@@ -13,9 +13,13 @@ return new class extends Migration
 {
     Schema::create('subjects', function (Blueprint $table) {
         $table->id();
-        $table->string('subject_name');
-        $table->integer('year_level');
-        $table->foreignId('strand_id')->constrained('strands');
+        $table->string('code', 100)->unique();
+        $table->string('name', 100);
+        $table->integer('semester')->default(1);
+        $table->string('year_level', 100);
+        $table->foreignId('school_year_id')->nullable()->constrained('school_years')->onDelete('cascade');
+        $table->foreignId('strand_id')->nullable()->constrained()->onDelete('cascade');
+        $table->foreignId('faculty_id')->nullable()->constrained('users')->onDelete('set null');
         $table->timestamps();
     });
 }
@@ -26,6 +30,8 @@ return new class extends Migration
      */
     public function down(): void
     {
+        Schema::disableForeignKeyConstraints();
         Schema::dropIfExists('subjects');
+        Schema::enableForeignKeyConstraints();
     }
 };

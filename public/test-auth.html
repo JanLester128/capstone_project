@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>Authentication Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 3px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        input { padding: 8px; margin: 5px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>Authentication Test Page</h1>
+    
+    <div class="test-section">
+        <h3>Staff Login Test</h3>
+        <input type="email" id="staffEmail" placeholder="Email" value="registrar@gmail.com">
+        <input type="password" id="staffPassword" placeholder="Password" value="password123">
+        <button onclick="testStaffLogin()">Test Staff Login</button>
+        <div id="staffResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Student Login Test</h3>
+        <input type="email" id="studentEmail" placeholder="Email" value="student@example.com">
+        <input type="password" id="studentPassword" placeholder="Password" value="password123">
+        <button onclick="testStudentLogin()">Test Student Login</button>
+        <div id="studentResult" class="result"></div>
+    </div>
+
+    <script>
+        async function testStaffLogin() {
+            const email = document.getElementById('staffEmail').value;
+            const password = document.getElementById('staffPassword').value;
+            const resultDiv = document.getElementById('staffResult');
+            
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Success!</strong><br>
+                        Status: ${response.status}<br>
+                        Message: ${result.message}<br>
+                        User: ${result.user?.email} (${result.user?.role})<br>
+                        Token: ${result.token ? 'Generated' : 'None'}<br>
+                        Redirect: ${result.redirect}
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <strong>❌ Error!</strong><br>
+                        Status: ${response.status}<br>
+                        Message: ${result.message}<br>
+                        Debug: ${result.debug || 'None'}
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${error.message}`;
+            }
+        }
+        
+        async function testStudentLogin() {
+            const email = document.getElementById('studentEmail').value;
+            const password = document.getElementById('studentPassword').value;
+            const resultDiv = document.getElementById('studentResult');
+            
+            try {
+                const response = await fetch('/auth/login/student', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Success!</strong><br>
+                        Status: ${response.status}<br>
+                        Message: ${result.message}<br>
+                        User: ${result.user?.email} (${result.user?.role})<br>
+                        Token: ${result.token ? 'Generated' : 'None'}<br>
+                        Redirect: ${result.redirect}
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <strong>❌ Error!</strong><br>
+                        Status: ${response.status}<br>
+                        Message: ${result.message}<br>
+                        Debug: ${result.debug || 'None'}
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -39,7 +39,6 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \Illuminate\Routing\Middleware\ThrottleRequests::class . ':api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
@@ -67,5 +66,6 @@ class Kernel extends HttpKernel
 
         // ✅ Custom role-based middleware
         'role' => \App\Http\Middleware\RoleMiddleware::class,
+        'single.session' => \App\Http\Middleware\SingleSessionMiddleware::class,
     ];
 }

@@ -4,214 +4,1042 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use App\Models\User;
+use App\Models\Subject;
+use App\Models\Strand;
+use App\Models\Section;
+use App\Models\SchoolYear;
+use App\Models\StudentPersonalInfo;
+use App\Models\Enrollment;
+use App\Models\Grade;
+use App\Models\ClassSchedule;
+use App\Models\ClassDetail;
+use App\Models\Notification;
 use App\Models\Registrar;
-use App\Models\Faculty;
 use App\Models\Coordinator;
+use App\Models\Semester;
 
 class RegistrarController extends Controller
 {
-    // Page that shows teachers (faculty + coordinators)
-        public function teachersPage()
+    public function sectionCOR($sectionId)
     {
-        $faculty = Faculty::with('user')->get();
-        $coordinators = Coordinator::with('user')->get();
+        $section = Section::with(['strand'])->findOrFail($sectionId);
+        $activeSchoolYear = SchoolYear::getActive();
+        
+        if (!$activeSchoolYear) {
+            return redirect()->back()->with('error', 'No active school year found. Please set an active school year first.');
+        }
+        
+        // Get actual scheduled subjects for this section from class table
+        // Filter by active school year and current semester
+        $scheduledSubjects = DB::table('class')
+            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+            ->join('users', 'class.faculty_id', '=', 'users.id')
+            ->where('class.school_year_id', $activeSchoolYear->id)
+            ->where('subjects.school_year_id', $activeSchoolYear->id)
+            ->where('subjects.semester', $activeSchoolYear->current_semester ?? 1)
+            ->where('class.is_active', true)
+            ->select(
+                'subjects.*',
+                'class.day_of_week',
+                'class.start_time',
+                'class.end_time',
+                'class.room',
+                'class.semester',
+                'users.name as faculty_name'
+            )
+            ->orderBy('subjects.year_level')
+            ->orderBy('subjects.semester')
+            ->orderBy('subjects.name')
+            ->get();
 
-        $teachers = $faculty->map(fn($f) => [
-            'id' => $f->user->id,
-            'name' => $f->user->name,
-            'email' => $f->user->email,
-            'department' => 'Faculty',
-        ])->merge(
-            $coordinators->map(fn($c) => [
-                'id' => $c->user->id,
-                'name' => $c->user->name,
-                'email' => $c->user->email,
-                'department' => 'Coordinator',
-            ])
-        );
-
-        return Inertia::render('Registrar/RegistrarFaculty', [
-            'initialTeachers' => $teachers
+        // Group subjects by year level and semester
+        $subjectsByYear = $scheduledSubjects->groupBy('year_level');
+        
+        // Get all sections for dropdown
+        $sections = Section::with('strand')->orderBy('section_name')->get();
+        
+        return Inertia::render('Registrar/SectionCOR', [
+            'section' => $section,
+            'subjectsByYear' => $subjectsByYear,
+            'activeSchoolYear' => $activeSchoolYear,
+            'sections' => $sections,
+            'scheduledSubjects' => $scheduledSubjects
         ]);
     }
-    // List all registrars
-    public function index()
+
+    // Classes Management Method
+    public function classesPage()
     {
-        $registrars = Registrar::with('user')->get();
-        return response()->json($registrars);
-    }
-
-    // Placeholder for student listing
-    public function students()
-    {
-        return response()->json(['message' => 'Students method not implemented yet.']);
-    }
-
-    // Register a registrar account
-    public function register(Request $request)
-    {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:6',
-        ]);
-
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => 'registrar',
-        ]);
-
-        Registrar::create(['user_id' => $user->id]);
-
-        return response()->json([
-            'message' => 'Registrar account created successfully',
-            'user' => $user
-        ], 201);
-    }
-
-    // Create faculty or coordinator under the logged-in registrar
-        public function store(Request $request)
-    {
-        // Ensure only registrar can access
-        if ($request->user()->role !== 'registrar') {
-            return Inertia::render('Registrar/RegistrarFaculty', [
-                'initialTeachers' => [],
-                'flash' => ['error' => 'Unauthorized']
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return Inertia::render('Registrar/RegistrarClass', [
+                'strands' => Strand::orderBy('name')->get(),
+                'faculties' => User::whereIn('role', ['faculty', 'coordinator'])->get(),
+                'sections' => Section::with(['strand', 'teacher'])->orderBy('section_name')->get(),
+                'classSchedules' => [],
+                'activeSchoolYear' => null,
+                'message' => 'No active school year found. Please create and activate a school year first.'
             ]);
         }
+        
+        // Get all strands for class assignment
+        $strands = Strand::with(['subjects' => function($query) use ($activeSchoolYear) {
+            $query->where('school_year_id', $activeSchoolYear->id);
+        }])->orderBy('name')->get();
+        
+        // Get all faculties for teacher assignment
+        $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
+        
+        // Get all sections for class assignment
+        $sections = Section::with(['strand', 'teacher'])->orderBy('section_name')->get();
+        
+        // Get class schedules with relationships
+        $classSchedules = ClassSchedule::with(['subject.strand', 'faculty', 'section'])
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->orderBy('day_of_week')
+            ->orderBy('start_time')
+            ->get()
+            ->map(function ($schedule) {
+                return [
+                    'id' => $schedule->id,
+                    'subject_name' => $schedule->subject ? $schedule->subject->name : 'No Subject',
+                    'subject_code' => $schedule->subject ? $schedule->subject->code : 'N/A',
+                    'strand_name' => $schedule->subject && $schedule->subject->strand ? $schedule->subject->strand->name : 'No Strand',
+                    'faculty_name' => $schedule->faculty ? $schedule->faculty->firstname . ' ' . $schedule->faculty->lastname : 'No Faculty',
+                    'section_name' => $schedule->section ? $schedule->section->section_name : 'No Section',
+                    'day_of_week' => $schedule->day_of_week,
+                    'start_time' => $schedule->start_time,
+                    'end_time' => $schedule->end_time,
+                    'room' => $schedule->room,
+                    'semester' => $schedule->semester,
+                    'is_active' => $schedule->is_active
+                ];
+            });
 
+        return Inertia::render('Registrar/RegistrarClass', [
+            'strands' => $strands,
+            'faculties' => $faculties,
+            'sections' => $sections,
+            'classSchedules' => $classSchedules,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    public function createSchoolYear(Request $request)
+    {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
-            'role' => 'required|in:faculty,coordinator',
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050',
+            'semester' => 'required|in:1st Semester,2nd Semester',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
         ]);
 
-        $password = Str::random(10);
-
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($password),
-            'role' => $validated['role'],
-        ]);
-
-        if ($validated['role'] === 'faculty') {
-            Faculty::create([
-                'user_id' => $user->id,
-                'registrar_id' => $request->user()->registrar->id
-            ]);
-        } else {
-            Coordinator::create([
-                'user_id' => $user->id,
-                'registrar_id' => $request->user()->registrar->id
-            ]);
+        // Ensure year_end is year_start + 1
+        if ($validated['year_end'] !== $validated['year_start'] + 1) {
+            return redirect()->back()->withErrors(['year_end' => 'End year must be one year after start year']);
         }
 
-        // Return Inertia response with teacher info + generated password
-        return Inertia::render('Registrar/RegistrarFaculty', [
-            'initialTeachers' => [
-                [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'department' => ucfirst($validated['role']),
-                    'password' => $password
-                ]
+        // Check if this school year and semester combination already exists
+        $exists = SchoolYear::where('year_start', $validated['year_start'])
+                           ->where('year_end', $validated['year_end'])
+                           ->where('semester', $validated['semester'])
+                           ->exists();
+
+        if ($exists) {
+            return redirect()->back()->withErrors(['general' => 'This school year and semester combination already exists']);
+        }
+
+        $schoolYear = SchoolYear::create([
+            'year_start' => $validated['year_start'],
+            'year_end' => $validated['year_end'],
+            'semester' => $validated['semester'],
+            'start_date' => $validated['start_date'],
+            'end_date' => $validated['end_date'],
+            'is_active' => false, // Don't activate automatically
+            'current_semester' => $validated['semester'] === '1st Semester' ? 1 : 2
+        ]);
+
+        return redirect()->back()->with('success', 'School year created successfully');
+    }
+
+    public function activateSchoolYear($id)
+    {
+        $schoolYear = SchoolYear::findOrFail($id);
+
+        // Deactivate all other school years
+        SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
+
+        // Activate the selected school year
+        $schoolYear->update(['is_active' => true]);
+
+        return redirect()->back()->with('success', 'School year activated successfully');
+    }
+
+    public function switchSemester(Request $request)
+    {
+        $validated = $request->validate([
+            'semester' => 'required|integer|in:1,2'
+        ]);
+
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
+        if (!$activeSchoolYear) {
+            return redirect()->back()->withErrors(['general' => 'No active school year found']);
+        }
+
+        $activeSchoolYear->update([
+            'current_semester' => $validated['semester'],
+            'semester' => $validated['semester'] === 1 ? '1st Semester' : '2nd Semester'
+        ]);
+
+        return redirect()->back()->with('success', 'Semester switched successfully');
+    }
+
+    public function getSections()
+    {
+        $sections = Section::with(['strand', 'teacher'])
+            ->orderBy('section_name')
+            ->get()
+            ->map(function ($section) {
+                return [
+                    'id' => $section->id,
+                    'section_name' => $section->section_name,
+                    'year_level' => $section->year_level,
+                    'strand_id' => $section->strand_id,
+                    'strand_name' => $section->strand ? $section->strand->name : 'No Strand',
+                    'strand_code' => $section->strand ? $section->strand->code : 'N/A',
+                    'teacher_id' => $section->teacher_id,
+                    'teacher_name' => $section->teacher ? $section->teacher->name : 'No Teacher Assigned',
+                ];
+            });
+
+        return response()->json($sections);
+    }
+
+    // Class Management Method
+    public function classPage()
+    {
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get all strands for class assignment
+        $strands = Strand::with(['subjects' => function($query) use ($activeSchoolYear) {
+            if ($activeSchoolYear) {
+                $query->where('school_year_id', $activeSchoolYear->id);
+            }
+        }])->orderBy('name')->get();
+        
+        // Get all sections for class assignment
+        $sections = Section::with(['strand', 'teacher'])->orderBy('section_name')->get();
+        
+        // Get all faculties for teacher assignment
+        $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
+        
+        // Get class schedules with relationships
+        $classSchedules = ClassSchedule::with(['subject.strand', 'faculty', 'section'])
+            ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
+                $query->where('school_year_id', $activeSchoolYear->id);
+            })
+            ->orderBy('day_of_week')
+            ->orderBy('start_time')
+            ->get()
+            ->map(function ($schedule) {
+                return [
+                    'id' => $schedule->id,
+                    'subject_id' => $schedule->subject_id,
+                    'subject_name' => $schedule->subject ? $schedule->subject->name : 'No Subject',
+                    'subject_code' => $schedule->subject ? $schedule->subject->code : 'N/A',
+                    'strand_name' => $schedule->subject && $schedule->subject->strand ? $schedule->subject->strand->name : 'No Strand',
+                    'faculty_id' => $schedule->faculty_id,
+                    'faculty_name' => $schedule->faculty ? $schedule->faculty->name : 'No Teacher',
+                    'section_id' => $schedule->section_id,
+                    'section_name' => $schedule->section ? $schedule->section->name : 'No Section',
+                    'day_of_week' => $schedule->day_of_week,
+                    'start_time' => $schedule->start_time,
+                    'end_time' => $schedule->end_time,
+                    'room' => $schedule->room ?? 'TBA',
+                    'semester' => $schedule->semester,
+                    'is_active' => $schedule->is_active ?? true,
+                ];
+            });
+
+        return Inertia::render('Registrar/RegistrarClass', [
+            'strands' => $strands,
+            'sections' => $sections,
+            'faculties' => $faculties,
+            'classSchedules' => $classSchedules,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    // Sections Management Method
+    public function sectionsPage()
+    {
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return Inertia::render('Registrar/RegistrarSections', [
+                'sections' => [],
+                'strands' => Strand::orderBy('name')->get(),
+                'faculties' => User::whereIn('role', ['faculty', 'coordinator'])->get(),
+                'activeSchoolYear' => null,
+                'message' => 'No active school year found. Please create and activate a school year first.'
+            ]);
+        }
+        
+        // Get all strands for section assignment
+        $strands = Strand::orderBy('name')->get();
+        
+        // Get all faculties for teacher assignment
+        $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
+        
+        // Get sections with their strand and teacher information
+        $sections = Section::with(['strand', 'teacher'])
+            ->orderBy('section_name')
+            ->get()
+            ->map(function ($section) {
+                return [
+                    'id' => $section->id,
+                    'section_name' => $section->section_name,
+                    'year_level' => $section->year_level,
+                    'strand_name' => $section->strand ? $section->strand->name : 'No Strand',
+                    'strand_id' => $section->strand_id,
+                    'teacher_name' => $section->teacher ? $section->teacher->firstname . ' ' . $section->teacher->lastname : 'No Teacher',
+                    'teacher_id' => $section->teacher_id,
+                ];
+            });
+
+        return Inertia::render('Registrar/RegistrarSections', [
+            'sections' => $sections,
+            'strands' => $strands,
+            'faculties' => $faculties,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    // Subjects Management Method
+    public function subjectsPage()
+    {
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get all strands with their subjects (don't filter by school year for now since subjects are seeded without school_year_id)
+        $strands = Strand::with(['subjects'])->get();
+        
+        // Get all faculties for teacher assignment
+        $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
+        
+        // Get all subjects with their strand and faculty information (show all subjects regardless of school_year_id)
+        $subjects = Subject::with(['strand', 'faculty'])
+            ->get()
+            ->map(function ($subject) use ($activeSchoolYear) {
+                return [
+                    'id' => $subject->id,
+                    'name' => $subject->name,
+                    'code' => $subject->code,
+                    'semester' => $subject->semester,
+                    'year_level' => $subject->year_level,
+                    'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
+                    'strand_id' => $subject->strand_id,
+                    'faculty_name' => $subject->faculty ? $subject->faculty->firstname . ' ' . $subject->faculty->lastname : 'No Faculty',
+                    'faculty_id' => $subject->faculty_id,
+                    'school_year_id' => $subject->school_year_id,
+                    'school_year' => $activeSchoolYear ? $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end : 'Not Assigned',
+                    'current_semester' => $activeSchoolYear ? $activeSchoolYear->current_semester ?? 1 : 1
+                ];
+            });
+
+        return Inertia::render('Registrar/RegistrarSubjects', [
+            'subjects' => $subjects,
+            'strands' => $strands,
+            'faculties' => $faculties,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    // Semesters Management Method
+    public function semestersPage()
+    {
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get all school years/semesters
+        $semesters = SchoolYear::orderBy('year_start', 'desc')
+            ->orderBy('semester')
+            ->get()
+            ->map(function ($semester) {
+                return [
+                    'id' => $semester->id,
+                    'year_start' => $semester->year_start,
+                    'year_end' => $semester->year_end,
+                    'semester' => $semester->semester,
+                    'start_date' => $semester->start_date,
+                    'end_date' => $semester->end_date,
+                    'is_active' => $semester->is_active,
+                    'current_semester' => $semester->current_semester ?? 1,
+                    'display_name' => $semester->year_start . '-' . $semester->year_end . ' (Semester ' . $semester->semester . ')'
+                ];
+            });
+
+        return Inertia::render('Registrar/RegistrarSemester', [
+            'schoolYears' => $semesters,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    public function toggleSchoolYear($id)
+    {
+        try {
+            $schoolYear = SchoolYear::findOrFail($id);
+            
+            if ($schoolYear->is_active) {
+                // Deactivate the school year
+                $schoolYear->update(['is_active' => false]);
+                $message = 'School year deactivated successfully';
+            } else {
+                // Deactivate all other school years first
+                SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
+                
+                // Activate this school year
+                $schoolYear->update(['is_active' => true]);
+                $message = 'School year activated successfully';
+            }
+
+            return redirect()->back()->with('success', $message);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to toggle school year status']);
+        }
+    }
+
+    // School Year Creation Method
+    public function storeSchoolYear(Request $request)
+    {
+        $request->validate([
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
+            'semester' => 'required|string|in:1st Semester,2nd Semester',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date'
+        ]);
+
+        try {
+            // Check if school year already exists
+            $existingSchoolYear = SchoolYear::where('year_start', $request->year_start)
+                ->where('year_end', $request->year_end)
+                ->where('semester', $request->semester)
+                ->first();
+
+            if ($existingSchoolYear) {
+                return redirect()->back()->withErrors(['general' => 'School year ' . $request->year_start . '-' . $request->year_end . ' already exists.']);
+            }
+
+            // Deactivate all existing school years if this is being set as active
+            SchoolYear::where('is_active', true)->update(['is_active' => false]);
+
+            // Create the school year
+            $schoolYear = SchoolYear::create([
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => $request->semester,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'current_semester' => $request->semester === '1st Semester' ? 1 : 2,
+                'is_active' => true
+            ]);
+
+            return redirect()->back()->with('success', 'School year ' . $request->year_start . '-' . $request->year_end . ' created successfully and set as active.');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to create school year: ' . $e->getMessage()]);
+        }
+    }
+
+    // Strand Management Methods
+    public function createStrand(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'code' => 'required|string|max:10',
+        ]);
+
+        // Check if strand with this code already exists
+        $existingStrand = Strand::where('code', strtoupper($request->code))->first();
+        if ($existingStrand) {
+            return redirect()->back()->withErrors(['general' => 'A strand with this code already exists. Please choose a different code.']);
+        }
+
+        // Check if strand with this name already exists
+        $existingName = Strand::where('name', $request->name)->first();
+        if ($existingName) {
+            return redirect()->back()->withErrors(['general' => 'A strand with this name already exists. Please choose a different name.']);
+        }
+
+        try {
+            $strand = Strand::create([
+                'name' => $request->name,
+                'code' => strtoupper($request->code),
+                'description' => $request->description ?? null,
+            ]);
+
+            return redirect()->back()->with('success', 'Strand created successfully!');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to create strand: ' . $e->getMessage()]);
+        }
+    }
+
+    public function updateStrand(Request $request, $id)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'code' => 'required|string|max:10|unique:strands,code,' . $id,
+        ]);
+
+        try {
+            $strand = Strand::findOrFail($id);
+            $strand->update([
+                'name' => $request->name,
+                'code' => strtoupper($request->code),
+                'description' => $request->description ?? null,
+            ]);
+
+            return redirect()->back()->with('success', 'Strand updated successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to update strand: ' . $e->getMessage()]);
+        }
+    }
+
+    public function deleteStrand($id)
+    {
+        try {
+            $strand = Strand::findOrFail($id);
+            
+            // Check if strand has associated sections or subjects
+            if ($strand->sections()->count() > 0 || $strand->subjects()->count() > 0) {
+                return redirect()->back()->withErrors(['general' => 'Cannot delete strand. It has associated sections or subjects.']);
+            }
+
+            $strand->delete();
+
+            return redirect()->back()->with('success', 'Strand deleted successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to delete strand: ' . $e->getMessage()]);
+        }
+    }
+
+    // Section Management Methods
+    public function createSection(Request $request)
+    {
+        $request->validate([
+            'section_name' => [
+                'required',
+                'string',
+                'max:20',
+                Rule::unique('sections')->where(function ($query) use ($request) {
+                    return $query->where('strand_id', $request->strand_id)
+                                ->where('year_level', $request->year_level);
+                })
             ],
-            'flash' => [
-                'success' => ucfirst($validated['role']) . ' account created successfully',
-                'password' => $password
-            ]
+            'year_level' => 'required|integer|in:11,12',
+            'strand_id' => 'required|exists:strands,id',
+            'teacher_id' => [
+                'nullable',
+                'exists:users,id',
+                Rule::unique('sections')->where(function ($query) use ($request) {
+                    return $query->whereNotNull('teacher_id');
+                })->ignore($request->id ?? null)
+            ],
+        ], [
+            'section_name.unique' => 'A section with this name already exists for the selected strand and year level.',
+            'teacher_id.unique' => 'This teacher is already assigned to another section.',
+        ]);
+
+        try {
+            // Check if teacher is already assigned (additional safety check)
+            if ($request->teacher_id) {
+                $existingAssignment = Section::where('teacher_id', $request->teacher_id)
+                    ->first();
+                
+                if ($existingAssignment) {
+                    $teacher = User::find($request->teacher_id);
+                    return redirect()->back()->withErrors([
+                        'teacher_id' => "Teacher {$teacher->firstname} {$teacher->lastname} is already assigned to section {$existingAssignment->section_name}"
+                    ]);
+                }
+            }
+
+            $section = Section::create([
+                'section_name' => $request->section_name,
+                'year_level' => $request->year_level,
+                'strand_id' => $request->strand_id,
+                'teacher_id' => $request->teacher_id,
+            ]);
+
+            return redirect()->back()->with('success', 'Section created successfully!');
+
+        } catch (\Exception $e) {
+            \Log::error('Section creation failed: ' . $e->getMessage());
+            
+            return redirect()->back()->withErrors([
+                'general' => 'Failed to create section: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    public function updateSection(Request $request, $id)
+    {
+        $request->validate([
+            'section_name' => 'required|string|max:20|unique:sections,section_name,' . $id,
+            'year_level' => 'required|integer|in:11,12',
+            'strand_id' => 'required|exists:strands,id',
+            'teacher_id' => 'nullable|exists:users,id',
+        ]);
+
+        try {
+            $section = Section::findOrFail($id);
+            $section->update([
+                'section_name' => $request->section_name,
+                'year_level' => $request->year_level,
+                'strand_id' => $request->strand_id,
+                'teacher_id' => $request->teacher_id,
+            ]);
+
+            return redirect()->back()->with('success', 'Section updated successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to update section: ' . $e->getMessage()]);
+        }
+    }
+
+    public function deleteSection($id)
+    {
+        try {
+            $section = Section::findOrFail($id);
+            
+            // Check if section has enrolled students
+            if ($section->enrollments()->count() > 0) {
+                return redirect()->back()->withErrors(['general' => 'Cannot delete section. It has enrolled students.']);
+            }
+
+            $section->delete();
+
+            return redirect()->back()->with('success', 'Section deleted successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to delete section: ' . $e->getMessage()]);
+        }
+    }
+
+    // API Methods for data retrieval
+    public function getStrands()
+    {
+        $strands = Strand::orderBy('name')->get();
+        return response()->json($strands);
+    }
+
+    public function getFaculty()
+    {
+        $faculty = User::whereIn('role', ['faculty', 'coordinator'])
+            ->select('id', 'firstname', 'lastname', 'email', 'role')
+            ->orderBy('lastname')
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->firstname . ' ' . $user->lastname,
+                    'email' => $user->email,
+                    'role' => $user->role
+                ];
+            });
+        return response()->json($faculty);
+    }
+
+    public function getSubjects()
+    {
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        $subjects = Subject::with(['strand'])
+            ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
+                $query->where('school_year_id', $activeSchoolYear->id);
+            })
+            ->orderBy('name')
+            ->get()
+            ->map(function ($subject) {
+                return [
+                    'id' => $subject->id,
+                    'name' => $subject->name,
+                    'code' => $subject->code,
+                    'semester' => $subject->semester,
+                    'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
+                    'strand_id' => $subject->strand_id
+                ];
+            });
+        return response()->json($subjects);
+    }
+
+    // Student Management Methods
+    public function studentsPage()
+    {
+        $students = User::where('role', 'student')
+            ->with(['studentPersonalInfo'])
+            ->orderBy('lastname')
+            ->get();
+
+        return Inertia::render('Registrar/RegistrarStudents', [
+            'students' => $students
         ]);
     }
 
-
-    // Show a registrar
-    public function show($id)
+    public function createStudent(Request $request)
     {
-        $registrar = Registrar::with('user')->find($id);
-        if (!$registrar) {
-            return response()->json(['message' => 'Registrar not found'], 404);
-        }
-        return response()->json($registrar);
-    }
-
-    // Update faculty or coordinator
-    public function update(Request $request, $userId)
-    {
-        if ($request->user()->role !== 'registrar') {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
-
-        $registrar = $request->user()->registrar;
-        if (!$registrar)
-            return response()->json(['message' => 'Registrar profile not found'], 422);
-
-        $user = User::find($userId);
-        if (!$user)
-            return response()->json(['message' => 'User not found'], 404);
-        if (!in_array($user->role, ['faculty', 'coordinator']))
-            return response()->json(['message' => 'Can only update faculty or coordinator accounts'], 403);
-
-        $record = $user->role === 'faculty'
-            ? Faculty::where('user_id', $user->id)->where('registrar_id', $registrar->id)->first()
-            : Coordinator::where('user_id', $user->id)->where('registrar_id', $registrar->id)->first();
-
-        if (!$record)
-            return response()->json(['message' => 'You do not have permission to update this user'], 403);
-
-        $validated = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
-            'email' => 'sometimes|required|email|unique:users,email,' . $user->id,
-            'password' => 'sometimes|nullable|string|min:6',
+        $request->validate([
+            'firstname' => 'required|string|max:255',
+            'lastname' => 'required|string|max:255',
+            'middlename' => 'nullable|string|max:255',
+            'email' => 'required|email|unique:users,email',
         ]);
 
-        if (isset($validated['name']))
-            $user->name = $validated['name'];
-        if (isset($validated['email']))
-            $user->email = $validated['email'];
-        if (!empty($validated['password']))
-            $user->password = Hash::make($validated['password']);
+        try {
+            $generatedPassword = Str::random(12);
+            
+            $student = User::create([
+                'firstname' => $request->firstname,
+                'lastname' => $request->lastname,
+                'middlename' => $request->middlename,
+                'email' => $request->email,
+                'password' => Hash::make($generatedPassword),
+                'role' => 'student',
+                'status' => 'active',
+                'password_changed' => false,
+                'password_change_required' => true,
+                'generated_password' => $generatedPassword,
+            ]);
 
-        $user->save();
+            return redirect()->back()->with('success', 'Student created successfully');
 
-        return response()->json([
-            'message' => ucfirst($user->role) . ' account updated successfully',
-            'user' => $user
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to create student: ' . $e->getMessage()]);
+        }
+    }
+
+    public function updateStudent(Request $request, $id)
+    {
+        $request->validate([
+            'firstname' => 'required|string|max:255',
+            'lastname' => 'required|string|max:255',
+            'middlename' => 'nullable|string|max:255',
+            'email' => 'required|email|unique:users,email,' . $id,
+        ]);
+
+        try {
+            $student = User::findOrFail($id);
+            $student->update([
+                'firstname' => $request->firstname,
+                'lastname' => $request->lastname,
+                'middlename' => $request->middlename,
+                'email' => $request->email,
+            ]);
+
+            return redirect()->back()->with('success', 'Student updated successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to update student: ' . $e->getMessage()]);
+        }
+    }
+
+    public function deleteStudent($id)
+    {
+        try {
+            $student = User::findOrFail($id);
+            
+            // Check if student has enrollments
+            if ($student->enrollments()->count() > 0) {
+                return redirect()->back()->withErrors(['general' => 'Cannot delete student. They have enrollment records.']);
+            }
+
+            $student->delete();
+
+            return redirect()->back()->with('success', 'Student deleted successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to delete student: ' . $e->getMessage()]);
+        }
+    }
+
+    // Semester Management Methods
+    public function createSemester(Request $request)
+    {
+        $request->validate([
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
+            'semester' => 'required|integer|in:1,2',
+        ]);
+
+        try {
+            // Check if semester already exists for this year
+            $existingSemester = SchoolYear::where('year_start', $request->year_start)
+                ->where('year_end', $request->year_end)
+                ->where('semester', $request->semester)
+                ->first();
+
+            if ($existingSemester) {
+                return redirect()->back()->withErrors(['general' => 'This semester already exists for the specified academic year.']);
+            }
+
+            $semester = SchoolYear::create([
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => $request->semester,
+                'is_active' => false, // New semesters are inactive by default
+            ]);
+
+            return redirect()->back()->with('success', 'Semester created successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to create semester: ' . $e->getMessage()]);
+        }
+    }
+
+    public function updateSemester(Request $request, $id)
+    {
+        $request->validate([
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
+            'semester' => 'required|integer|in:1,2',
+        ]);
+
+        try {
+            $semester = SchoolYear::findOrFail($id);
+
+            // Check if updated semester already exists (excluding current record)
+            $existingSemester = SchoolYear::where('year_start', $request->year_start)
+                ->where('year_end', $request->year_end)
+                ->where('semester', $request->semester)
+                ->where('id', '!=', $id)
+                ->first();
+
+            if ($existingSemester) {
+                return redirect()->back()->withErrors(['general' => 'This semester already exists for the specified academic year.']);
+            }
+
+            $semester->update([
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => $request->semester,
+            ]);
+
+            return redirect()->back()->with('success', 'Semester updated successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to update semester: ' . $e->getMessage()]);
+        }
+    }
+
+    public function deleteSemester($id)
+    {
+        try {
+            $semester = SchoolYear::findOrFail($id);
+            
+            // Check if semester is active
+            if ($semester->is_active) {
+                return redirect()->back()->withErrors(['general' => 'Cannot delete active semester. Please activate another semester first.']);
+            }
+
+            // Check if semester has subjects or enrollments
+            if ($semester->subjects()->count() > 0 || $semester->enrollments()->count() > 0) {
+                return redirect()->back()->withErrors(['general' => 'Cannot delete semester. It has associated subjects or enrollments.']);
+            }
+
+            $semester->delete();
+
+            return redirect()->back()->with('success', 'Semester deleted successfully');
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to delete semester: ' . $e->getMessage()]);
+        }
+    }
+
+    // Dashboard Statistics Methods
+    public function getDashboardStats()
+    {
+        try {
+            $stats = [
+                'students_count' => User::where('role', 'student')->count(),
+                'faculty_count' => User::whereIn('role', ['faculty', 'coordinator'])->count(),
+                'sections_count' => Section::count(),
+                'classes_count' => ClassSchedule::count(),
+                'coordinators_count' => User::where('role', 'coordinator')->count(),
+                'strands_count' => Strand::count(),
+                'subjects_count' => Subject::count(),
+                'active_school_year' => SchoolYear::where('is_active', true)->first()
+            ];
+
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to get dashboard stats: ' . $e->getMessage()]);
+        }
+    }
+
+    public function getStudentsCount()
+    {
+        return response()->json(['count' => User::where('role', 'student')->count()]);
+    }
+
+    public function getSectionsCount()
+    {
+        return response()->json(['count' => Section::count()]);
+    }
+
+    public function getFacultyCount()
+    {
+        return response()->json(['count' => User::whereIn('role', ['faculty', 'coordinator'])->count()]);
+    }
+
+    public function getClassesCount()
+    {
+        return response()->json(['count' => ClassSchedule::count()]);
+    }
+
+    public function getCoordinatorsCount()
+    {
+        return response()->json(['count' => User::where('role', 'coordinator')->count()]);
+    }
+
+    // COR (Certificate of Registration) Methods
+    public function subjectsCOR($strandId)
+    {
+        try {
+            $strand = Strand::with(['subjects' => function($query) {
+                $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+                if ($activeSchoolYear) {
+                    $query->where('school_year_id', $activeSchoolYear->id);
+                }
+                $query->orderBy('semester')->orderBy('name');
+            }])->findOrFail($strandId);
+
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
+            return Inertia::render('Registrar/COR/StrandCOR', [
+                'strand' => $strand,
+                'activeSchoolYear' => $activeSchoolYear,
+                'subjects' => $strand->subjects->groupBy('semester')
+            ]);
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to load strand COR: ' . $e->getMessage()]);
+        }
+    }
+
+    // Faculty Management Method
+    public function facultyPage()
+    {
+        // Get all faculty and coordinators
+        $teachers = User::whereIn('role', ['faculty', 'coordinator'])
+            ->select('id', 'firstname', 'lastname', 'email', 'role', 'status', 'assigned_strand_id')
+            ->with('assignedStrand:id,name,code')
+            ->orderBy('lastname')
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => trim($user->firstname . ' ' . $user->lastname),
+                    'firstname' => $user->firstname,
+                    'lastname' => $user->lastname,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'status' => $user->status ?? 'faculty',
+                    'assigned_strand_id' => $user->assigned_strand_id,
+                    'assigned_strand' => $user->assignedStrand ? [
+                        'id' => $user->assignedStrand->id,
+                        'name' => $user->assignedStrand->name,
+                        'code' => $user->assignedStrand->code
+                    ] : null
+                ];
+            });
+
+        // Get all strands for assignment
+        $strands = Strand::select('id', 'name', 'code')->orderBy('name')->get();
+
+        return Inertia::render('Registrar/RegistrarFaculty', [
+            'initialTeachers' => $teachers,
+            'strands' => $strands
         ]);
     }
 
-    // Delete faculty or coordinator
-    public function delete(Request $request, $userId)
+    // Faculty Creation Method
+    public function createFaculty(Request $request)
     {
-        if ($request->user()->role !== 'registrar') {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        $request->validate([
+            'firstname' => 'required|string|max:255',
+            'lastname' => 'required|string|max:255',
+            'middlename' => 'nullable|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'assigned_strand_id' => 'nullable|exists:strands,id',
+            'send_email' => 'boolean'
+        ]);
+
+        try {
+            // Generate a random password
+            $password = Str::random(12);
+            
+            // Create the faculty user
+            $faculty = User::create([
+                'firstname' => $request->firstname,
+                'lastname' => $request->lastname,
+                'middlename' => $request->middlename,
+                'email' => $request->email,
+                'password' => Hash::make($password),
+                'role' => 'faculty',
+                'status' => 'faculty',
+                'assigned_strand_id' => $request->assigned_strand_id,
+                'email_verified_at' => now()
+            ]);
+
+            $emailSent = false;
+            
+            // Send email if requested
+            if ($request->send_email) {
+                try {
+                    Mail::send('emails.faculty_credentials', [
+                        'name' => trim($faculty->firstname . ' ' . $faculty->lastname),
+                        'email' => $faculty->email,
+                        'password' => $password,
+                        'login_url' => url('/login')
+                    ], function ($message) use ($faculty) {
+                        $message->to($faculty->email)
+                               ->subject('ONSTS - Faculty Account Created')
+                               ->from('onsts.registrar@gmail.com', 'ONSTS Registrar');
+                    });
+                    $emailSent = true;
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send faculty credentials email: ' . $e->getMessage());
+                }
+            }
+
+            $message = 'Faculty account created successfully!';
+            if ($request->send_email) {
+                $message .= $emailSent ? ' Login credentials have been sent to their email.' : ' However, the email could not be sent.';
+            }
+
+            return redirect()->back()->with('success', $message);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['general' => 'Failed to create faculty account: ' . $e->getMessage()]);
         }
-
-        $registrar = $request->user()->registrar;
-        if (!$registrar)
-            return response()->json(['message' => 'Registrar profile not found'], 422);
-
-        $user = User::find($userId);
-        if (!$user)
-            return response()->json(['message' => 'User not found'], 404);
-        if (!in_array($user->role, ['faculty', 'coordinator']))
-            return response()->json(['message' => 'Can only delete faculty or coordinator accounts'], 403);
-
-        $record = $user->role === 'faculty'
-            ? Faculty::where('user_id', $user->id)->where('registrar_id', $registrar->id)->first()
-            : Coordinator::where('user_id', $user->id)->where('registrar_id', $registrar->id)->first();
-
-        if (!$record)
-            return response()->json(['message' => 'You do not have permission to delete this user'], 403);
-
-        $record->delete();
-        $user->delete();
-
-        return response()->json(['message' => ucfirst($user->role) . ' account deleted successfully']);
     }
 }

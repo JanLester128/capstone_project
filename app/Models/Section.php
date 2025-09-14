@@ -9,7 +9,7 @@ class Section extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['section_name', 'strand_id', 'year_level'];
+    protected $fillable = ['section_name', 'strand_id', 'year_level', 'teacher_id'];
 
     public function strand() {
         return $this->belongsTo(Strand::class);
@@ -22,4 +22,10 @@ class Section extends Model
     public function students() {
         return $this->hasMany(Student::class);
     }
+
+    public function teacher()
+    {
+        return $this->belongsTo(User::class, 'teacher_id');
+    }
+
 }

@@ -18,9 +18,17 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'lastname',
+        'firstname',
+        'middlename',
         'email',
-        'role',        // <-- Add this line
+        'role',
         'password',
+        'plain_password',
+        'assigned_strand_id',
+        'is_coordinator',
+        'password_changed',
+        'password_change_required',
     ];
 
     /**
@@ -30,6 +38,7 @@ class User extends Authenticatable
      */
     protected $hidden = [
         'password',
+        'plain_password',
         'remember_token',
     ];
 
@@ -49,10 +58,7 @@ class User extends Authenticatable
         return $this->hasOne(Registrar::class);
     }
 
-    public function faculty()
-    {
-        return $this->hasOne(Faculty::class);
-    }
+    // Removed faculty relationship - using unified authentication
 
     public function coordinator()
     {
@@ -62,5 +68,15 @@ class User extends Authenticatable
     public function student()
     {
         return $this->hasOne(Student::class);
+    }
+
+    public function assignedStrand()
+    {
+        return $this->belongsTo(Strand::class, 'assigned_strand_id');
+    }
+
+    public function getFullNameAttribute()
+    {
+        return trim($this->firstname . ' ' . ($this->middlename ? $this->middlename . ' ' : '') . $this->lastname);
     }
 }

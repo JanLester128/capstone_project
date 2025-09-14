@@ -9,7 +9,7 @@ class Strand extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'hs_grade', 'strand_id', 'section_id'];
+    protected $fillable = ['code', 'name', 'description'];
 
     public function registrar() {
         return $this->belongsTo(Registrar::class);
@@ -20,7 +20,7 @@ class Strand extends Model
     }
 
     public function subjects() {
-        return $this->hasMany(Subject::class);
+        return $this->belongsToMany(Subject::class, 'strand_subjects');
     }
 
     public function students() {

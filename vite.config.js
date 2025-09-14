@@ -12,4 +12,13 @@ export default defineConfig({
         react(),
         tailwindcss(),
     ],
+    server: {
+        host: 'localhost',
+        port: 5173,
+        strictPort: false,
+        hmr: false, // Disable HMR to fix WebSocket issues
+        watch: {
+            usePolling: true,
+        },
+    },
 });

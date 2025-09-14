@@ -9,15 +9,16 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-  public function up(): void
-{
-    Schema::create('strands', function (Blueprint $table) {
-        $table->id();
-        $table->string('strand_name');
-        $table->text('description')->nullable();
-        $table->timestamps();
-    });
-}
+    public function up(): void
+    {
+        Schema::create('strands', function (Blueprint $table) {
+            $table->id();
+            $table->string('code', 100)->unique();
+            $table->string('name', 100);
+            $table->string('description', 100)->nullable();
+            $table->timestamps();
+        });
+    }
 
 
     /**
@@ -25,6 +26,8 @@ return new class extends Migration
      */
     public function down(): void
     {
+        Schema::disableForeignKeyConstraints();
         Schema::dropIfExists('strands');
+        Schema::enableForeignKeyConstraints();
     }
 };

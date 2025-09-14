@@ -35,9 +35,21 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        // Check both session and sanctum authentication
+        $user = $request->user() ?: $request->user('sanctum');
+        
         return [
             ...parent::share($request),
-            //
+            'auth' => [
+                'user' => $user,
+                'authenticated' => $user !== null,
+                'role' => $user?->role,
+            ],
+            'flash' => [
+                'message' => fn () => $request->session()->get('message'),
+                'error' => fn () => $request->session()->get('error'),
+                'success' => fn () => $request->session()->get('success'),
+            ],
         ];
     }
 }

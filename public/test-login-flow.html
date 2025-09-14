@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Login Flow Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 3px; white-space: pre-wrap; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 3px; }
+        button:hover { background: #0056b3; }
+        input { padding: 8px; margin: 5px; width: 200px; border: 1px solid #ddd; border-radius: 3px; }
+        .credentials { background: #f8f9fa; padding: 10px; border-radius: 3px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔐 Complete Authentication Flow Test</h1>
+    
+    <div class="credentials">
+        <h4>Test Credentials:</h4>
+        <strong>Registrar:</strong> registrar@gmail.com / password123<br>
+        <strong>Faculty:</strong> faculty@gmail.com / password123<br>
+        <strong>Student:</strong> student@gmail.com / password123
+    </div>
+    
+    <div class="test-section">
+        <h3>🏢 Staff Login Test (Registrar/Faculty/Coordinator)</h3>
+        <input type="email" id="staffEmail" placeholder="Email" value="registrar@gmail.com">
+        <input type="password" id="staffPassword" placeholder="Password" value="password123">
+        <button onclick="testStaffLogin()">Test Staff Login</button>
+        <button onclick="testFacultyLogin()">Test Faculty Login</button>
+        <div id="staffResult" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>🎓 Student Login Test</h3>
+        <input type="email" id="studentEmail" placeholder="Email" value="student@gmail.com">
+        <input type="password" id="studentPassword" placeholder="Password" value="password123">
+        <button onclick="testStudentLogin()">Test Student Login</button>
+        <div id="studentResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔄 Complete Flow Test</h3>
+        <button onclick="testCompleteFlow()">Test All Login Flows</button>
+        <div id="completeResult" class="result"></div>
+    </div>
+
+    <script>
+        async function testStaffLogin() {
+            const email = document.getElementById('staffEmail').value;
+            const password = document.getElementById('staffPassword').value;
+            const resultDiv = document.getElementById('staffResult');
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Testing staff login...';
+            
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ SUCCESS!
+Status: ${response.status}
+Message: ${result.message}
+User: ${result.user?.email} (${result.user?.role})
+Token: ${result.token ? 'Generated ✓' : 'None ✗'}
+Token Key: ${result.token_key}
+Redirect: ${result.redirect}
+Password Change Required: ${result.requires_password_change ? 'Yes' : 'No'}`;
+                    
+                    // Store token for testing
+                    if (result.token) {
+                        localStorage.setItem(result.token_key, result.token);
+                    }
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ ERROR!
+Status: ${response.status}
+Message: ${result.message}
+Debug: ${result.debug || 'None'}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ NETWORK ERROR: ${error.message}`;
+            }
+        }
+        
+        async function testFacultyLogin() {
+            document.getElementById('staffEmail').value = 'faculty@gmail.com';
+            await testStaffLogin();
+        }
+        
+        async function testStudentLogin() {
+            const email = document.getElementById('studentEmail').value;
+            const password = document.getElementById('studentPassword').value;
+            const resultDiv = document.getElementById('studentResult');
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Testing student login...';
+            
+            try {
+                const response = await fetch('/auth/login/student', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ SUCCESS!
+Status: ${response.status}
+Message: ${result.message}
+User: ${result.user?.email} (${result.user?.role})
+Token: ${result.token ? 'Generated ✓' : 'None ✗'}
+Token Key: ${result.token_key}
+Redirect: ${result.redirect}`;
+                    
+                    // Store token for testing
+                    if (result.token) {
+                        localStorage.setItem(result.token_key, result.token);
+                    }
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ ERROR!
+Status: ${response.status}
+Message: ${result.message}
+Debug: ${result.debug || 'None'}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ NETWORK ERROR: ${error.message}`;
+            }
+        }
+        
+        async function testCompleteFlow() {
+            const resultDiv = document.getElementById('completeResult');
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Running complete authentication flow test...\n';
+            
+            const tests = [
+                { name: 'Registrar Login', email: 'registrar@gmail.com', endpoint: '/auth/login' },
+                { name: 'Faculty Login', email: 'faculty@gmail.com', endpoint: '/auth/login' },
+                { name: 'Student Login', email: 'student@gmail.com', endpoint: '/auth/login/student' }
+            ];
+            
+            let results = [];
+            
+            for (const test of tests) {
+                try {
+                    const response = await fetch(test.endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: JSON.stringify({ email: test.email, password: 'password123' })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        results.push(`✅ ${test.name}: SUCCESS - ${result.user?.role} → ${result.redirect}`);
+                    } else {
+                        results.push(`❌ ${test.name}: FAILED - ${result.message}`);
+                    }
+                } catch (error) {
+                    results.push(`❌ ${test.name}: ERROR - ${error.message}`);
+                }
+            }
+            
+            const successCount = results.filter(r => r.includes('SUCCESS')).length;
+            const totalCount = results.length;
+            
+            if (successCount === totalCount) {
+                resultDiv.className = 'result success';
+                resultDiv.textContent = `🎉 ALL TESTS PASSED! (${successCount}/${totalCount})\n\n` + results.join('\n');
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `⚠️ SOME TESTS FAILED (${successCount}/${totalCount})\n\n` + results.join('\n');
+            }
+        }
+        
+        // Test dashboard access
+        async function testDashboardAccess(role, token) {
+            const dashboardUrls = {
+                'registrar': '/registrar/dashboard',
+                'student': '/student/dashboard',
+                'faculty': '/faculty/dashboard',
+                'coordinator': '/faculty/dashboard'
+            };
+            
+            const url = dashboardUrls[role];
+            if (!url) return false;
+            
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                return response.ok;
+            } catch (error) {
+                return false;
+            }
+        }
+    </script>
+</body>
+</html>
