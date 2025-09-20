@@ -133,7 +133,7 @@ const ForgotPassword = () => {
                 readOnly={!!new URLSearchParams(window.location.search).get('email')}
                 className={`w-full px-4 py-3 pl-12 border-2 border-blue-900 rounded-full text-blue-900 placeholder-transparent focus:outline-none focus:border-blue-600 focus:shadow-lg focus:shadow-blue-200/50 transition-all duration-300 peer ${
                   new URLSearchParams(window.location.search).get('email') ? 'bg-blue-50 cursor-not-allowed' : 'bg-transparent'
-                }`}
+                } ${errors.email ? 'border-red-500 bg-red-50' : ''}`}
                 placeholder="EMAIL ADDRESS"
               />
               <FaEnvelope className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600 w-4 h-4" />
@@ -150,8 +150,8 @@ const ForgotPassword = () => {
                 </div>
               )}
               {errors.email && (
-                <span className="text-red-600 text-xs font-semibold mt-1 block">
-                  {errors.email}
+                <span className="text-red-600 text-xs font-semibold mt-1 block flex items-center gap-1">
+                  <span>⚠️</span> {errors.email}
                 </span>
               )}
             </div>

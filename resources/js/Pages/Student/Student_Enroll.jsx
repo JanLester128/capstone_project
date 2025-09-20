@@ -1,8 +1,25 @@
 import React, { useState } from "react";
-import { usePage } from "@inertiajs/react";
+import { Head, usePage } from "@inertiajs/react";
 import Student_Sidebar from "../layouts/Student_Sidebar";
 import EnrollmentForm from "../layouts/EnrollmentForm";
-import { FaUserGraduate, FaFileAlt, FaCheckCircle, FaTimesCircle, FaClock, FaInfoCircle, FaExclamationTriangle, FaSchool } from 'react-icons/fa';
+import { 
+  FaUserGraduate, 
+  FaFileAlt, 
+  FaCheckCircle, 
+  FaTimesCircle, 
+  FaClock, 
+  FaInfoCircle, 
+  FaExclamationTriangle, 
+  FaSchool,
+  FaArrowRight,
+  FaCalendarAlt,
+  FaUser,
+  FaIdCard,
+  FaGraduationCap,
+  FaBookOpen,
+  FaClipboardCheck,
+  FaSpinner
+} from 'react-icons/fa';
 
 export default function StudentEnroll({ auth, user, availableStrands = [], activeSchoolYear = null }) {
   const { enrollmentStatus, flash } = usePage().props;
@@ -13,296 +30,299 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
     return saved ? JSON.parse(saved) : false;
   });
 
+  // HCI Principle 1: Visibility of system status - Clear status information
   const getEnrollmentStatusInfo = () => {
     switch (enrollmentStatus?.status) {
       case 'pending':
         return {
-          icon: <FaClock className="w-8 h-8 text-yellow-600" />,
-          title: "Enrollment Pending",
-          message: "Your enrollment application is currently under review by the coordinator.",
-          bgColor: "bg-yellow-50",
-          borderColor: "border-yellow-200",
-          textColor: "text-yellow-800"
+          icon: <FaClock className="w-12 h-12 text-yellow-500" />,
+          title: "Enrollment Under Review",
+          message: "Your enrollment application is currently being reviewed by the academic coordinator. You will be notified once a decision is made.",
+          bgColor: "bg-gradient-to-br from-yellow-50 to-orange-50",
+          borderColor: "border-yellow-300",
+          textColor: "text-yellow-800",
+          actionColor: "bg-yellow-100 text-yellow-800",
+          status: "In Progress"
         };
       case 'approved':
         return {
-          icon: <FaCheckCircle className="w-8 h-8 text-green-600" />,
+          icon: <FaCheckCircle className="w-12 h-12 text-green-500" />,
           title: "Enrollment Approved",
-          message: "Congratulations! Your enrollment has been approved. You can now access your class schedule.",
-          bgColor: "bg-green-50",
-          borderColor: "border-green-200",
-          textColor: "text-green-800"
+          message: "Congratulations! Your enrollment has been approved. You can now access your class schedule and begin your academic journey.",
+          bgColor: "bg-gradient-to-br from-green-50 to-emerald-50",
+          borderColor: "border-green-300",
+          textColor: "text-green-800",
+          actionColor: "bg-green-100 text-green-800",
+          status: "Completed"
         };
       case 'rejected':
         return {
-          icon: <FaTimesCircle className="w-8 h-8 text-red-600" />,
-          title: "Enrollment Rejected",
-          message: "Your enrollment application was not approved. Please contact the coordinator for more information.",
-          bgColor: "bg-red-50",
-          borderColor: "border-red-200",
-          textColor: "text-red-800"
+          icon: <FaTimesCircle className="w-12 h-12 text-red-500" />,
+          title: "Enrollment Requires Attention",
+          message: "Your enrollment application needs additional information or corrections. Please contact the academic coordinator or resubmit your application.",
+          bgColor: "bg-gradient-to-br from-red-50 to-pink-50",
+          borderColor: "border-red-300",
+          textColor: "text-red-800",
+          actionColor: "bg-red-100 text-red-800",
+          status: "Action Required"
         };
       default:
         return {
-          icon: <FaUserGraduate className="w-8 h-8 text-purple-600" />,
-          title: "Ready to Enroll",
-          message: "Complete your enrollment application to begin your academic journey with us.",
-          bgColor: "bg-purple-50",
-          borderColor: "border-purple-200",
-          textColor: "text-purple-800"
+          icon: <FaUserGraduate className="w-12 h-12 text-blue-500" />,
+          title: "Ready to Begin Enrollment",
+          message: "Start your academic journey by completing the enrollment process. All required information and documents should be prepared beforehand.",
+          bgColor: "bg-gradient-to-br from-blue-50 to-indigo-50",
+          borderColor: "border-blue-300",
+          textColor: "text-blue-800",
+          actionColor: "bg-blue-100 text-blue-800",
+          status: "Not Started"
         };
     }
   };
 
   const statusInfo = getEnrollmentStatusInfo();
 
+  // HCI Principle 5: Error prevention - Check prerequisites
+  const canEnroll = () => {
+    return activeSchoolYear && availableStrands.length > 0 && !enrollmentStatus?.status;
+  };
+
+  const handleSidebarToggle = (collapsed) => {
+    setIsCollapsed(collapsed);
+  };
+
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Sidebar */}
-      <Student_Sidebar auth={auth} notifications={[]} onToggle={setIsCollapsed} />
-      
-      {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-72'}`}>
-        {/* Header Section - Enhanced with Breadcrumbs */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 shadow-lg">
-          <div className="max-w-7xl mx-auto px-6 py-8">
-            {/* Breadcrumb Navigation - Heuristic 3: User Control */}
-            <nav className="text-blue-200 text-sm mb-4" aria-label="Breadcrumb">
-              <ol className="flex items-center space-x-2">
-                <li><span>Home</span></li>
-                <li><span className="mx-2">/</span></li>
-                <li><span className="text-white font-medium">Enrollment</span></li>
-              </ol>
-            </nav>
-            
+    <>
+      <Head title="Student Enrollment - ONSTS" />
+      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+        <Student_Sidebar onToggle={handleSidebarToggle} />
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
+          
+          {/* Enhanced Header */}
+          <header className="bg-white shadow-lg border-b border-gray-200 px-6 py-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-6">
-                <div className="p-4 bg-white/20 rounded-2xl backdrop-blur-sm">
-                  <FaUserGraduate className="w-10 h-10 text-white" />
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                  <FaUserGraduate className="text-white text-xl" />
                 </div>
                 <div>
-                  <h1 className="text-4xl font-bold text-white mb-2">Student Enrollment</h1>
-                  <p className="text-blue-100 text-lg">Begin your academic journey with us</p>
-                  {/* System Status - Heuristic 1: Visibility of System Status */}
-                  <div className="flex items-center gap-4 mt-2">
-                    <div className="flex items-center gap-2 text-blue-200 text-sm">
-                      <FaClock className="w-4 h-4" />
-                      <span>Enrollment Period: Open</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-blue-200 text-sm">
-                      <FaCheckCircle className="w-4 h-4" />
-                      <span>System Online</span>
-                    </div>
-                  </div>
+                  <h1 className="text-2xl font-bold text-gray-900">Student Enrollment</h1>
+                  <p className="text-gray-600">
+                    {activeSchoolYear ? 
+                      `${activeSchoolYear.semester} Semester ${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 
+                      'Academic Year Information'
+                    }
+                  </p>
                 </div>
               </div>
               
-              {/* Help Button - Heuristic 10: Help and Documentation */}
-              <div className="hidden md:flex">
-                <button className="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2 text-white hover:bg-white/20 transition-colors">
-                  <FaInfoCircle className="w-4 h-4" />
-                  <span>Need Help?</span>
-                </button>
+              {/* Status Badge */}
+              <div className={`flex items-center space-x-2 px-4 py-2 rounded-full border ${statusInfo.actionColor}`}>
+                <div className="w-2 h-2 rounded-full bg-current animate-pulse"></div>
+                <span className="font-medium text-sm">{statusInfo.status}</span>
               </div>
             </div>
-          </div>
-        </div>
+          </header>
 
-        <div className="max-w-7xl mx-auto px-6 py-12">
-        {/* Enrollment Status or Welcome Section */}
-        {enrollmentStatus ? (
-          <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-            <div className="text-center space-y-6">
-              <div className="flex items-center justify-center gap-3">
-                {getEnrollmentStatusInfo().icon}
-                <h2 className="text-2xl font-semibold text-gray-800">
-                  {getEnrollmentStatusInfo().title}
-                </h2>
-              </div>
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto space-y-6">
               
-              <div className={`${getEnrollmentStatusInfo().bgColor} ${getEnrollmentStatusInfo().borderColor} border rounded-lg p-6 max-w-2xl mx-auto`}>
-                <p className={`${getEnrollmentStatusInfo().textColor} font-medium text-lg`}>
-                  {getEnrollmentStatusInfo().message}
-                </p>
-              </div>
-
-              {enrollmentStatus.status === 'pending' && (
-                <div className="mt-6 p-6 bg-blue-50 border border-blue-200 rounded-lg max-w-2xl mx-auto">
-                  <div className="flex items-center gap-2 text-blue-700 mb-3">
-                    <FaInfoCircle className="w-5 h-5" />
-                    <span className="font-semibold text-lg">What happens next?</span>
+              {/* Flash Messages - HCI Principle 1: Visibility of system status */}
+              {flash?.success && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center space-x-3">
+                  <FaCheckCircle className="text-green-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-green-800 font-medium">Success!</p>
+                    <p className="text-green-700 text-sm">{flash.success}</p>
                   </div>
-                  <ul className="text-blue-600 space-y-2 text-left">
-                    <li className="flex items-start gap-2">
-                      <span className="text-blue-400 mt-1">•</span>
-                      <span>Your application is being reviewed by the academic coordinator</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-blue-400 mt-1">•</span>
-                      <span>You will receive an email notification once a decision is made</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-blue-400 mt-1">•</span>
-                      <span>The review process typically takes 3-5 business days</span>
-                    </li>
-                  </ul>
                 </div>
               )}
 
-              {enrollmentStatus.status === 'rejected' && (
-                <div className="mt-6 p-6 bg-red-50 border border-red-200 rounded-lg max-w-2xl mx-auto">
-                  <div className="flex items-center gap-2 text-red-700 mb-3">
-                    <FaInfoCircle className="w-5 h-5" />
-                    <span className="font-semibold text-lg">Next Steps</span>
+              {flash?.error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
+                  <FaExclamationTriangle className="text-red-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-red-800 font-medium">Error</p>
+                    <p className="text-red-700 text-sm">{flash.error}</p>
                   </div>
-                  <p className="text-red-600 text-left">
-                    Please contact the registrar's office or submit a new application with the required corrections.
-                  </p>
                 </div>
               )}
 
-              {enrollmentStatus.status === 'approved' && (
-                <div className="flex items-center justify-center gap-3 text-green-600 text-xl">
-                  <FaCheckCircle className="w-6 h-6" />
-                  <span className="font-semibold">Enrollment Approved - Welcome!</span>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Welcome Hero Section */}
-            <div className="text-center mb-12">
-              {!activeSchoolYear ? (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-8 mb-8 max-w-2xl mx-auto">
-                  <div className="flex items-center justify-center gap-3 mb-4">
-                    <FaExclamationTriangle className="w-8 h-8 text-yellow-600" />
-                    <h2 className="text-2xl font-bold text-yellow-800">Enrollment Not Available</h2>
-                  </div>
-                  <p className="text-yellow-700 text-lg leading-relaxed">
-                    REGISTRAR DID NOT ACTIVATE THE SCHOOL YEAR YET. 
-                    Please check back later or contact the registrar's office for more information.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="inline-flex items-center gap-4 bg-white rounded-2xl shadow-lg p-6 mb-8">
-                    <div className="p-3 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl">
-                      <FaUserGraduate className="w-8 h-8 text-white" />
-                    </div>
-                    <div className="text-left">
-                      <h2 className="text-3xl font-bold text-gray-800 mb-1">Ready to Enroll?</h2>
-                      <p className="text-gray-600">Complete your application in just a few steps</p>
-                    </div>
+              {/* Main Status Card */}
+              <div className={`${statusInfo.bgColor} border-2 ${statusInfo.borderColor} rounded-xl p-8 shadow-lg`}>
+                <div className="text-center space-y-6">
+                  <div className="flex justify-center">
+                    {statusInfo.icon}
                   </div>
                   
-                  <div className="max-w-3xl mx-auto mb-8">
-                    <p className="text-lg text-gray-700 leading-relaxed">
-                      Welcome to our enrollment system! Choose your preferred academic strand and submit your application. 
-                      Our coordinators will review your submission and guide you through the next steps.
+                  <div className="space-y-3">
+                    <h2 className={`text-2xl font-bold ${statusInfo.textColor}`}>
+                      {statusInfo.title}
+                    </h2>
+                    <p className={`text-lg ${statusInfo.textColor} max-w-2xl mx-auto leading-relaxed`}>
+                      {statusInfo.message}
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => setShowEnrollmentForm(true)}
-                    className="group bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-12 rounded-2xl transition-all duration-300 flex items-center gap-4 mx-auto text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-1"
-                  >
-                    <FaUserGraduate className="w-6 h-6 group-hover:rotate-12 transition-transform duration-300" />
-                    Enroll Now
-                    <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                  </button>
-                  
-                  <div className="flex items-center justify-center gap-2 mt-4 text-gray-500">
-                    <FaClock className="w-4 h-4" />
-                    <span className="text-sm">Takes only 5-10 minutes</span>
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+                    {!enrollmentStatus?.status && canEnroll() && (
+                      <button
+                        onClick={() => setShowEnrollmentForm(true)}
+                        className="flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                      >
+                        <FaGraduationCap className="mr-3 text-xl" />
+                        Start Enrollment Process
+                        <FaArrowRight className="ml-3" />
+                      </button>
+                    )}
+
+                    {enrollmentStatus?.status === 'rejected' && (
+                      <button
+                        onClick={() => setShowEnrollmentForm(true)}
+                        className="flex items-center px-8 py-4 bg-gradient-to-r from-orange-600 to-red-600 text-white font-semibold rounded-lg hover:from-orange-700 hover:to-red-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                      >
+                        <FaFileAlt className="mr-3 text-xl" />
+                        Resubmit Application
+                        <FaArrowRight className="ml-3" />
+                      </button>
+                    )}
+
+                    {enrollmentStatus?.status === 'approved' && (
+                      <button
+                        onClick={() => window.location.href = '/student/schedule'}
+                        className="flex items-center px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                      >
+                        <FaCalendarAlt className="mr-3 text-xl" />
+                        View Class Schedule
+                        <FaArrowRight className="ml-3" />
+                      </button>
+                    )}
                   </div>
-                </>
-              )}
+                </div>
+              </div>
+
+              {/* Information Cards - HCI Principle 6: Recognition rather than recall */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <FaSchool className="text-blue-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Academic Year</h3>
+                      <p className="text-sm text-gray-600">
+                        {activeSchoolYear ? 
+                          `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 
+                          'Not Available'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                      <FaBookOpen className="text-green-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Available Strands</h3>
+                      <p className="text-sm text-gray-600">
+                        {availableStrands.length} programs available
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <FaUser className="text-purple-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Student ID</h3>
+                      <p className="text-sm text-gray-600">
+                        {user?.id ? `STU-${String(user.id).padStart(6, '0')}` : 'Not Assigned'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Requirements Checklist - HCI Principle 10: Help and documentation */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <FaClipboardCheck className="mr-2 text-indigo-600" />
+                  Enrollment Requirements
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    'Student Photo (2x2 ID Picture)',
+                    'Previous Academic Records (if transferring)',
+                    'Birth Certificate (Upload Image)',
+                    'Report Card (Upload Image)'
+                  ].map((requirement, index) => (
+                    <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                      <FaCheckCircle className="text-green-500 flex-shrink-0" />
+                      <span className="text-sm text-gray-700">{requirement}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start space-x-3">
+                    <FaInfoCircle className="text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-blue-800 font-medium">Important Note</p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Please ensure all documents are ready before starting the enrollment process. 
+                        Incomplete applications may cause delays in processing.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact Information - HCI Principle 9: Help users recognize, diagnose, and recover from errors */}
+              <div className="bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Need Help?</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <FaUser className="text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Academic Coordinator</p>
+                      <p className="text-sm text-gray-600">For enrollment assistance</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                      <FaIdCard className="text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Registrar Office</p>
+                      <p className="text-sm text-gray-600">For document verification</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            {/* Information Cards */}
-            <div className="grid md:grid-cols-3 gap-6 mb-12">
-              {/* Required Documents */}
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <FaFileAlt className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-800">Required Documents</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-gray-600">
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                    PSA Birth Certificate
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                    Report Card (Form 138)
-                  </li>
-                </ul>
-              </div>
-
-              {/* Academic Strands */}
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <FaSchool className="w-5 h-5 text-green-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-800">Academic Strands</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-gray-600">
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    STEM (Science & Technology)
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    ABM (Business & Management)
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    HUMSS (Humanities)
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                    GAS (General Academic)
-                  </li>
-                </ul>
-              </div>
-
-              {/* Why Choose Us */}
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <FaCheckCircle className="w-5 h-5 text-purple-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-800">Why Choose Us?</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-gray-600">
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full"></div>
-                    Experienced Faculty
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full"></div>
-                    Quality Education
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-          </>
-        )}
-
-        <EnrollmentForm 
-          isOpen={showEnrollmentForm} 
-          onClose={() => setShowEnrollmentForm(false)} 
-          user={user || auth?.user}
-          availableStrands={availableStrands}
-          activeSchoolYear={activeSchoolYear}
-        />
+          </main>
         </div>
       </div>
-    </div>
+
+      {/* Enrollment Form Modal */}
+      {showEnrollmentForm && (
+        <EnrollmentForm 
+          isOpen={showEnrollmentForm}
+          user={user}
+          availableStrands={availableStrands}
+          activeSchoolYear={activeSchoolYear}
+          onClose={() => setShowEnrollmentForm(false)}
+        />
+      )}
+    </>
   );
 }

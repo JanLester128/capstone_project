@@ -12,13 +12,19 @@ return new class extends Migration
     public function up(): void
     {
         // Check and update only existing columns in each table
-        
+
         // Update enrollments table - only if columns exist
-        if (Schema::hasColumn('enrollments', 'student_photo')) {
+        if (Schema::hasTable('enrollments')) {
             Schema::table('enrollments', function (Blueprint $table) {
-                $table->string('student_photo', 100)->nullable()->change();
-                $table->string('psa_birth_certificate', 100)->nullable()->change();
-                $table->string('report_card', 100)->nullable()->change();
+                if (Schema::hasColumn('enrollments', 'student_photo')) {
+                    $table->string('student_photo', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('enrollments', 'psa_birth_certificate')) {
+                    $table->string('psa_birth_certificate', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('enrollments', 'report_card')) {
+                    $table->string('report_card', 100)->nullable()->change();
+                }
             });
         }
 
@@ -84,13 +90,22 @@ return new class extends Migration
         if (Schema::hasTable('subjects')) {
             Schema::table('subjects', function (Blueprint $table) {
                 if (Schema::hasColumn('subjects', 'code')) {
-                    $table->string('code', 100)->change(); // Remove ->unique()
+                    $table->string('code', 100)->change();
                 }
                 if (Schema::hasColumn('subjects', 'name')) {
                     $table->string('name', 100)->change();
                 }
+                if (Schema::hasColumn('subjects', 'year_level')) {
+                    $table->string('year_level', 100)->change();
+                }
                 if (Schema::hasColumn('subjects', 'description')) {
                     $table->string('description', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('subjects', 'prerequisites')) {
+                    $table->string('prerequisites', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('subjects', 'corequisites')) {
+                    $table->string('corequisites', 100)->nullable()->change();
                 }
             });
         }
@@ -116,66 +131,124 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert changes if needed
-        Schema::table('enrollments', function (Blueprint $table) {
-            $table->string('email', 255)->change();
-            $table->string('phone', 255)->nullable()->change();
-            $table->string('birthplace', 255)->change();
-            $table->string('religion', 255)->nullable()->change();
-            $table->string('mother_tongue', 255)->nullable()->change();
-            $table->string('pwd_id', 255)->nullable()->change();
-            $table->string('last_school_attended', 255)->change();
-            $table->string('last_grade_completed', 255)->change();
-            $table->string('last_school_year', 255)->change();
-            $table->string('student_photo', 255)->nullable()->change();
-            $table->string('psa_birth_certificate', 255)->nullable()->change();
-            $table->string('report_card', 255)->nullable()->change();
-        });
+        // Revert changes if needed - only for columns that exist
+        if (Schema::hasTable('enrollments')) {
+            Schema::table('enrollments', function (Blueprint $table) {
+                if (Schema::hasColumn('enrollments', 'student_photo')) {
+                    $table->string('student_photo', 255)->nullable()->change();
+                }
+                if (Schema::hasColumn('enrollments', 'psa_birth_certificate')) {
+                    $table->string('psa_birth_certificate', 255)->nullable()->change();
+                }
+                if (Schema::hasColumn('enrollments', 'report_card')) {
+                    $table->string('report_card', 255)->nullable()->change();
+                }
+            });
+        }
 
         Schema::table('users', function (Blueprint $table) {
-            $table->string('name', 255)->nullable()->change();
-            $table->string('firstname', 255)->nullable()->change();
-            $table->string('lastname', 255)->nullable()->change();
-            $table->string('middlename', 255)->nullable()->change();
-            $table->string('email', 255)->unique()->change();
-            $table->string('password', 255)->change();
-            $table->string('plain_password', 255)->nullable()->change();
+            if (Schema::hasColumn('users', 'name')) {
+                $table->string('name', 100)->nullable()->change();
+            }
+            if (Schema::hasColumn('users', 'firstname')) {
+                $table->string('firstname', 100)->nullable()->change();
+            }
+            if (Schema::hasColumn('users', 'lastname')) {
+                $table->string('lastname', 100)->nullable()->change();
+            }
+            if (Schema::hasColumn('users', 'middlename')) {
+                $table->string('middlename', 100)->nullable()->change();
+            }
+            if (Schema::hasColumn('users', 'email')) {
+                $table->string('email', 100)->change(); // Remove ->unique()
+            }
+            if (Schema::hasColumn('users', 'password')) {
+                $table->string('password', 100)->change();
+            }
+            if (Schema::hasColumn('users', 'plain_password')) {
+                $table->string('plain_password', 100)->nullable()->change();
+            }
         });
 
-        Schema::table('student_personal_info', function (Blueprint $table) {
-            $table->string('school_year', 255)->nullable()->change();
-            $table->string('lrn', 255)->nullable()->change();
-            $table->string('grade_level', 255)->nullable()->change();
-            $table->string('nongraded', 255)->nullable()->change();
-            $table->string('psa', 255)->nullable()->change();
-            $table->string('extension_name', 255)->nullable()->change();
-            $table->string('sex', 255)->nullable()->change();
-            $table->string('birth_place', 255)->nullable()->change();
-            $table->string('religion', 255)->nullable()->change();
-            $table->string('mother_tongue', 255)->nullable()->change();
-            $table->string('ip_community', 255)->nullable()->change();
-            $table->string('four_ps', 255)->nullable()->change();
-            $table->string('special_needs', 255)->nullable()->change();
-            $table->string('pwd_id', 255)->nullable()->change();
-            $table->string('last_grade', 255)->nullable()->change();
-            $table->string('last_sy', 255)->nullable()->change();
-            $table->string('psa_birth_certificate', 255)->nullable()->change();
-            $table->string('report_card', 255)->nullable()->change();
-            $table->string('image', 255)->nullable()->change();
-            $table->string('hs_grade', 255)->default('N/A')->change();
-        });
+        if (Schema::hasTable('student_personal_info')) {
+            Schema::table('student_personal_info', function (Blueprint $table) {
+                if (Schema::hasColumn('student_personal_info', 'school_year')) {
+                    $table->string('school_year', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'lrn')) {
+                    $table->string('lrn', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'grade_level')) {
+                    $table->string('grade_level', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'extension_name')) {
+                    $table->string('extension_name', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'sex')) {
+                    $table->string('sex', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'birth_place')) {
+                    $table->string('birth_place', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'religion')) {
+                    $table->string('religion', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'ip_community')) {
+                    $table->string('ip_community', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'four_ps')) {
+                    $table->string('four_ps', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'special_needs')) {
+                    $table->string('special_needs', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'pwd_id')) {
+                    $table->string('pwd_id', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'last_grade')) {
+                    $table->string('last_grade', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'last_sy')) {
+                    $table->string('last_sy', 100)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'report_card')) {
+                    $table->string('report_card', 255)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'image')) {
+                    $table->string('image', 255)->nullable()->change();
+                }
+                if (Schema::hasColumn('student_personal_info', 'hs_grade')) {
+                    $table->string('hs_grade', 255)->default('N/A')->change();
+                }
+            });
+        }
 
-        Schema::table('subjects', function (Blueprint $table) {
-            $table->string('code', 255)->unique()->change();
-            $table->string('name', 255)->change();
-            $table->string('year_level', 255)->change();
-            $table->string('description', 255)->nullable()->change();
-        });
+        if (Schema::hasTable('subjects')) {
+            Schema::table('subjects', function (Blueprint $table) {
+                if (Schema::hasColumn('subjects', 'code')) {
+                    $table->string('code', 100)->change(); // Remove ->unique()
+                }
+                if (Schema::hasColumn('subjects', 'name')) {
+                    $table->string('name', 100)->change();
+                }
+                if (Schema::hasColumn('subjects', 'description')) {
+                    $table->string('description', 150)->nullable()->change();
+                }
+            });
+        }
 
-        Schema::table('strands', function (Blueprint $table) {
-            $table->string('code', 255)->unique()->change();
-            $table->string('name', 255)->change();
-            $table->string('description', 255)->nullable()->change();
-        });
+        if (Schema::hasTable('strands')) {
+            Schema::table('strands', function (Blueprint $table) {
+                if (Schema::hasColumn('strands', 'code')) {
+                    $table->string('code', 100)->change(); // Remove ->unique()
+                }
+                if (Schema::hasColumn('strands', 'name')) {
+                    $table->string('name', 100)->change();
+                }
+                if (Schema::hasColumn('strands', 'description')) {
+                    $table->string('description', 150)->nullable()->change();
+                }
+            });
+        }
     }
 };

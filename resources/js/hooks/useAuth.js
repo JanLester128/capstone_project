@@ -28,7 +28,7 @@ const useAuth = () => {
         AuthManager.setAxiosAuth();
       }
       
-      // Don't automatically redirect - let components handle their own authentication
+      // Don't automatically redirect - let AuthCheck component handle authentication flow
     } catch (error) {
       console.error('Error initializing auth:', error);
       setAuthState({
@@ -37,7 +37,8 @@ const useAuth = () => {
         token: null
       });
     } finally {
-      setIsLoading(false);
+      // Reduce loading time for better UX
+      setTimeout(() => setIsLoading(false), 100);
     }
   }, []);
 

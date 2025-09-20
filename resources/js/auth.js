@@ -14,18 +14,40 @@ export const AuthManager = {
     const user = this.getUser();
     const session = this.getSession();
     
+    console.log('AuthManager.isAuthenticated() - Check results:', {
+      hasToken: !!token,
+      hasUser: !!user,
+      hasSession: !!session,
+      userRole: user?.role
+    });
+    
     if (!token || !user || !session) {
+      console.log('AuthManager.isAuthenticated() - Missing auth data, returning false');
       return false;
     }
     
-    // Skip session expiration check to prevent login redirects on refresh
-    // Session expiration will be handled by backend middleware
+    // Check if session is not too old (more lenient check)
+    const lastActivity = localStorage.getItem(this.LAST_ACTIVITY_KEY);
+    if (lastActivity) {
+      const timeSinceActivity = Date.now() - parseInt(lastActivity);
+      console.log('AuthManager.isAuthenticated() - Time since activity:', Math.round(timeSinceActivity / 1000 / 60), 'minutes');
+      
+      // Allow up to 48 hours of inactivity before considering session invalid
+      if (timeSinceActivity > (48 * 60 * 60 * 1000)) {
+        console.log('Session too old, clearing auth');
+        this.clearAuth();
+        return false;
+      }
+    }
+    
+    console.log('AuthManager.isAuthenticated() - All checks passed, returning true');
     return true;
   },
 
   // Store current page location
   storeCurrentPage(path) {
-    if (path && path !== '/login') {
+    // Validate path and exclude problematic routes
+    if (path && path !== '/login' && !path.includes('/by-semester')) {
       localStorage.setItem(this.CURRENT_PAGE_KEY, path);
     }
   },
@@ -50,10 +72,13 @@ export const AuthManager = {
       return { valid: false, message: 'No session data' };
     }
     
-    // Check if session expired (24 hours)
-    if (lastActivity && Date.now() - parseInt(lastActivity) > 24 * 60 * 60 * 1000) {
-      this.clearAuth();
-      return { valid: false, message: 'Session expired' };
+    // Check if session expired (24 hours) - but be more lenient on page refresh
+    if (lastActivity && Date.now() - parseInt(lastActivity) > this.SESSION_TIMEOUT) {
+      // Only clear auth if session is significantly expired (more than 25 hours)
+      if (Date.now() - parseInt(lastActivity) > (this.SESSION_TIMEOUT + 60 * 60 * 1000)) {
+        this.clearAuth();
+        return { valid: false, message: 'Session expired' };
+      }
     }
     
     // Validate token with backend to handle database resets
@@ -86,7 +111,9 @@ export const AuthManager = {
       
     } catch (error) {
       console.error('Session validation error:', error);
-      // On network error, don't clear auth immediately
+      // On network error, assume session is valid for better UX
+      // This prevents login loops when the server is temporarily unavailable
+      this.updateLastActivity();
       return { 
         valid: true, 
         user: JSON.parse(localStorage.getItem(this.USER_KEY) || '{}'),

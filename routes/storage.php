@@ -15,18 +15,21 @@ use Illuminate\Http\Request;
 */
 
 Route::middleware(['auth:sanctum'])->group(function () {
-    Route::get('/storage/enrollment_documents/{filename}', function (Request $request, $filename) {
-        $filePath = 'enrollment_documents/' . $filename;
-        
-        if (!Storage::disk('public')->exists($filePath)) {
+    Route::get('/storage/enrollment_documents/{filename}', function (\Illuminate\Http\Request $request, $filename) {
+        // Prevent path traversal by normalizing provided filename
+        $safeFilename = basename($filename);
+        $relativePath = 'enrollment_documents/' . $safeFilename;
+
+        // Resolve to absolute filesystem path under storage/app/public
+        $absolutePath = storage_path('app/public/' . $relativePath);
+
+        if (!file_exists($absolutePath)) {
             abort(404);
         }
-        
-        $file = Storage::disk('public')->get($filePath);
-        $mimeType = Storage::disk('public')->mimeType($filePath);
-        
-        return response($file, 200)
-            ->header('Content-Type', $mimeType)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+
+        // Stream the file inline; Laravel will set sensible headers
+        return response()->file($absolutePath, [
+            'Content-Disposition' => 'inline; filename="' . $safeFilename . '"'
+        ]);
     })->name('storage.enrollment_documents');
 });

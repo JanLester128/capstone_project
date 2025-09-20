@@ -283,6 +283,13 @@ const Sidebar = ({ onToggle }) => {
       label: "Semesters",
       description: "Academic periods",
       shortcut: "Alt+T"
+    },
+    {
+      path: "/registrar/profile",
+      icon: FaUser,
+      label: "Profile",
+      description: "Account settings",
+      shortcut: "Alt+R"
     }
   ];
 
@@ -358,34 +365,8 @@ const Sidebar = ({ onToggle }) => {
           )}
         </div>
 
-        {/* User Profile Section - HCI Principle 6: Recognition rather than recall */}
-        {!isCollapsed && (
-          <div className="px-3 py-3 border-b border-gray-200 flex-shrink-0">
-            <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-                <FaUser className="text-white text-sm" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">
-                  {userProfile.name || 'Registrar'}
-                </p>
-                <p className="text-xs text-gray-600 truncate">
-                  {userProfile.email || 'registrar@onsts.edu.ph'}
-                </p>
-              </div>
-              <div className="flex items-center">
-                {connectionStatus === 'connected' ? (
-                  <div className="w-2 h-2 bg-green-500 rounded-full" title="Online" />
-                ) : (
-                  <div className="w-2 h-2 bg-red-500 rounded-full" title="Offline" />
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Sidebar Navigation */}
-        <nav className={`flex-1 ${isCollapsed ? 'px-1' : 'px-3'} py-3 transition-all duration-300 min-h-0`}>
+        <nav className={`flex-1 ${isCollapsed ? 'px-2' : 'px-3'} py-3 transition-all duration-300 min-h-0`}>
           <ul className="space-y-1" role="menubar">
             {menuItems.map((item) => {
               const Icon = item.icon;
@@ -395,41 +376,56 @@ const Sidebar = ({ onToggle }) => {
                 <li key={item.path} role="none">
                   <Link
                     href={item.path}
-                    className={`flex items-center ${isCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2 rounded-lg transition-all duration-300 group relative ${
+                    className={`flex items-center ${isCollapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'} rounded-xl transition-all duration-300 group relative border ${
                       isCurrentActive
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        ? "bg-blue-600 text-white shadow-lg border-blue-700 transform scale-[1.01]"
+                        : "text-gray-700 hover:bg-gray-50 hover:text-gray-900 border-transparent hover:border-gray-200 hover:shadow-sm"
                     }`}
                     title={isCollapsed ? `${item.label} - ${item.description} (${item.shortcut})` : item.shortcut}
                     role="menuitem"
                     aria-current={isCurrentActive ? "page" : undefined}
                   >
-                    <Icon className={`text-sm transition-all duration-300 ${
-                      isCurrentActive ? "scale-110 text-white" : "group-hover:scale-110"
-                    }`} />
+                    <div className={`flex items-center justify-center ${isCollapsed ? 'w-5 h-5' : 'w-6 h-6'} transition-all duration-300`}>
+                      <Icon className={`${isCollapsed ? 'text-sm' : 'text-base'} transition-all duration-300 ${
+                        isCurrentActive ? "scale-110 text-white" : "group-hover:scale-110 group-hover:text-blue-600"
+                      }`} />
+                    </div>
                     
                     {!isCollapsed && (
-                      <>
-                        <div className="flex-1 min-w-0">
-                          <span className="font-medium text-sm block leading-tight truncate">
-                            {item.label}
-                          </span>
-                          <span className="text-xs opacity-75 block leading-tight truncate">
-                            {item.description}
-                          </span>
-                        </div>
-                        
-                        {isCurrentActive && (
-                          <div className="flex items-center">
-                            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-xs block leading-tight truncate">
+                              {item.label}
+                            </span>
+                            <span className={`text-xs block leading-tight truncate ${
+                              isCurrentActive ? 'text-blue-100' : 'text-gray-500 group-hover:text-gray-600'
+                            }`}>
+                              {item.description}
+                            </span>
                           </div>
-                        )}
-                      </>
+                          
+                          {isCurrentActive && (
+                            <div className="flex items-center ml-2">
+                              <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
                     
                     {/* Active indicator for collapsed state */}
                     {isCollapsed && isCurrentActive && (
-                      <div className="absolute -right-0.5 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-blue-600 rounded-full"></div>
+                      <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-blue-400 rounded-full shadow-sm"></div>
+                    )}
+                    
+                    {/* Hover tooltip for collapsed state */}
+                    {isCollapsed && (
+                      <div className="absolute left-full ml-2 px-2 py-1.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 shadow-lg">
+                        <div className="font-medium">{item.label}</div>
+                        <div className="text-xs text-gray-300">{item.description}</div>
+                        <div className="absolute top-1/2 -left-1 transform -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
+                      </div>
                     )}
                   </Link>
                 </li>

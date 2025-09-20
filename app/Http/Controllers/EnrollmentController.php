@@ -10,7 +10,7 @@ use App\Models\ClassSchedule;
 use App\Models\ClassDetail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class EnrollmentController extends Controller
@@ -35,53 +35,97 @@ class EnrollmentController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'firstname' => 'required|string|max:255',
-            'lastname' => 'required|string|max:255',
-            'middlename' => 'nullable|string|max:255',
-            'lrn' => 'required|string|max:12|unique:enrollments,lrn',
-            'email' => 'required|email|unique:enrollments,email',
-            'phone' => 'nullable|string|max:15',
-            'birthdate' => 'required|date',
-            'birthplace' => 'required|string|max:255',
-            'sex' => 'required|in:Male,Female',
-            'religion' => 'nullable|string|max:255',
-            'address' => 'required|string',
-            'age' => 'required|integer|min:15|max:25',
-            'mother_tongue' => 'nullable|string|max:255',
-            'is_ip_community' => 'boolean',
-            'is_4ps' => 'boolean',
-            'pwd_id' => 'nullable|string|max:255',
-            'grade_level' => 'required|in:Grade 11,Grade 12',
-            'last_school_attended' => 'required|string|max:255',
-            'last_grade_completed' => 'required|string|max:255',
-            'last_school_year' => 'required|string|max:255',
-            'first_strand_choice' => 'required|exists:strands,id',
-            'second_strand_choice' => 'nullable|exists:strands,id',
-            'third_strand_choice' => 'nullable|exists:strands,id',
-            'student_photo' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
-            'psa_birth_certificate' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
-            'report_card' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            // Basic enrollment info
+            'gradeLevel' => 'required|in:Grade 11,Grade 12',
+            'lastGrade' => 'required|string|max:255',
+            'lastSY' => 'required|string|max:255',
+            
+            // Strand preferences (frontend sends these names)
+            'firstChoice' => 'required|exists:strands,id',
+            'secondChoice' => 'nullable|exists:strands,id',
+            'thirdChoice' => 'nullable|exists:strands,id',
+            
+            // File uploads
+            'reportCard' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'psaBirthCertificate' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
         ]);
 
         // Handle file uploads
-        if ($request->hasFile('student_photo')) {
-            $validated['student_photo'] = $request->file('student_photo')->store('enrollment_documents', 'public');
+        if ($request->hasFile('reportCard')) {
+            $validated['report_card'] = $request->file('reportCard')->store('enrollment_documents', 'public');
         }
 
-        if ($request->hasFile('psa_birth_certificate')) {
-            $validated['psa_birth_certificate'] = $request->file('psa_birth_certificate')->store('enrollment_documents', 'public');
+        if ($request->hasFile('psaBirthCertificate')) {
+            $psaPath = $request->file('psaBirthCertificate')->store('enrollment_documents', 'public');
         }
 
-        if ($request->hasFile('report_card')) {
-            $validated['report_card'] = $request->file('report_card')->store('enrollment_documents', 'public');
+        // Map frontend field names to database field names
+        $enrollmentData = [
+            'student_id' => Auth::id(),
+            'grade_level' => $validated['gradeLevel'],
+            'last_school_attended' => 'Previous School', // Default value since not in form
+            'last_grade_completed' => $validated['lastGrade'],
+            'last_school_year' => $validated['lastSY'],
+            'status' => 'pending',
+        ];
+
+        // Add file paths if uploaded
+        if (isset($validated['report_card'])) {
+            $enrollmentData['report_card'] = $validated['report_card'];
         }
 
-        // Add user and school year
-        $validated['user_id'] = Auth::id();
-        $validated['school_year_id'] = SchoolYear::where('is_active', true)->first()->id;
-        $validated['submitted_at'] = now();
+        // Add school year and timestamps
+        $schoolYear = SchoolYear::where('is_active', true)->first();
+        $enrollmentData['school_year_id'] = $schoolYear->id;
+        $enrollmentData['submitted_at'] = now();
 
-        Enrollment::create($validated);
+        // Create enrollment record
+        $enrollment = Enrollment::create($enrollmentData);
+
+        // Store strand preferences in separate table
+        $strandChoices = [
+            'firstChoice' => $validated['firstChoice'],
+            'secondChoice' => $validated['secondChoice'] ?? null,
+            'thirdChoice' => $validated['thirdChoice'] ?? null,
+        ];
+
+        $preferences = [];
+        foreach ($strandChoices as $choiceName => $strandId) {
+            if ($strandId) {
+                $order = $choiceName === 'firstChoice' ? 1 : ($choiceName === 'secondChoice' ? 2 : 3);
+                $preferences[] = [
+                    'student_id' => Auth::id(),
+                    'enrollment_id' => $enrollment->id,
+                    'strand_id' => $strandId,
+                    'preference_order' => $order,
+                    'school_year_id' => $schoolYear->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+        }
+
+        // Insert strand preferences
+        if (!empty($preferences)) {
+            try {
+                \App\Models\StudentStrandPreference::insert($preferences);
+                Log::info('Strand preferences inserted successfully', ['preferences' => $preferences]);
+            } catch (\Exception $e) {
+                Log::error('Failed to insert strand preferences', ['error' => $e->getMessage(), 'preferences' => $preferences]);
+                // Continue with enrollment even if preferences fail
+            }
+        }
+
+        // Store PSA birth certificate path if uploaded
+        if (isset($psaPath)) {
+            try {
+                $enrollment->update([
+                    'documents' => json_encode(['psa_birth_certificate' => $psaPath])
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to update enrollment documents', ['error' => $e->getMessage()]);
+            }
+        }
 
         return redirect()->route('student.dashboard')->with('success', 'Enrollment application submitted successfully!');
     }
@@ -125,7 +169,7 @@ class EnrollmentController extends Controller
     }
 
     /**
-     * Approve enrollment and assign strand/section
+     * Approve enrollment and create class details for student
      */
     public function approve(Request $request, Enrollment $enrollment)
     {
@@ -135,6 +179,25 @@ class EnrollmentController extends Controller
             'coordinator_notes' => 'nullable|string'
         ]);
 
+        // Check section capacity limit (35 students maximum)
+        $currentEnrollmentCount = ClassDetail::where('section_id', $validated['assigned_section_id'])
+            ->where('enrollment_status', 'approved')
+            ->where('school_year_id', $enrollment->school_year_id)
+            ->count();
+
+        if ($currentEnrollmentCount >= 35) {
+            Log::warning('Section capacity exceeded', [
+                'section_id' => $validated['assigned_section_id'],
+                'current_count' => $currentEnrollmentCount,
+                'enrollment_id' => $enrollment->id
+            ]);
+            
+            return back()->withErrors([
+                'assigned_section_id' => 'This section has reached its maximum capacity of 35 students. Please select a different section.'
+            ]);
+        }
+
+        // Update enrollment status
         $enrollment->update([
             'status' => 'approved',
             'assigned_strand_id' => $validated['assigned_strand_id'],
@@ -142,6 +205,19 @@ class EnrollmentController extends Controller
             'coordinator_id' => Auth::id(),
             'coordinator_notes' => $validated['coordinator_notes'],
             'reviewed_at' => now()
+        ]);
+
+        // Create class detail record for the approved student
+        ClassDetail::create([
+            'student_id' => $enrollment->student_id,
+            'strand_id' => $validated['assigned_strand_id'],
+            'section_id' => $validated['assigned_section_id'],
+            'school_year_id' => $enrollment->school_year_id,
+            'coordinator_notes' => $validated['coordinator_notes'],
+            'enrollment_status' => 'approved',
+            'approved_by' => Auth::id(),
+            'approved_at' => now(),
+            'is_enrolled' => false // Will be set to true when enrolled in specific classes
         ]);
 
         return back()->with('success', 'Enrollment approved successfully!');
@@ -167,7 +243,7 @@ class EnrollmentController extends Controller
     }
 
     /**
-     * Enroll approved student in class schedules
+     * Enroll approved student in specific class schedules
      */
     public function enrollInClasses(Request $request, Enrollment $enrollment)
     {
@@ -176,11 +252,29 @@ class EnrollmentController extends Controller
             'class_ids.*' => 'exists:class,id'
         ]);
 
+        // Get the student's class detail record
+        $classDetail = ClassDetail::where('student_id', $enrollment->student_id)
+            ->where('enrollment_status', 'approved')
+            ->first();
+
+        if (!$classDetail) {
+            return back()->withErrors(['error' => 'Student must be approved first before enrolling in classes.']);
+        }
+
         foreach ($validated['class_ids'] as $classId) {
-            ClassDetail::create([
+            // Update existing class detail or create new ones for specific classes
+            ClassDetail::updateOrCreate([
                 'class_id' => $classId,
-                'enrollment_id' => $enrollment->id,
-                'section_id' => $enrollment->assigned_section_id,
+                'student_id' => $enrollment->student_id,
+            ], [
+                'strand_id' => $classDetail->strand_id,
+                'section_id' => $classDetail->section_id,
+                'school_year_id' => $classDetail->school_year_id,
+                'coordinator_notes' => $classDetail->coordinator_notes,
+                'enrollment_status' => 'enrolled',
+                'approved_by' => $classDetail->approved_by,
+                'approved_at' => $classDetail->approved_at,
+                'is_enrolled' => true,
                 'enrolled_at' => now()
             ]);
         }
@@ -198,8 +292,9 @@ class EnrollmentController extends Controller
         }
 
         $classDetails = ClassDetail::with(['classSchedule.subject', 'classSchedule.faculty'])
-            ->where('enrollment_id', $enrollment->id)
+            ->where('student_id', $enrollment->student_id)
             ->where('section_id', $enrollment->assigned_section_id)
+            ->where('is_enrolled', true)
             ->get();
 
         $schedulesByDay = $classDetails->groupBy(function ($detail) {

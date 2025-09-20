@@ -1,8 +1,87 @@
 import React, { useState, useEffect } from "react";
 import { usePage, router } from "@inertiajs/react";
-import { FaPlay, FaPause, FaCalendarAlt, FaToggleOn, FaToggleOff, FaPlus, FaEdit, FaTrash, FaTimes, FaList, FaCalendarTimes, FaGraduationCap, FaClock } from "react-icons/fa";
+import { FaPlay, FaPause, FaCalendarAlt, FaToggleOn, FaToggleOff, FaPlus, FaEdit, FaTrash, FaTimes, FaList, FaCalendarTimes, FaGraduationCap, FaClock, FaExclamationTriangle } from "react-icons/fa";
 import Sidebar from "../layouts/Sidebar";
 import Swal from "sweetalert2";
+
+// Countdown Timer Component
+const CountdownTimer = ({ endDate, isActive, semesterId, onExpired }) => {
+  const [timeRemaining, setTimeRemaining] = useState(null);
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    if (!endDate || !isActive) {
+      setTimeRemaining(null);
+      return;
+    }
+
+    const updateTimer = () => {
+      const now = new Date();
+      const end = new Date(endDate);
+      const diff = end - now;
+
+      if (diff <= 0) {
+        setIsExpired(true);
+        setTimeRemaining(null);
+        if (onExpired) {
+          onExpired(semesterId);
+        }
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      setTimeRemaining({ days, hours, minutes, seconds });
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(interval);
+  }, [endDate, isActive, semesterId, onExpired]);
+
+  if (!isActive || !endDate) {
+    return null;
+  }
+
+  if (isExpired) {
+    return (
+      <div className="flex items-center gap-2 text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
+        <FaExclamationTriangle className="text-sm" />
+        <span className="text-sm font-semibold">EXPIRED</span>
+      </div>
+    );
+  }
+
+  if (!timeRemaining) {
+    return null;
+  }
+
+  const { days, hours, minutes, seconds } = timeRemaining;
+  const isUrgent = days === 0 && hours < 24;
+  const isWarning = days <= 7;
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+      isUrgent 
+        ? 'text-red-600 bg-red-50 border-red-200' 
+        : isWarning 
+        ? 'text-orange-600 bg-orange-50 border-orange-200'
+        : 'text-green-600 bg-green-50 border-green-200'
+    }`}>
+      <FaClock className="text-sm animate-pulse" />
+      <div className="text-sm font-mono font-semibold">
+        {days > 0 && <span>{days}d </span>}
+        <span>{String(hours).padStart(2, '0')}:</span>
+        <span>{String(minutes).padStart(2, '0')}:</span>
+        <span>{String(seconds).padStart(2, '0')}</span>
+      </div>
+    </div>
+  );
+};
 
 const SemesterModal = ({ isOpen, onClose, semester }) => {
   const [semesterName, setSemesterName] = useState("");
@@ -13,6 +92,11 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
   const [customYearMode, setCustomYearMode] = useState(false);
   const [customStartYear, setCustomStartYear] = useState("");
   const [processing, setProcessing] = useState(false);
+
+  // Get today's date in YYYY-MM-DD format for min date validation
+  const getTodayDate = () => {
+    return new Date().toISOString().split('T')[0];
+  };
 
   useEffect(() => {
     if (semester) {
@@ -35,6 +119,39 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!semesterName.trim() || !String(yearStart).trim() || !String(yearEnd).trim() || !startDate.trim() || !endDate.trim()) return;
+
+    // Validate dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    const end = new Date(endDate);
+    end.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    // Only validate future dates for new semesters (allow today's date)
+    if (!semester) {
+      if (start < today) {
+        Swal.fire({
+          title: 'Invalid Date',
+          text: 'Start date cannot be in the past',
+          icon: 'error',
+          confirmButtonColor: '#dc2626'
+        });
+        return;
+      }
+    }
+    
+    if (end <= start) {
+      Swal.fire({
+        title: 'Invalid Date',
+        text: 'End date must be after start date',
+        icon: 'error',
+        confirmButtonColor: '#dc2626'
+      });
+      return;
+    }
 
     setProcessing(true);
     const data = {
@@ -197,9 +314,13 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
+              min={!semester ? getTodayDate() : undefined}
               className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
               required
             />
+            {!semester && (
+              <p className="text-xs text-gray-500 mt-1">Cannot select past dates for new semesters</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">End Date *</label>
@@ -207,9 +328,11 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
+              min={startDate || (!semester ? getTodayDate() : undefined)}
               className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
               required
             />
+            <p className="text-xs text-gray-500 mt-1">Must be after start date</p>
           </div>
           <div className="flex gap-3">
             <button
@@ -340,6 +463,38 @@ const RegistrarSemester = () => {
     }
   };
 
+  // Auto-check for expired semesters every minute
+  useEffect(() => {
+    const checkExpiredSemesters = () => {
+      router.post('/registrar/school-years/auto-deactivate', {}, {
+        preserveState: true,
+        preserveScroll: true,
+        only: [],
+        onSuccess: (page) => {
+          const data = page.props;
+          if (data.count > 0) {
+            // Refresh the page to show updated semester status
+            router.visit('/registrar/semesters', { 
+              preserveState: false,
+              preserveScroll: true 
+            });
+          }
+        },
+        onError: (errors) => {
+          console.error('Error checking expired semesters:', errors);
+        }
+      });
+    };
+
+    // Check immediately when component mounts
+    checkExpiredSemesters();
+
+    // Then check every minute
+    const interval = setInterval(checkExpiredSemesters, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const activeSemester = schoolYears.find(s => s.is_active);
   const inactiveSemesters = schoolYears.filter(s => !s.is_active);
 
@@ -465,6 +620,14 @@ const RegistrarSemester = () => {
                         )}
                       </span>
                     </div>
+
+                    {/* Countdown Timer */}
+                    <CountdownTimer
+                      endDate={semester.end_date}
+                      isActive={semester.is_active}
+                      semesterId={semester.id}
+                      onExpired={() => handleToggleActive(semester.id, semester.is_active)}
+                    />
 
                     {/* Status and Actions */}
                     <div className="flex items-center justify-between pt-4 border-t border-gray-100">

@@ -13,7 +13,13 @@ import {
   FaSchool,
   FaBell,
   FaBars,
-  FaTimes
+  FaTimes,
+  FaBookOpen,
+  FaCog,
+  FaQuestionCircle,
+  FaGraduationCap,
+  FaChevronRight,
+  FaCircle
 } from "react-icons/fa";
 
 export default function StudentSidebar({ auth, notifications = [], onToggle }) {
@@ -23,6 +29,7 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
     const saved = localStorage.getItem('student_sidebar_collapsed');
     return saved ? JSON.parse(saved) : false;
   });
+  const [hoveredItem, setHoveredItem] = useState(null);
 
   // Notify parent component of initial state on mount
   useEffect(() => {
@@ -39,284 +46,233 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
     if (onToggle) onToggle(newState);
   };
 
+  // HCI Principle 9: Help users recognize, diagnose, and recover from errors
   const handleLogout = async () => {
     const result = await Swal.fire({
       title: 'Confirm Logout',
-      text: 'Are you sure you want to logout?',
+      text: 'Are you sure you want to logout? Any unsaved changes will be lost.',
       icon: 'question',
       showCancelButton: true,
       confirmButtonColor: '#dc2626',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, Logout',
-      cancelButtonText: 'Cancel'
+      cancelButtonText: 'Cancel',
+      reverseButtons: true,
+      focusCancel: true
     });
 
     if (result.isConfirmed) {
       try {
-        // Get token before clearing for logout request
-        const token = localStorage.getItem('auth_token');
-        
-        // Send logout request to backend with proper headers
-        const response = await fetch('/auth/logout', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-          },
-          credentials: 'include'
-        });
-
-        // Clear all authentication data
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_user');
-        localStorage.removeItem('auth_session');
-        localStorage.removeItem('last_activity');
-        localStorage.removeItem('current_page');
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
-        localStorage.removeItem('student_token');
-        localStorage.removeItem('registrar_token');
-        localStorage.removeItem('faculty_token');
-        localStorage.removeItem('coordinator_token');
-        
-        // Clear axios headers
-        if (window.axios) {
-          delete window.axios.defaults.headers.common['Authorization'];
-        }
-
-        // Show success message
-        await Swal.fire({
-          icon: 'success',
-          title: 'Logged Out Successfully',
-          text: 'You have been logged out. Redirecting to login page...',
-          timer: 1500,
-          timerProgressBar: true,
-          showConfirmButton: false
-        });
-
-        // Redirect to login
-        window.location.href = '/login';
-
-      } catch (error) {
-        console.error('Logout error:', error);
-        
-        // Clear data anyway and redirect
+        await axios.post('/logout');
+        // Clear local storage
         localStorage.clear();
-        if (window.axios) {
-          delete window.axios.defaults.headers.common['Authorization'];
-        }
-        
-        await Swal.fire({
-          icon: 'info',
-          title: 'Logged Out',
-          text: 'Session cleared. Redirecting to login page...',
-          timer: 1500,
-          timerProgressBar: true,
-          showConfirmButton: false
-        });
-        
         window.location.href = '/login';
+      } catch (error) {
+        Swal.fire({
+          title: 'Error',
+          text: 'Failed to logout. Please try again.',
+          icon: 'error',
+          confirmButtonColor: '#dc2626'
+        });
       }
     }
   };
 
-  // Get unread notifications count from props
-  const unreadNotifications = notifications.filter(n => !n.read).length;
-
+  // HCI Principle 4: Consistency and standards - Consistent navigation structure
   const menuItems = [
-    { name: "Dashboard", href: "/student/dashboard", icon: FaHome },
-    { name: "Enroll", href: "/student/enroll", icon: FaUserGraduate },
-    { name: "Grades", href: "/student/grades", icon: FaChartBar },
-    { name: "Schedule", href: "/student/schedule", icon: FaCalendarAlt },
-    { name: "Notifications", href: "/student/notifications", icon: FaBell, badge: unreadNotifications },
-    { name: "Profile", href: "/student/profile", icon: FaUser },
+    {
+      path: '/student/dashboard',
+      icon: FaHome,
+      label: 'Dashboard',
+      description: 'Overview & Stats',
+      badge: null
+    },
+    {
+      path: '/student/schedule',
+      icon: FaCalendarAlt,
+      label: 'Schedule',
+      description: 'Class Timetable',
+      badge: null
+    },
+    {
+      path: '/student/grades',
+      icon: FaChartBar,
+      label: 'Grades',
+      description: 'Academic Records',
+      badge: null
+    },
+    {
+      path: '/student/enroll',
+      icon: FaUserGraduate,
+      label: 'Enrollment',
+      description: 'Course Registration',
+      badge: 'New'
+    },
+    {
+      path: '/student/notifications',
+      icon: FaBell,
+      label: 'Notifications',
+      description: 'Updates & Alerts',
+      badge: notifications.length > 0 ? notifications.length : null
+    },
+    {
+      path: '/student/profile',
+      icon: FaUser,
+      label: 'Profile',
+      description: 'Personal Info',
+      badge: null
+    }
   ];
 
-  const isActive = (href) => url === href;
+  // HCI Principle 1: Visibility of system status - Show current page
+  const isActive = (path) => {
+    return url === path || url.startsWith(path);
+  };
 
   return (
-    <div className={`fixed left-0 top-0 h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 text-white shadow-2xl z-50 border-r border-slate-700/50 transition-all duration-300 flex flex-col ${isCollapsed ? 'w-20' : 'w-72'}`}>
-      {/* Toggle Button */}
-      <button
-        onClick={handleToggle}
-        className="absolute -right-4 top-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white p-2 rounded-full shadow-lg transition-all duration-300 hover:scale-110 z-10"
-      >
-        {isCollapsed ? <FaBars className="w-4 h-4" /> : <FaTimes className="w-4 h-4" />}
-      </button>
-
-      {/* Logo/Brand Section */}
-      <div className="flex-shrink-0 p-4 border-b border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-blue-800/50 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg">
-              <img 
-                src="/onsts.png" 
-                alt="ONSTS Logo" 
-                className="w-8 h-8 object-contain"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'block';
-                }}
-              />
-              <FaSchool className="w-8 h-8 text-white hidden" />
+    <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-50 ${
+      isCollapsed ? 'w-20' : 'w-64'
+    }`}>
+      
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-purple-600">
+        {!isCollapsed && (
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+              <FaGraduationCap className="text-blue-600" />
             </div>
-            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full border-2 border-slate-900 animate-pulse"></div>
+            <div className="text-white">
+              <h1 className="font-bold text-lg">ONSTS</h1>
+              <p className="text-xs text-blue-100">Student Portal</p>
+            </div>
           </div>
-          {!isCollapsed && (
-            <div className="flex-1">
-              <h1 className="text-xl font-bold bg-gradient-to-r from-white via-blue-100 to-indigo-200 bg-clip-text text-transparent">
-                ONSTS
-              </h1>
-              <p className="text-slate-300 text-xs font-medium tracking-wide">Student Portal</p>
-            </div>
-          )}
-        </div>
+        )}
+        
+        {/* Toggle Button - HCI Principle 3: User control and freedom */}
+        <button
+          onClick={handleToggle}
+          className={`p-2 rounded-lg text-white hover:bg-white/20 transition-colors duration-200 ${
+            isCollapsed ? 'mx-auto' : ''
+          }`}
+          title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+        >
+          {isCollapsed ? <FaBars /> : <FaTimes />}
+        </button>
       </div>
 
       {/* Navigation Menu */}
-      <nav className={`flex-1 py-4 space-y-2 ${isCollapsed ? 'px-2' : 'px-4'}`}>
-        {menuItems.map((item) => {
-          const IconComponent = item.icon;
-          const active = isActive(item.href);
-          
-          return (
-            <div key={item.name} className="relative group">
+      <nav className="flex-1 py-4">
+        <div className="space-y-1 px-3">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            
+            return (
               <Link
-                href={item.href}
-                className={`flex items-center rounded-xl transition-all duration-300 relative overflow-hidden ${
-                  isCollapsed 
-                    ? 'justify-center p-3 mx-auto w-12 h-12' 
-                    : 'gap-3 px-4 py-3'
-                } ${
+                key={item.path}
+                href={item.path}
+                className={`group flex items-center px-3 py-3 rounded-lg text-sm font-medium transition-all duration-200 relative ${
                   active
-                    ? "bg-gradient-to-r from-blue-600/90 to-indigo-600/90 text-white shadow-lg backdrop-blur-sm border border-blue-400/30"
-                    : "text-slate-300 hover:bg-gradient-to-r hover:from-slate-800/50 hover:to-blue-800/30 hover:text-white hover:shadow-md"
-                } ${!isCollapsed && !active ? 'hover:translate-x-1' : ''}`}
+                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-600'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+                onMouseEnter={() => setHoveredItem(item.path)}
+                onMouseLeave={() => setHoveredItem(null)}
               >
-                <div className={`relative rounded-lg transition-all duration-300 ${
-                  isCollapsed ? 'p-1.5' : 'p-2'
-                } ${
-                  active 
-                    ? "bg-white/20 text-white shadow-md" 
-                    : "bg-slate-700/50 text-slate-400 group-hover:bg-blue-600/30 group-hover:text-white"
-                }`}>
-                  <IconComponent className="w-4 h-4" />
-                  {item.badge && item.badge > 0 && (
-                    <div className="absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-pink-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold shadow-md">
-                      {item.badge > 9 ? '9+' : item.badge}
-                    </div>
-                  )}
-                </div>
-                
-                {!isCollapsed && (
-                  <>
-                    <span className={`font-medium text-sm ${active ? "text-white" : "group-hover:text-white"}`}>
-                      {item.name}
-                    </span>
-                    {item.badge && item.badge > 0 && !active && (
-                      <div className="ml-auto bg-gradient-to-r from-red-500 to-pink-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold shadow-md">
-                        {item.badge > 9 ? '9+' : item.badge}
-                      </div>
-                    )}
-                    {active && (
-                      <div className="absolute right-3 w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                    )}
-                  </>
+                {/* Active Indicator */}
+                {active && (
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 rounded-r-full"></div>
                 )}
                 
-                {/* Hover effect background */}
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 to-indigo-600/0 group-hover:from-blue-600/10 group-hover:to-indigo-600/10 transition-all duration-300 rounded-xl"></div>
+                {/* Icon */}
+                <Icon className={`flex-shrink-0 ${isCollapsed ? 'mx-auto' : 'mr-3'} text-lg ${
+                  active ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
+                }`} />
+                
+                {/* Label and Description */}
+                {!isCollapsed && (
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="truncate">{item.label}</span>
+                      {item.badge && (
+                        <span className={`ml-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none rounded-full ${
+                          typeof item.badge === 'number'
+                            ? 'text-white bg-red-500'
+                            : 'text-blue-700 bg-blue-100'
+                        }`}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">{item.description}</p>
+                  </div>
+                )}
+
+                {/* Hover Arrow */}
+                {!isCollapsed && !active && (
+                  <FaChevronRight className={`ml-2 text-xs text-gray-400 transition-transform duration-200 ${
+                    hoveredItem === item.path ? 'translate-x-1' : ''
+                  }`} />
+                )}
+
+                {/* Tooltip for collapsed state */}
+                {isCollapsed && (
+                  <div className="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+                    <div className="font-medium">{item.label}</div>
+                    <div className="text-xs text-gray-300">{item.description}</div>
+                    {/* Tooltip Arrow */}
+                    <div className="absolute top-1/2 left-0 transform -translate-y-1/2 -translate-x-1 border-4 border-transparent border-r-gray-900"></div>
+                  </div>
+                )}
               </Link>
-              
-              {/* Tooltip for collapsed state */}
-              {isCollapsed && (
-                <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-slate-800 text-white px-2 py-1 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap z-50">
-                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1 w-2 h-2 bg-slate-800 rotate-45"></div>
-                  {item.name}
-                  {item.badge && item.badge > 0 && (
-                    <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                      {item.badge > 9 ? '9+' : item.badge}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </nav>
 
-      {/* User Info & Logout Section */}
-      <div className={`flex-shrink-0 border-t border-slate-700/50 bg-gradient-to-r from-slate-800/30 to-blue-800/30 backdrop-blur-sm ${isCollapsed ? 'p-2' : 'p-4'}`}>
-        {auth?.user && !isCollapsed && (
-          <div className="mb-3 p-3 bg-gradient-to-r from-slate-700/50 to-blue-700/30 rounded-xl backdrop-blur-sm border border-slate-600/30 shadow-lg">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                  <span className="text-white font-bold text-sm">
-                    {auth.user.firstname?.[0]}{auth.user.lastname?.[0]}
-                  </span>
-                </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-slate-900"></div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-medium text-sm truncate">
-                  {auth.user.firstname} {auth.user.lastname}
-                </p>
-                <p className="text-slate-300 text-xs">Student Account</p>
-              </div>
-            </div>
+      {/* Footer Section */}
+      <div className="border-t border-gray-200 p-4">
+        {/* Help & Settings - HCI Principle 10: Help and documentation */}
+        {!isCollapsed && (
+          <div className="space-y-2 mb-4">
+            <Link
+              href="/help"
+              className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+            >
+              <FaQuestionCircle className="mr-3 text-gray-400" />
+              Help & Support
+            </Link>
+            <Link
+              href="/student/settings"
+              className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+            >
+              <FaCog className="mr-3 text-gray-400" />
+              Settings
+            </Link>
           </div>
         )}
 
-        {auth?.user && isCollapsed && (
-          <div className="mb-2 flex justify-center">
-            <div className="relative group">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <span className="text-white font-bold text-sm">
-                  {auth.user.firstname?.[0]}{auth.user.lastname?.[0]}
-                </span>
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-slate-900"></div>
-              
-              {/* Tooltip for collapsed user info */}
-              <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-slate-800 text-white px-2 py-1 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap z-50">
-                <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1 w-2 h-2 bg-slate-800 rotate-45"></div>
-                <div>
-                  <p className="font-medium text-xs">{auth.user.firstname} {auth.user.lastname}</p>
-                  <p className="text-xs text-slate-300">Student</p>
-                </div>
-              </div>
+        {/* Logout Button */}
+        <button
+          onClick={handleLogout}
+          className={`w-full flex items-center px-3 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 group ${
+            isCollapsed ? 'justify-center' : ''
+          }`}
+          title="Logout"
+        >
+          <FaSignOutAlt className={`${isCollapsed ? '' : 'mr-3'} group-hover:scale-110 transition-transform duration-200`} />
+          {!isCollapsed && <span>Logout</span>}
+        </button>
+
+        {/* Status Indicator */}
+        {!isCollapsed && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className="flex items-center text-xs text-gray-500">
+              <FaCircle className="mr-2 text-green-500 animate-pulse" />
+              <span>Online</span>
             </div>
           </div>
         )}
-
-        <div className="relative group">
-          <button
-            onClick={handleLogout}
-            className={`group flex items-center rounded-xl text-red-300 hover:bg-gradient-to-r hover:from-red-600/20 hover:to-pink-600/20 hover:text-white transition-all duration-300 w-full border border-red-500/20 hover:border-red-400/40 shadow-md hover:shadow-lg ${
-              isCollapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3'
-            }`}
-          >
-            <div className={`rounded-lg bg-red-500/20 text-red-400 group-hover:bg-red-500/30 group-hover:text-white transition-all duration-300 ${
-              isCollapsed ? 'p-1.5' : 'p-2'
-            }`}>
-              <FaSignOutAlt className="w-4 h-4" />
-            </div>
-            {!isCollapsed && (
-              <span className="font-medium text-sm group-hover:text-white">Sign Out</span>
-            )}
-          </button>
-          
-          {/* Tooltip for collapsed logout */}
-          {isCollapsed && (
-            <div className="absolute left-full ml-3 top-1/2 transform -translate-y-1/2 bg-slate-800 text-white px-2 py-1 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap z-50">
-              <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1 w-2 h-2 bg-slate-800 rotate-45"></div>
-              Sign Out
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

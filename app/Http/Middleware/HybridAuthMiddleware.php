@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Middleware;
 
 use Closure;
@@ -46,9 +45,9 @@ class HybridAuthMiddleware
         // Check for Bearer token in Authorization header
         $token = $request->bearerToken();
         
-        // If no Bearer token in header, check for token in session or cookies
+        // If no Bearer token in header, check for token in session 
         if (!$token) {
-            $token = $request->session()->get('auth_token') ?? $request->cookie('auth_token');
+            $token = $request->session()->get('auth_token');
         }
         
         if ($token) {

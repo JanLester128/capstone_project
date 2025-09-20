@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -26,9 +27,51 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropForeign(['assigned_strand_id']);
-            $table->dropIndex(['role', 'assigned_strand_id']);
-            $table->dropColumn(['assigned_strand_id', 'is_coordinator']);
+            // Try to drop foreign key and index safely
+            try {
+                if (Schema::hasColumn('users', 'assigned_strand_id')) {
+                    // Check if foreign key exists by querying information_schema
+                    $foreignKeyExists = DB::select("
+                        SELECT CONSTRAINT_NAME 
+                        FROM information_schema.KEY_COLUMN_USAGE 
+                        WHERE TABLE_SCHEMA = DATABASE() 
+                        AND TABLE_NAME = 'users' 
+                        AND CONSTRAINT_NAME = 'users_assigned_strand_id_foreign'
+                    ");
+                    
+                    if (!empty($foreignKeyExists)) {
+                        $table->dropForeign(['assigned_strand_id']);
+                    }
+                    
+                    // Check if index exists
+                    $indexExists = DB::select("
+                        SELECT INDEX_NAME 
+                        FROM information_schema.STATISTICS 
+                        WHERE TABLE_SCHEMA = DATABASE() 
+                        AND TABLE_NAME = 'users' 
+                        AND INDEX_NAME = 'users_role_assigned_strand_id_index'
+                    ");
+                    
+                    if (!empty($indexExists)) {
+                        $table->dropIndex(['role', 'assigned_strand_id']);
+                    }
+                }
+            } catch (\Exception $e) {
+                // Silently continue if foreign key or index doesn't exist
+            }
+            
+            // Check if columns exist before dropping
+            $columnsToDrop = [];
+            if (Schema::hasColumn('users', 'assigned_strand_id')) {
+                $columnsToDrop[] = 'assigned_strand_id';
+            }
+            if (Schema::hasColumn('users', 'is_coordinator')) {
+                $columnsToDrop[] = 'is_coordinator';
+            }
+            
+            if (!empty($columnsToDrop)) {
+                $table->dropColumn($columnsToDrop);
+            }
         });
     }
 };

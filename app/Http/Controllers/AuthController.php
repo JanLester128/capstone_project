@@ -5,24 +5,37 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Inertia\Inertia;
 use App\Models\User;
 use App\Models\Student;
-use Inertia\Inertia;
+use App\Models\Registrar;
+use App\Models\Coordinator;
+use App\Models\SchoolYear;
 use Laravel\Sanctum\PersonalAccessToken;
-use Illuminate\Support\Facades\Log;
+use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Support\Facades\Cache;
 
+/**
+ * AuthController handles user authentication and session management.
+ */
 class AuthController extends Controller
 {
+    /**
+     * Create a new AuthController instance.
+     */
     public function __construct()
     {
         // Remove guest middleware to allow login requests
     }
 
     /**
-     * HCI Principle 1: Visibility of system status
-     * Handle root URL access with clear authentication flow
+     * Handle root URL access with clear authentication flow.
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function handleRootAccess()
     {
@@ -36,10 +49,12 @@ class AuthController extends Controller
     }
 
     /**
-     * HCI Principle 7: Flexibility and efficiency of use
-     * Get dashboard route based on user role
+     * Get dashboard route based on user role.
+     *
+     * @param string $role
+     * @return string
      */
-    private function getDashboardRoute($role)
+    private function getDashboardRoute(string $role)
     {
         $routes = [
             'registrar' => '/registrar/dashboard',
@@ -52,8 +67,10 @@ class AuthController extends Controller
     }
 
     /**
-     * HCI Principle 9: Help users recognize, diagnose, and recover from errors
-     * Unified login with clear error messages
+     * Unified login with clear error messages.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
      */
     public function login(Request $request)
     {
@@ -179,7 +196,9 @@ class AuthController extends Controller
                 ($user->password_change_required || !$user->password_changed || $user->plain_password)) {
                 
                 // Generate unified token for password change authentication
-                $token = $user->createToken('auth_token')->plainTextToken;
+                /** @var \App\Models\User $user */
+                $user = $user;
+                $token = /** @var \Laravel\Sanctum\HasApiTokens $user */ $user->createToken('auth_token')->plainTextToken;
                 $sessionId = 'session_' . time() . '_' . uniqid();
                 
                 // Store session in cache
@@ -210,7 +229,10 @@ class AuthController extends Controller
             }
             
             // Generate unified token and session
-            $token = $user->createToken('auth_token')->plainTextToken;
+            $user = $user;
+            /** @var \App\Models\User $user */
+            /** @var \Laravel\Sanctum\HasApiTokens $user */
+            $token = /** @var \Laravel\Sanctum\HasApiTokens $user */ $user->createToken('auth_token')->plainTextToken;
             $sessionId = 'session_' . time() . '_' . uniqid();
             
             // Store session in cache for single session enforcement
@@ -261,8 +283,10 @@ class AuthController extends Controller
     }
 
     /**
-     * HCI Principle 1: Visibility of system status
-     * Validate session with clear feedback
+     * Validate session with clear feedback.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function validateSession(Request $request)
     {
@@ -319,8 +343,10 @@ class AuthController extends Controller
     }
 
     /**
-     * HCI Principle 3: User control and freedom
-     * Clear logout functionality
+     * Clear logout functionality.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
      */
     public function logout(Request $request)
     {
@@ -390,7 +416,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Student registration
+     * Student registration.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
      */
     public function registerStudent(Request $request)
     {
@@ -460,7 +489,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Student login - separate endpoint for students
+     * Student login - separate endpoint for students.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
      */
     public function loginStudent(Request $request)
     {
@@ -528,7 +560,10 @@ class AuthController extends Controller
             }
             
             // Generate unified token and session
-            $token = $user->createToken('auth_token')->plainTextToken;
+            $user = $user;
+            /** @var \App\Models\User $user */
+            /** @var \Laravel\Sanctum\HasApiTokens $user */
+            $token = /** @var \Laravel\Sanctum\HasApiTokens $user */ $user->createToken('auth_token')->plainTextToken;
             $sessionId = 'session_' . time() . '_' . uniqid();
             
             // Store session in cache for single session enforcement
@@ -580,7 +615,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Show a specific student
+     * Show a specific student.
+     *
+     * @param int $id
+     * @return \Inertia\Response
      */
     public function showStudent($id)
     {
@@ -593,7 +631,9 @@ class AuthController extends Controller
     }
 
     /**
-     * List all students
+     * List all students.
+     *
+     * @return \Inertia\Response
      */
     public function listStudents()
     {
@@ -604,7 +644,11 @@ class AuthController extends Controller
     }
 
     /**
-     * Update a student
+     * Update a student.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function updateStudent(Request $request, $id)
     {
@@ -614,7 +658,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Delete a student
+     * Delete a student.
+     *
+     * @param int $id
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function deleteStudent($id)
     {
@@ -624,7 +671,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Change password for Faculty
+     * Change password for Faculty.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function changePasswordFaculty(Request $request)
     {
@@ -676,7 +726,10 @@ class AuthController extends Controller
     }
 
     /**
-     * Change password for Coordinator
+     * Change password for Coordinator.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
      */
     public function changePasswordCoordinator(Request $request)
     {

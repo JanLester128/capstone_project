@@ -23,10 +23,12 @@ class User extends Authenticatable
         'middlename',
         'email',
         'role',
+        'status',
         'password',
         'plain_password',
         'assigned_strand_id',
         'is_coordinator',
+        'is_disabled',
         'password_changed',
         'password_change_required',
     ];
@@ -50,6 +52,9 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'is_coordinator' => 'boolean',
+        'is_disabled' => 'boolean',
+        'password_change_required' => 'boolean',
     ];
 
     // Optional relationships if needed

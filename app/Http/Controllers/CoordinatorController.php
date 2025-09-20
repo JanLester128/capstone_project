@@ -3,6 +3,16 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Inertia\Inertia;
 use App\Models\Student;
 use App\Models\StudentPersonalInfo;
 use App\Models\Section;
@@ -12,7 +22,7 @@ use App\Models\Enrollment;
 use App\Models\Grade;
 use App\Models\Semester;
 use App\Models\SchoolYear;
-use Inertia\Inertia;
+use Illuminate\Support\Facades\Schema;
 
 class CoordinatorController extends Controller
 {
@@ -38,63 +48,42 @@ class CoordinatorController extends Controller
             ]);
         }
 
-        // Helper function to process student data
+        // Helper to process a student (attach preferences and address)
         $processStudent = function ($student) {
-            // Process strand preferences from JSON field
-            $strandIds = json_decode($student->getAttributes()['strand_preferences'] ?? '[]', true);
-            \Log::info('Raw strand_preferences: ' . ($student->getAttributes()['strand_preferences'] ?? 'null'));
-            \Log::info('Decoded strand IDs: ' . json_encode($strandIds));
-            
-            if (!empty($strandIds) && is_array($strandIds)) {
-                $strands = Strand::whereIn('id', $strandIds)->get();
-                \Log::info('Found strands: ' . $strands->pluck('code')->toJson());
-                $student->strand_preferences = $strands->pluck('code')->toArray();
-                
-                // If no codes found, fall back to names
-                if (empty($student->strand_preferences)) {
-                    $student->strand_preferences = $strands->pluck('name')->toArray();
-                }
-            } else {
-                // Try alternative approaches if JSON decode fails
-                $rawPrefs = $student->getAttributes()['strand_preferences'];
-                if ($rawPrefs && is_string($rawPrefs)) {
-                    // Try parsing as comma-separated values
-                    $possibleIds = explode(',', str_replace([' ', '[', ']', '"'], '', $rawPrefs));
-                    $possibleIds = array_filter(array_map('intval', $possibleIds));
-                    
-                    if (!empty($possibleIds)) {
-                        $strands = Strand::whereIn('id', $possibleIds)->get();
-                        $student->strand_preferences = $strands->pluck('code')->toArray();
-                    } else {
-                        $student->strand_preferences = ['No preferences specified'];
-                    }
-                } else {
-                    $student->strand_preferences = ['No preferences specified'];
-                }
-            }
-            
-            // Ensure address is included
+            $preferences = \App\Models\StudentStrandPreference::with('strand')
+                ->where('student_id', $student->id) // use student_personal_info PK
+                ->orderBy('preference_order')
+                ->get();
+
+            $codes = $preferences->map(fn($p) => $p->strand?->code)->filter()->values();
+            $names = $preferences->map(fn($p) => $p->strand?->name)->filter()->values();
+            $student->strand_preferences = $codes->isNotEmpty() ? $codes->toArray() : ($names->isNotEmpty() ? $names->toArray() : ['No preferences specified']);
             $student->address = $student->address ?: 'No address provided';
             return $student;
         };
 
-        // Get pending students
-        $pendingStudents = Student::with(['user', 'strand', 'section'])
-            ->where('enrollment_status', 'pending')
-            ->get()
-            ->map($processStudent);
+        // Build lists by deriving status from enrollments (active school year)
+        $studentsAll = Student::with(['user', 'strand', 'section'])->get();
+        $pendingStudents = collect();
+        $approvedStudents = collect();
+        $rejectedStudents = collect();
 
-        // Get approved students  
-        $approvedStudents = Student::with(['user', 'strand', 'section'])
-            ->where('enrollment_status', 'approved')
-            ->get()
-            ->map($processStudent);
-
-        // Get rejected students
-        $rejectedStudents = Student::with(['user', 'strand', 'section'])
-            ->where('enrollment_status', 'rejected')
-            ->get()
-            ->map($processStudent);
+        foreach ($studentsAll as $student) {
+            $latest = DB::table('enrollments')
+                ->where('student_id', $student->user_id) // enrollments.student_id references users.id
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->orderByDesc('id')
+                ->first();
+            $status = $latest->status ?? 'pending';
+            $processed = $processStudent($student);
+            if ($status === 'approved') {
+                $approvedStudents->push($processed);
+            } elseif ($status === 'rejected') {
+                $rejectedStudents->push($processed);
+            } else {
+                $pendingStudents->push($processed);
+            }
+        }
 
         return Inertia::render('Faculty/Faculty_Enrollment', [
             'pendingStudents' => $pendingStudents,
@@ -102,7 +91,7 @@ class CoordinatorController extends Controller
             'rejectedStudents' => $rejectedStudents,
             'activeSchoolYear' => $activeSchoolYear,
             'auth' => [
-                'user' => auth()->user()
+                'user' => Auth::user()
             ]
         ]);
     }
@@ -125,43 +114,35 @@ class CoordinatorController extends Controller
             ]);
         }
 
-        // Get pending students
-        $pendingStudents = Student::with(['user', 'strand', 'section', 'strandPreferences.strand'])
-            ->where('enrollment_status', 'pending')
-            ->get()
-            ->map(function ($student) {
-                // Debug log to see what we're getting
-                \Log::info('Student data:', [
-                    'id' => $student->id,
-                    'address' => $student->address,
-                    'strand_preferences_count' => $student->strandPreferences->count(),
-                    'strand_preferences' => $student->strandPreferences->pluck('strand.code')->toArray()
-                ]);
-                
-                // Ensure address is included
-                $student->address = $student->address ?: 'No address provided';
-                return $student;
-            });
+        // Derive groups from enrollments (active SY)
+        $studentsAll = Student::with(['user', 'strand', 'section', 'strandPreferences.strand'])->get();
+        $pendingStudents = collect();
+        $approvedStudents = collect();
+        $rejectedStudents = collect();
 
-        // Get approved students  
-        $approvedStudents = Student::with(['user', 'strand', 'section', 'strandPreferences.strand'])
-            ->where('enrollment_status', 'approved')
-            ->get()
-            ->map(function ($student) {
-                // Ensure address is included
-                $student->address = $student->address ?: 'No address provided';
-                return $student;
-            });
+        foreach ($studentsAll as $student) {
+            $latest = DB::table('enrollments')
+                ->where('student_id', $student->user_id)
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->orderByDesc('id')
+                ->first();
 
-        // Get rejected students
-        $rejectedStudents = Student::with(['user', 'strand', 'section', 'strandPreferences.strand'])
-            ->where('enrollment_status', 'rejected')
-            ->get()
-            ->map(function ($student) {
-                // Ensure address is included
-                $student->address = $student->address ?: 'No address provided';
-                return $student;
-            });
+            Log::info('Student data:', [
+                'id' => $student->id,
+                'address' => $student->address,
+                'strand_preferences_count' => optional($student->strandPreferences)->count(),
+            ]);
+
+            $student->address = $student->address ?: 'No address provided';
+            $status = $latest->status ?? 'pending';
+            if ($status === 'approved') {
+                $approvedStudents->push($student);
+            } elseif ($status === 'rejected') {
+                $rejectedStudents->push($student);
+            } else {
+                $pendingStudents->push($student);
+            }
+        }
 
         return Inertia::render('Faculty/Faculty_Enrollment', [
             'pendingStudents' => $pendingStudents,
@@ -183,15 +164,19 @@ class CoordinatorController extends Controller
             return Inertia::render('Faculty/Faculty_Students', [
                 'enrolledStudents' => collect([]),
                 'auth' => [
-                    'user' => auth()->user()
+                    'user' => Auth::user()
                 ]
             ]);
         }
 
-        // Get enrolled students for the active school year only
-        $enrolledStudents = Student::with(['user', 'strand', 'section', 'schoolYear'])
-            ->where('enrollment_status', 'enrolled')
+        // Get enrolled students for the active school year only via enrollments
+        $enrolledUserIds = DB::table('enrollments')
             ->where('school_year_id', $activeSchoolYear->id)
+            ->where('status', 'enrolled')
+            ->pluck('student_id');
+
+        $enrolledStudents = Student::with(['user', 'strand', 'section', 'schoolYear'])
+            ->whereIn('user_id', $enrolledUserIds)
             ->get();
 
         return Inertia::render('Faculty/Faculty_Students', [
@@ -211,7 +196,7 @@ class CoordinatorController extends Controller
                 ];
             }),
             'auth' => [
-                'user' => auth()->user()
+                'user' => Auth::user()
             ]
         ]);
     }
@@ -225,39 +210,22 @@ class CoordinatorController extends Controller
             $student = Student::with(['user', 'strand', 'section', 'schoolYear'])
                 ->findOrFail($id);
 
-            // Process strand preferences from JSON field
-            $strandIds = json_decode($student->getAttributes()['strand_preferences'] ?? '[]', true);
-            \Log::info('Raw strand_preferences: ' . ($student->getAttributes()['strand_preferences'] ?? 'null'));
-            \Log::info('Decoded strand IDs: ' . json_encode($strandIds));
-            
-            if (!empty($strandIds) && is_array($strandIds)) {
-                $strands = Strand::whereIn('id', $strandIds)->get();
-                \Log::info('Found strands: ' . $strands->pluck('code')->toJson());
-                $student->strand_preferences = $strands->pluck('code')->toArray();
-                
-                // If no codes found, fall back to names
-                if (empty($student->strand_preferences)) {
-                    $student->strand_preferences = $strands->pluck('name')->toArray();
-                }
+            // Use student_strand_preferences table (student_id stores users.id)
+            $preferences = \App\Models\StudentStrandPreference::with('strand')
+                ->where('student_id', $student->id)
+                ->orderBy('preference_order')
+                ->get();
+
+            $codes = $preferences->map(fn($p) => $p->strand?->code)->filter()->values();
+            $names = $preferences->map(fn($p) => $p->strand?->name)->filter()->values();
+            if ($codes->isNotEmpty()) {
+                $student->strand_preferences = $codes->toArray();
+            } elseif ($names->isNotEmpty()) {
+                $student->strand_preferences = $names->toArray();
             } else {
-                // Try alternative approaches if JSON decode fails
-                $rawPrefs = $student->getAttributes()['strand_preferences'];
-                if ($rawPrefs && is_string($rawPrefs)) {
-                    // Try parsing as comma-separated values
-                    $possibleIds = explode(',', str_replace([' ', '[', ']', '"'], '', $rawPrefs));
-                    $possibleIds = array_filter(array_map('intval', $possibleIds));
-                    
-                    if (!empty($possibleIds)) {
-                        $strands = Strand::whereIn('id', $possibleIds)->get();
-                        $student->strand_preferences = $strands->pluck('code')->toArray();
-                    } else {
-                        $student->strand_preferences = ['No preferences specified'];
-                    }
-                } else {
-                    $student->strand_preferences = ['No preferences specified'];
-                }
+                $student->strand_preferences = ['No preferences specified'];
             }
-            
+
             // Clean up document paths - remove any duplicate enrollment_documents prefix
             if ($student->psa_birth_certificate) {
                 $student->psa_birth_certificate = str_replace('enrollment_documents/', '', $student->psa_birth_certificate);
@@ -274,8 +242,8 @@ class CoordinatorController extends Controller
 
             return response()->json($student);
         } catch (\Exception $e) {
-            \Log::error('Error fetching student details: ' . $e->getMessage());
-            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Error fetching student details: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json(['error' => 'Failed to fetch student details'], 500);
         }
     }
@@ -287,8 +255,8 @@ class CoordinatorController extends Controller
     {
         $user = $request->user();
         
-        // Find the coordinator record for the authenticated user
-        $coordinator = Coordinator::where('user_id', $user->id)->first();
+        // Get coordinator user data (coordinators are users with coordinator role)
+        $coordinator = $user->role === 'coordinator' || $user->is_coordinator ? $user : null;
         
         return Inertia::render('Faculty/Faculty_Profile', [
             'coordinator' => $coordinator
@@ -313,46 +281,56 @@ class CoordinatorController extends Controller
             return response()->json(['error' => 'Invalid strand selected'], 400);
         }
         
+        // Update student's assignments (no status write on personal info)
         $student->update([
-            'enrollment_status' => 'approved',
             'strand_id' => $strand->id,
             'section_id' => $validated['section_id'],
-            'coordinator_notes' => $validated['coordinator_notes'],
+            'coordinator_notes' => $validated['coordinator_notes'] ?? null,
             'reviewed_at' => now(),
-            'reviewed_by' => auth()->id()
+            'reviewed_by' => Auth::id()
         ]);
 
         // Get active school year
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
         
         if ($activeSchoolYear) {
-            // Get all subjects for the assigned strand
-            $strandSubjects = Subject::where('strand_id', $strand->id)
-                ->where('school_year_id', $activeSchoolYear->id)
+            // Get actual class schedules for the assigned section and strand
+            $sectionSchedules = DB::table('class')
+                ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                ->join('users', 'class.faculty_id', '=', 'users.id')
+                ->where('class.section_id', $validated['section_id'])
+                ->where('class.school_year_id', $activeSchoolYear->id)
+                ->where('subjects.strand_id', $strand->id)
+                ->select([
+                    'class.*',
+                    'subjects.code as subject_code',
+                    'subjects.name as subject_name',
+                    'users.firstname',
+                    'users.lastname'
+                ])
                 ->get();
 
-            // Create class records for each subject
-            foreach ($strandSubjects as $subject) {
-                $classRecord = \DB::table('class')->insertGetId([
-                    'section_id' => $validated['section_id'],
-                    'subject_id' => $subject->id,
-                    'faculty_id' => $subject->faculty_id,
-                    'day_of_week' => $subject->day_of_week ?: 'Monday',
-                    'start_time' => $subject->start_time ?: '08:00:00',
-                    'end_time' => $subject->end_time ?: '09:30:00',
-                    'room' => $subject->room ?: 'TBA',
-                    'semester' => $activeSchoolYear->semester ?? '1st Semester',
-                    'school_year' => ($activeSchoolYear->year_start ?? '2024') . '-' . ($activeSchoolYear->year_end ?? '2025'),
+            // Create class records for each actual schedule
+            foreach ($sectionSchedules as $schedule) {
+                $classRecord = DB::table('class')->insertGetId([
+                    'subject_id' => $schedule->subject_id,
+                    'faculty_id' => $schedule->faculty_id,
+                    'school_year_id' => $schedule->school_year_id,
+                    'day_of_week' => $schedule->day_of_week,
+                    'start_time' => $schedule->start_time,
+                    'end_time' => $schedule->end_time,
+                    'duration' => $schedule->duration ?? 90,
+                    'semester' => $schedule->semester,
+                    'room' => $schedule->room ?? 'TBA',
                     'is_active' => true,
+                    // COR-specific fields
                     'student_id' => $student->id,
-                    'subject_code' => $subject->code ?? 'N/A',
-                    'subject_name' => $subject->name ?? 'Unknown Subject',
-                    'strand_name' => $strand->name ?? 'Not Assigned',
+                    'subject_code' => $schedule->subject_code,
+                    'subject_name' => $schedule->subject_name,
+                    'strand_name' => $strand->name,
                     'registration_number' => 'REG' . str_pad($student->id, 6, '0', STR_PAD_LEFT),
                     'date_enrolled' => now()->toDateString(),
-                    'instructor_name' => $subject->faculty && $subject->faculty->user 
-                        ? $subject->faculty->user->firstname . ' ' . $subject->faculty->user->lastname 
-                        : 'TBA',
+                    'instructor_name' => $schedule->firstname . ' ' . $schedule->lastname,
                     'student_name' => $student->user->firstname . ' ' . $student->user->lastname,
                     'student_lrn' => $student->lrn ?? 'N/A',
                     'grade_level' => $student->grade_level ?? 'Grade 11',
@@ -361,13 +339,49 @@ class CoordinatorController extends Controller
                     'updated_at' => now()
                 ]);
 
-                // Add student to class_details table
-                \DB::table('class_details')->updateOrInsert(
+                Log::info('Class record created', ['class_id' => $classRecord]);
+
+                // Create enrollment record in enrollments table if it doesn't exist
+                $existing = DB::table('enrollments')
+                    ->where('student_id', $student->user_id)
+                    ->where('school_year_id', $activeSchoolYear->id)
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($existing) {
+                    DB::table('enrollments')->where('id', $existing->id)->update([
+                        'status' => 'approved',
+                        'coordinator_id' => Auth::id(),
+                        // prefer reviewed_at if exists, else date_enrolled
+                        (Schema::hasColumn('enrollments', 'reviewed_at') ? 'reviewed_at' : (Schema::hasColumn('enrollments', 'date_enrolled') ? 'date_enrolled' : 'updated_at')) => now(),
+                        'updated_at' => now(),
+                    ]);
+                    $enrollmentId = $existing->id;
+                } else {
+                    $insert = [
+                        'student_id' => $student->user_id,
+                        'school_year_id' => $activeSchoolYear->id,
+                        'status' => 'approved',
+                        'coordinator_id' => Auth::id(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                    if (Schema::hasColumn('enrollments', 'submitted_at')) $insert['submitted_at'] = now();
+                    if (Schema::hasColumn('enrollments', 'reviewed_at')) $insert['reviewed_at'] = now();
+                    if (!Schema::hasColumn('enrollments', 'submitted_at') && Schema::hasColumn('enrollments', 'date_enrolled')) $insert['date_enrolled'] = now();
+                    $enrollmentId = DB::table('enrollments')->insertGetId($insert);
+                }
+
+                // Add student to class_details table with proper enrollment reference
+                DB::table('class_details')->updateOrInsert(
                     [
                         'class_id' => $classRecord,
-                        'student_id' => $student->id
+                        'enrollment_id' => $enrollmentId
                     ],
                     [
+                        'section_id' => $validated['section_id'],
+                        'is_enrolled' => true,
+                        'enrolled_at' => now(),
                         'created_at' => now(),
                         'updated_at' => now()
                     ]
@@ -376,7 +390,7 @@ class CoordinatorController extends Controller
         }
 
         // Store notification in database
-        \DB::table('notifications')->insert([
+        DB::table('notifications')->insert([
             'student_id' => $student->id,
             'type' => 'enrollment',
             'status' => 'approved',
@@ -413,11 +427,33 @@ class CoordinatorController extends Controller
         ]);
 
         $student = Student::findOrFail($id);
-        
-        $student->update([
-            'enrollment_status' => 'rejected',
-            'coordinator_notes' => $validated['coordinator_notes'],
-        ]);
+
+        // Update enrollments table status to rejected for active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        if ($activeSchoolYear) {
+            $existing = DB::table('enrollments')
+                ->where('student_id', $student->user_id)
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->orderByDesc('id')
+                ->first();
+
+            if ($existing) {
+                DB::table('enrollments')->where('id', $existing->id)->update([
+                    'status' => 'rejected',
+                    'coordinator_id' => Auth::id(),
+                    'updated_at' => now(),
+                ]);
+            } else {
+                DB::table('enrollments')->insert([
+                    'student_id' => $student->user_id,
+                    'school_year_id' => $activeSchoolYear->id,
+                    'status' => 'rejected',
+                    'coordinator_id' => Auth::id(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
 
         // Send rejection notification email to student
         $this->sendEnrollmentNotification($student, 'rejected');
@@ -517,7 +553,7 @@ class CoordinatorController extends Controller
     {
         try {
             $validated = $request->validate([
-                'subjects' => 'required|array',
+                'subjects' => 'nullable|array',
                 'subjects.*' => 'exists:subjects,id'
             ]);
 
@@ -540,7 +576,7 @@ class CoordinatorController extends Controller
                 $existingEnrollment->update([
                     'strand_id' => $student->strand_id,
                     'status' => 'approved',
-                    'coordinator_id' => auth()->user()->faculty->id
+                    'coordinator_id' => Auth::user()->faculty->id
                 ]);
                 $enrollment = $existingEnrollment;
             } else {
@@ -550,34 +586,34 @@ class CoordinatorController extends Controller
                     'strand_id' => $student->strand_id,
                     'school_year_id' => $currentSchoolYear->id,
                     'status' => 'approved',
-                    'coordinator_id' => auth()->user()->faculty->id
+                    'coordinator_id' => Auth::user()->faculty->id
                 ]);
             }
 
-            // Clear existing subject assignments and add new ones
-            if (method_exists($enrollment, 'subjects')) {
+            // Clear existing subject assignments and add new ones (only if provided)
+            if (!empty($validated['subjects']) && method_exists($enrollment, 'subjects')) {
                 $enrollment->subjects()->detach(); // Remove existing subjects
                 foreach ($validated['subjects'] as $subjectId) {
                     $enrollment->subjects()->attach($subjectId);
                 }
             }
 
-            // Store COR data in class table for each selected subject
-            foreach ($validated['subjects'] as $subjectId) {
+            // Store COR data in class table for each selected subject (only if provided)
+            foreach (($validated['subjects'] ?? []) as $subjectId) {
                 $subject = Subject::find($subjectId);
                 
                 if ($subject) {
-                    \Log::info('Processing subject for enrollment', [
+                    Log::info('Processing subject for enrollment', [
                         'subject_id' => $subjectId,
                         'student_id' => $student->id,
                         'enrollment_id' => $enrollment->id
                     ]);
 
                     // Create class record with COR data
-                    $classRecord = \DB::table('class')->insertGetId([
-                        'section_id' => $student->section_id,
+                    $classRecord = DB::table('class')->insertGetId([
                         'subject_id' => $subjectId,
                         'faculty_id' => $subject->faculty_id,
+                        'school_year_id' => $subject->school_year_id,
                         'day_of_week' => $subject->day_of_week ?: 'Monday',
                         'start_time' => $subject->start_time ?: '08:00:00',
                         'end_time' => $subject->end_time ?: '09:30:00',
@@ -604,10 +640,10 @@ class CoordinatorController extends Controller
                         'updated_at' => now()
                     ]);
 
-                    \Log::info('Class record created', ['class_id' => $classRecord]);
+                    Log::info('Class record created', ['class_id' => $classRecord]);
 
                     // Add student to class_details table (list of officially enrolled students)
-                    \DB::table('class_details')->updateOrInsert(
+                    DB::table('class_details')->updateOrInsert(
                         [
                             'class_id' => $classRecord,
                             'student_id' => $student->id
@@ -618,12 +654,30 @@ class CoordinatorController extends Controller
                         ]
                     );
 
-                    \Log::info('Class details record created/updated');
+                    Log::info('Class details record created/updated');
                 }
             }
 
-            // Update student enrollment status
-            $student->update(['enrollment_status' => 'enrolled']);
+            // Update enrollments table status to enrolled
+            $latest = DB::table('enrollments')
+                ->where('student_id', $student->user_id)
+                ->where('school_year_id', $currentSchoolYear->id)
+                ->orderByDesc('id')
+                ->first();
+            if ($latest) {
+                DB::table('enrollments')->where('id', $latest->id)->update([
+                    'status' => 'enrolled',
+                    'updated_at' => now(),
+                ]);
+            } else {
+                DB::table('enrollments')->insert([
+                    'student_id' => $student->user_id,
+                    'school_year_id' => $currentSchoolYear->id,
+                    'status' => 'enrolled',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
             // Send notification email to student
             $this->sendEnrollmentNotification($student, 'approved', $enrollment);
@@ -631,8 +685,8 @@ class CoordinatorController extends Controller
             return redirect()->back()->with('success', 'Student enrolled successfully!');
             
         } catch (\Exception $e) {
-            \Log::error('Enrollment finalization error: ' . $e->getMessage());
-            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Enrollment finalization error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
             
             return redirect()->back()->with('error', 'Failed to finalize enrollment: ' . $e->getMessage());
         }
@@ -658,7 +712,7 @@ class CoordinatorController extends Controller
                 'sections' => $sections
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching sections and strands: ' . $e->getMessage());
+            Log::error('Error fetching sections and strands: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to fetch data'], 500);
         }
     }
@@ -690,7 +744,7 @@ class CoordinatorController extends Controller
                 'subjects' => $subjects
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching subjects for strand: ' . $e->getMessage());
+            Log::error('Error fetching subjects for strand: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to fetch subjects'], 500);
         }
     }
@@ -704,54 +758,114 @@ class CoordinatorController extends Controller
             $validated = $request->validate([
                 'strand' => 'required|string',
                 'section_id' => 'required|integer|exists:sections,id',
-                'subjects' => 'required|array',
-                'subjects.*' => 'integer|exists:subjects,id'
+                'subjects' => 'nullable|array',
+                'subjects.*' => 'exists:subjects,id',
             ]);
+
+            // Resolve strand by code or id
+            $strand = is_numeric($validated['strand'])
+                ? Strand::find($validated['strand'])
+                : Strand::where('code', $validated['strand'])->first();
+
+            if (!$strand) {
+                return redirect()->back()->with('error', 'Invalid strand selected.');
+            }
 
             $student = Student::findOrFail($id);
-            
-            // Find the strand by code
-            $strand = Strand::where('code', $validated['strand'])->first();
-            if (!$strand) {
-                return back()->withErrors(['strand' => 'Invalid strand selected']);
-            }
 
-            // Get active school year
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            if (!$activeSchoolYear) {
-                return back()->withErrors(['error' => 'No active school year found']);
-            }
-
-            // Update student with strand and section assignment
+            // Assign strand & section to the student
             $student->update([
-                'enrollment_status' => 'enrolled',
                 'strand_id' => $strand->id,
                 'section_id' => $validated['section_id'],
-                'school_year_id' => $activeSchoolYear->id,
-                'enrolled_at' => now(),
-                'enrolled_by' => auth()->id()
+                'reviewed_at' => now(),
+                'reviewed_by' => Auth::id(),
             ]);
 
-            // Create enrollment records for selected subjects
-            foreach ($validated['subjects'] as $subjectId) {
-                Enrollment::create([
-                    'student_id' => $student->id,
-                    'subject_id' => $subjectId,
-                    'school_year_id' => $activeSchoolYear->id,
-                    'semester' => $activeSchoolYear->current_semester ?? '1st Semester',
-                    'enrollment_date' => now(),
-                    'status' => 'enrolled'
-                ]);
+            // Active School Year
+            $activeSY = SchoolYear::where('is_active', true)->first();
+            if (!$activeSY) {
+                return redirect()->back()->with('error', 'REGISTRAR DID NOT ACTIVATE THE SCHOOL YEAR YET. Please contact the registrar to activate a school year first.');
             }
 
-            return redirect()->back()->with('success', 'Student enrollment finalized successfully!');
+            // Upsert enrollment (FK uses student_personal_info.id)
+            $enrollmentKey = [
+                'student_id' => $student->id,
+                'school_year_id' => $activeSY->id,
+            ];
+            $enrollmentData = [
+                'status' => 'approved',
+                'coordinator_id' => Auth::id(),
+                'updated_at' => now(),
+            ];
+            if (Schema::hasColumn('enrollments', 'strand_id')) {
+                $enrollmentData['strand_id'] = $strand->id;
+            }
+            if (Schema::hasColumn('enrollments', 'date_enrolled')) {
+                $enrollmentData['date_enrolled'] = now();
+            }
+            DB::table('enrollments')->updateOrInsert(
+                $enrollmentKey,
+                array_merge(['created_at' => now()], $enrollmentData)
+            );
+            $enrollmentId = DB::table('enrollments')
+                ->where($enrollmentKey)
+                ->orderByDesc('id')
+                ->value('id');
+
+            // If subjects were provided, attach and create COR class records
+            if (!empty($validated['subjects'])) {
+                foreach ($validated['subjects'] as $subjectId) {
+                    $subject = Subject::find($subjectId);
+                    if (!$subject) { continue; }
+
+                    // Create class record (COR)
+                    DB::table('class')->insert([
+                        'section_id' => $student->section_id,
+                        'subject_id' => $subject->id,
+                        'faculty_id' => $subject->faculty_id,
+                        'day_of_week' => $subject->day_of_week ?: 'Monday',
+                        'start_time' => $subject->start_time ?: '08:00:00',
+                        'end_time' => $subject->end_time ?: '09:30:00',
+                        'room' => $subject->room ?: 'TBA',
+                        'semester' => $activeSY->semester ?? '1st Semester',
+                        'school_year' => ($activeSY->year_start ?? '2024') . '-' . ($activeSY->year_end ?? '2025'),
+                        'is_active' => true,
+                        // COR details
+                        'student_id' => $student->id,
+                        'enrollment_id' => $enrollmentId,
+                        'subject_code' => $subject->code ?? 'N/A',
+                        'subject_name' => $subject->name ?? 'Unknown Subject',
+                        'strand_name' => $strand->name ?? 'N/A',
+                        'registration_number' => 'REG' . str_pad($enrollmentId, 6, '0', STR_PAD_LEFT),
+                        'date_enrolled' => now()->toDateString(),
+                        'instructor_name' => ($subject->faculty && $subject->faculty->user)
+                            ? ($subject->faculty->user->firstname . ' ' . $subject->faculty->user->lastname)
+                            : 'TBA',
+                        'student_name' => $student->user->firstname . ' ' . $student->user->lastname,
+                        'student_lrn' => $student->lrn ?? 'N/A',
+                        'grade_level' => $student->grade_level ?? 'Grade 11',
+                        'enrollment_status' => 'approved',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            // Finally mark enrollment as enrolled
+            DB::table('enrollments')->where('id', $enrollmentId)->update([
+                'status' => 'enrolled',
+                ...(Schema::hasColumn('enrollments', 'date_enrolled') ? ['date_enrolled' => now()] : []),
+                'updated_at' => now(),
+            ]);
+
+            return redirect()->back()->with('success', 'Student enrolled successfully!');
             
-        } catch (\Exception $e) {
-            \Log::error('Error finalizing enrollment: ' . $e->getMessage());
-            \Log::error('Request data: ' . json_encode($request->all()));
-            \Log::error('Student ID: ' . $id);
+        } catch (\Throwable $e) {
+            Log::error('Error finalizing enrollment (with assignment): ' . $e->getMessage());
+            Log::error('Request data: ' . json_encode($request->all()));
+            Log::error('Student ID: ' . $id);
             
-            return back()->withErrors(['error' => 'Failed to finalize enrollment: ' . $e->getMessage()]);
+            return redirect()->back()->with('error', 'Failed to finalize enrollment: ' . $e->getMessage());
         }
     }
 
@@ -806,7 +920,7 @@ class CoordinatorController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Error fetching subjects for strand: ' . $e->getMessage());
+            Log::error('Error fetching subjects for strand: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch subjects',
@@ -823,7 +937,7 @@ class CoordinatorController extends Controller
         try {
             $user = $student->user;
             if (!$user || !$user->email) {
-                \Log::warning('Cannot send notification - student has no email: ' . $student->id);
+                Log::warning('Cannot send notification - student has no email: ' . $student->id);
                 return;
             }
 
@@ -835,14 +949,14 @@ class CoordinatorController extends Controller
                 'subjects' => $enrollment && $enrollment->subjects ? $enrollment->subjects->pluck('name')->toArray() : []
             ];
 
-            \Mail::send('emails.enrollment_notification', $data, function ($message) use ($user, $status) {
+            Mail::send('emails.enrollment_notification', $data, function ($message) use ($user, $status) {
                 $message->to($user->email)
                     ->subject('Enrollment ' . ucfirst($status) . ' - ONSTS');
             });
 
-            \Log::info('Enrollment notification sent to: ' . $user->email);
+            Log::info('Enrollment notification sent to: ' . $user->email);
         } catch (\Exception $e) {
-            \Log::error('Failed to send enrollment notification: ' . $e->getMessage());
+            Log::error('Failed to send enrollment notification: ' . $e->getMessage());
         }
     }
 }

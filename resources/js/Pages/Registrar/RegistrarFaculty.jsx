@@ -351,20 +351,17 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
   };
 
   const handleToggleStatus = async (teacher) => {
-    const newStatus = teacher.status === 'faculty' ? 'coordinator' : 'faculty';
-    const statusText = newStatus === 'coordinator' ? 'Coordinator' : 'Faculty';
-    
     const result = await Swal.fire({
       title: 'Change Faculty Status',
       html: `
         <div class="text-left">
-          <p class="mb-3">Change <strong>${teacher.name}</strong>'s status to <strong>${statusText}</strong>?</p>
+          <p class="mb-3">Change <strong>${teacher.name}</strong>'s status to ${teacher.status === 'coordinator' ? 'Faculty' : 'Coordinator'}?</p>
           <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
-            <h4 class="font-semibold text-blue-800 mb-2">${statusText} Access Includes:</h4>
+            <h4 class="font-semibold text-blue-800 mb-2">${teacher.status === 'coordinator' ? 'Faculty' : 'Coordinator'} Access Includes:</h4>
             <ul class="text-sm text-blue-700 space-y-1">
-              ${newStatus === 'coordinator' ? 
-                '<li>• Enrollment Management</li><li>• Student Assignment</li><li>• All Faculty Features</li>' :
-                '<li>• Schedule Management</li><li>• Class Lists</li><li>• Grade Input</li>'
+              ${teacher.status === 'coordinator' ? 
+                '<li>• Schedule Management</li><li>• Class Lists</li><li>• Grade Input</li>' :
+                '<li>• Enrollment Management</li><li>• Student Assignment</li><li>• All Faculty Features</li>'
               }
             </ul>
           </div>
@@ -372,32 +369,41 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
       `,
       icon: 'question',
       showCancelButton: true,
-      confirmButtonText: `Change to ${statusText}`,
+      confirmButtonText: `Change to ${teacher.status === 'coordinator' ? 'Faculty' : 'Coordinator'}`,
       cancelButtonText: 'Cancel',
       confirmButtonColor: '#3b82f6'
     });
 
     if (result.isConfirmed) {
       // Use Inertia router instead of axios
-      router.post(`/registrar/faculty/${teacher.faculty_id}/toggle-status`, {}, {
+      router.post(`/registrar/faculty/${teacher.id}/toggle-status`, {}, {
         onSuccess: (page) => {
-          const newStatus = page.props.flash?.new_status || (teacher.status === 'faculty' ? 'coordinator' : 'faculty');
+          // Get the new status from the response or calculate it
+          const newStatus = page.props.flash?.new_status || (teacher.status === 'coordinator' ? 'faculty' : 'coordinator');
+          const newIsCoordinator = newStatus === 'coordinator';
           
           // Update the teacher in the local state
           setTeachers(prev => prev.map(t => 
-            t.faculty_id === teacher.faculty_id 
-              ? { ...t, status: newStatus }
+            t.id === teacher.id 
+              ? { 
+                  ...t, 
+                  status: newStatus,
+                  is_coordinator: newIsCoordinator
+                }
               : t
           ));
 
           Swal.fire({
             title: 'Success!',
-            text: `${teacher.firstname} ${teacher.lastname} is now a ${newStatus}`,
+            text: `${teacher.name} is now a ${newStatus === 'coordinator' ? 'Coordinator' : 'Faculty member'}`,
             icon: 'success',
-            confirmButtonColor: '#10b981'
+            confirmButtonColor: '#10b981',
+            timer: 2000,
+            showConfirmButton: false
           });
         },
-        onError: () => {
+        onError: (errors) => {
+          console.error('Toggle status error:', errors);
           Swal.fire({
             title: 'Error!',
             text: 'Failed to update faculty status. Please try again.',

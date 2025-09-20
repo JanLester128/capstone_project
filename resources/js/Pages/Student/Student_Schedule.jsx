@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { usePage } from "@inertiajs/react";
+import { Head, usePage } from "@inertiajs/react";
 import Student_Sidebar from "../layouts/Student_Sidebar";
 import { 
   FaCalendarAlt, 
@@ -10,34 +10,66 @@ import {
   FaCheckCircle,
   FaTimesCircle,
   FaInfoCircle,
-  FaSpinner
+  FaSpinner,
+  FaUser,
+  FaDownload,
+  FaPrint,
+  FaSearch,
+  FaGraduationCap,
+  FaCalendarWeek,
+  FaPlay,
+  FaPause,
+  FaStop
 } from "react-icons/fa";
 
 export default function Student_Schedule() {
   const { auth } = usePage().props;
   const [isCollapsed, setIsCollapsed] = useState(() => {
-    // Get initial state from localStorage
     const saved = localStorage.getItem('student_sidebar_collapsed');
     return saved ? JSON.parse(saved) : false;
   });
 
-  // State for dynamic schedule data
-  const [scheduleData, setScheduleData] = useState({});
-  const [studentInfo, setStudentInfo] = useState(null);
-  const [schoolYear, setSchoolYear] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [enrollmentStatus, setEnrollmentStatus] = useState('pending');
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [viewMode, setViewMode] = useState('week');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [enrollmentStatus, setEnrollmentStatus] = useState('enrolled');
 
   useEffect(() => {
-    // TODO: Replace with actual API calls
-    // Fetch schedule data, enrollment status, and notifications
-    setLoading(false);
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
-  // TODO: Replace with actual schedule data from API
-  const weeklySchedule = [];
+  const handleSidebarToggle = (collapsed) => {
+    setIsCollapsed(collapsed);
+  };
+
+  const weeklySchedule = [
+    {
+      day: 'Monday',
+      classes: [
+        { id: 1, subject: 'Mathematics', time: '8:00 AM - 9:00 AM', room: 'Room 101', teacher: 'Ms. Johnson', type: 'Core', color: 'blue' },
+        { id: 2, subject: 'Science', time: '9:15 AM - 10:15 AM', room: 'Lab 201', teacher: 'Mr. Smith', type: 'Core', color: 'green' },
+        { id: 3, subject: 'English', time: '10:30 AM - 11:30 AM', room: 'Room 102', teacher: 'Mrs. Davis', type: 'Core', color: 'purple' }
+      ]
+    },
+    {
+      day: 'Tuesday',
+      classes: [
+        { id: 4, subject: 'Filipino', time: '8:00 AM - 9:00 AM', room: 'Room 103', teacher: 'Ms. Cruz', type: 'Core', color: 'orange' },
+        { id: 5, subject: 'Social Studies', time: '9:15 AM - 10:15 AM', room: 'Room 104', teacher: 'Mr. Garcia', type: 'Core', color: 'red' }
+      ]
+    },
+    {
+      day: 'Wednesday',
+      classes: [
+        { id: 6, subject: 'Mathematics', time: '8:00 AM - 9:00 AM', room: 'Room 101', teacher: 'Ms. Johnson', type: 'Core', color: 'blue' },
+        { id: 7, subject: 'Physical Education', time: '2:00 PM - 3:00 PM', room: 'Gymnasium', teacher: 'Coach Martinez', type: 'Elective', color: 'teal' }
+      ]
+    }
+  ];
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -50,38 +82,29 @@ export default function Student_Schedule() {
     switch (enrollmentStatus) {
       case 'pending':
         return {
-          icon: <FaClock className="w-8 h-8 text-yellow-600" />,
-          title: "Schedule Not Available",
-          message: "Your enrollment is still pending approval. Once your enrollment is approved by the coordinator, your class schedule will be available here.",
-          bgColor: "bg-yellow-50",
-          borderColor: "border-yellow-200",
+          icon: <FaClock className="w-12 h-12 text-yellow-500" />,
+          title: "Schedule Pending Approval",
+          message: "Your enrollment is under review. Once approved, your class schedule will be available here.",
+          bgColor: "bg-gradient-to-br from-yellow-50 to-orange-50",
+          borderColor: "border-yellow-300",
           textColor: "text-yellow-800"
-        };
-      case 'rejected':
-        return {
-          icon: <FaTimesCircle className="w-8 h-8 text-red-600" />,
-          title: "Enrollment Required",
-          message: "Your enrollment application was not approved. Please submit a new enrollment application to access your class schedule.",
-          bgColor: "bg-red-50",
-          borderColor: "border-red-200",
-          textColor: "text-red-800"
         };
       case 'enrolled':
         return {
-          icon: <FaCheckCircle className="w-8 h-8 text-green-600" />,
-          title: "Welcome to Your Schedule",
-          message: "Your enrollment has been approved! Below is your official class schedule for this semester.",
-          bgColor: "bg-green-50",
-          borderColor: "border-green-200",
+          icon: <FaCheckCircle className="w-12 h-12 text-green-500" />,
+          title: "Schedule Active",
+          message: "Welcome to your official class schedule! All classes are confirmed for the semester.",
+          bgColor: "bg-gradient-to-br from-green-50 to-emerald-50",
+          borderColor: "border-green-300",
           textColor: "text-green-800"
         };
       default:
         return {
-          icon: <FaExclamationTriangle className="w-8 h-8 text-blue-600" />,
+          icon: <FaExclamationTriangle className="w-12 h-12 text-blue-500" />,
           title: "Enrollment Required",
-          message: "Please complete your enrollment application first to access your class schedule.",
-          bgColor: "bg-blue-50",
-          borderColor: "border-blue-200",
+          message: "Please complete your enrollment to access your class schedule.",
+          bgColor: "bg-gradient-to-br from-blue-50 to-indigo-50",
+          borderColor: "border-blue-300",
           textColor: "text-blue-800"
         };
     }
@@ -89,252 +112,183 @@ export default function Student_Schedule() {
 
   const statusInfo = getStatusMessage();
 
+  const getSubjectColor = (color) => {
+    const colors = {
+      blue: 'bg-blue-100 border-blue-300 text-blue-800',
+      green: 'bg-green-100 border-green-300 text-green-800',
+      purple: 'bg-purple-100 border-purple-300 text-purple-800',
+      orange: 'bg-orange-100 border-orange-300 text-orange-800',
+      red: 'bg-red-100 border-red-300 text-red-800',
+      teal: 'bg-teal-100 border-teal-300 text-teal-800'
+    };
+    return colors[color] || 'bg-gray-100 border-gray-300 text-gray-800';
+  };
+
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-      <Student_Sidebar onToggle={setIsCollapsed} />
-      
-      <div className={`flex-1 transition-all duration-300 p-8 ${isCollapsed ? 'ml-20' : 'ml-72'}`}>
-        {/* Header - Enhanced with Breadcrumbs and Status */}
-        <div className="mb-8">
-          {/* Breadcrumb Navigation - Heuristic 3: User Control */}
-          <nav className="text-gray-500 text-sm mb-4" aria-label="Breadcrumb">
-            <ol className="flex items-center space-x-2">
-              <li><span>Home</span></li>
-              <li><span className="mx-2">/</span></li>
-              <li><span className="text-gray-800 font-medium">Class Schedule</span></li>
-            </ol>
-          </nav>
+    <>
+      <Head title="Class Schedule - ONSTS" />
+      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+        <Student_Sidebar onToggle={handleSidebarToggle} />
+        
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
           
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-                Class Schedule
-              </h1>
-              <p className="text-gray-600">Your weekly class schedule and timetable</p>
-              {/* System Status - Heuristic 1: Visibility of System Status */}
-              <div className="flex items-center gap-4 mt-2">
-                <div className="flex items-center gap-2 text-green-600 text-sm">
-                  <FaCheckCircle className="w-4 h-4" />
-                  <span>Schedule synchronized</span>
+          <header className="bg-white shadow-lg border-b border-gray-200 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                  <FaCalendarAlt className="text-white text-xl" />
                 </div>
-                <div className="flex items-center gap-2 text-blue-600 text-sm">
-                  <FaCalendarAlt className="w-4 h-4" />
-                  <span>Academic Year 2024-2025</span>
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Class Schedule</h1>
+                  <p className="text-gray-600 flex items-center space-x-2">
+                    <FaClock className="text-sm" />
+                    <span>{currentTime.toLocaleDateString('en-US', { 
+                      weekday: 'long', 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })}</span>
+                    <span className="text-gray-400">•</span>
+                    <span>{currentTime.toLocaleTimeString('en-US', { 
+                      hour: '2-digit', 
+                      minute: '2-digit' 
+                    })}</span>
+                  </p>
                 </div>
               </div>
+              
+              <div className="flex items-center space-x-3">
+                <button className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200">
+                  <FaDownload className="mr-2" />
+                  Export
+                </button>
+                <button className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200">
+                  <FaPrint className="mr-2" />
+                  Print
+                </button>
+              </div>
             </div>
-            
-            <div className="flex items-center gap-4">
-              {/* Notification Indicator - Enhanced */}
-              {unreadCount > 0 && (
-                <div className="flex items-center gap-3 bg-blue-100 border border-blue-200 rounded-lg px-4 py-2 animate-pulse">
-                  <FaInfoCircle className="w-5 h-5 text-blue-600" />
-                  <span className="text-blue-800 font-medium">
-                    {unreadCount} new notification{unreadCount > 1 ? 's' : ''}
-                  </span>
+          </header>
+
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-7xl mx-auto space-y-6">
+              
+              {enrollmentStatus !== 'enrolled' && (
+                <div className={`${statusInfo.bgColor} border-2 ${statusInfo.borderColor} rounded-xl p-8 shadow-lg`}>
+                  <div className="text-center space-y-4">
+                    <div className="flex justify-center">{statusInfo.icon}</div>
+                    <div>
+                      <h2 className={`text-2xl font-bold ${statusInfo.textColor}`}>{statusInfo.title}</h2>
+                      <p className={`text-lg ${statusInfo.textColor} mt-2`}>{statusInfo.message}</p>
+                    </div>
+                  </div>
                 </div>
               )}
-              
-              {/* Quick Actions - Heuristic 7: Flexibility and Efficiency */}
-              <div className="hidden md:flex items-center gap-2">
-                <button className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-200 transition-colors text-sm">
-                  <FaCalendarAlt className="w-4 h-4" />
-                  <span>Export Schedule</span>
-                </button>
-                <button className="flex items-center gap-2 bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors text-sm">
-                  <FaInfoCircle className="w-4 h-4" />
-                  <span>Help</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Status Message */}
-        <div className={`mb-8 ${statusInfo.bgColor} ${statusInfo.borderColor} border-2 rounded-2xl shadow-lg p-8`}>
-          <div className="flex items-center gap-6">
-            <div className="flex-shrink-0">
-              {statusInfo.icon}
-            </div>
-            <div className="flex-1">
-              <h2 className={`text-2xl font-bold ${statusInfo.textColor} mb-2`}>
-                {statusInfo.title}
-              </h2>
-              <p className={`${statusInfo.textColor} text-lg leading-relaxed`}>
-                {statusInfo.message}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Loading State */}
-        {loading && (
-          <div className="flex justify-center items-center py-12">
-            <FaSpinner className="w-8 h-8 text-blue-600 animate-spin" />
-            <span className="ml-3 text-lg text-gray-600">Loading your schedule...</span>
-          </div>
-        )}
-
-        {/* COR Information - Show if enrollment is approved and schedule data exists */}
-        {!loading && enrollmentStatus === 'enrolled' && weeklySchedule.length > 0 && (
-          <>
-            {/* COR Header */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 mb-8">
-              <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">Certificate of Registration (COR)</h2>
-                <p className="text-gray-600">Academic Year {schoolYear} • {studentInfo?.semester || '1st Semester'}</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm border-2 border-black p-4">
-                <div className="flex">
-                  <span className="font-semibold min-w-[120px]">Registration No.:</span>
-                  <span className="border-b border-black flex-1 ml-2">REG{String(auth?.user?.student?.id || auth?.user?.id || '000001').padStart(6, '0')}</span>
-                </div>
-                <div className="flex">
-                  <span className="font-semibold min-w-[80px]">Semester:</span>
-                  <span className="border-b border-black flex-1 ml-2">{studentInfo?.semester || '1st Semester'}</span>
-                </div>
-                
-                <div className="flex">
-                  <span className="font-semibold min-w-[120px]">Date Enrolled:</span>
-                  <span className="border-b border-black flex-1 ml-2">{new Date().toLocaleDateString()}</span>
-                </div>
-                <div className="flex">
-                  <span className="font-semibold min-w-[80px]">School Year:</span>
-                  <span className="border-b border-black flex-1 ml-2">{schoolYear}</span>
-                </div>
-                
-                <div className="flex">
-                  <span className="font-semibold min-w-[120px]">Student Name:</span>
-                  <span className="border-b border-black flex-1 ml-2">{studentInfo?.name || `${auth.user.firstname} ${auth.user.lastname}`}</span>
-                </div>
-                <div className="flex">
-                  <span className="font-semibold min-w-[80px]">LRN:</span>
-                  <span className="border-b border-black flex-1 ml-2">{studentInfo?.lrn || 'N/A'}</span>
-                </div>
-                
-                <div className="flex">
-                  <span className="font-semibold min-w-[120px]">Strand:</span>
-                  <span className="border-b border-black flex-1 ml-2">{studentInfo?.strand || 'Not Assigned'}</span>
-                </div>
-                <div className="flex">
-                  <span className="font-semibold min-w-[80px]">Grade Level:</span>
-                  <span className="border-b border-black flex-1 ml-2">{studentInfo?.grade_level || 'Grade 11'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Schedule Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-100 rounded-lg">
-                    <FaCalendarAlt className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-gray-600 text-sm">Total Classes</p>
-                    <p className="text-2xl font-bold text-gray-800">{weeklySchedule.reduce((total, day) => total + day.classes.length, 0)}</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <FaBookOpen className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-gray-600 text-sm">Subjects</p>
-                    <p className="text-2xl font-bold text-gray-800">{Object.keys(scheduleData).length}</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-purple-100 rounded-lg">
-                    <FaClock className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-gray-600 text-sm">Registration Status</p>
-                    <p className="text-lg font-bold text-green-600">ENROLLED</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Weekly Schedule */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-              <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-6">
-                <h2 className="text-2xl font-bold flex items-center gap-3">
-                  <FaCalendarAlt className="w-6 h-6" />
-                  Weekly Schedule
-                </h2>
-                <p className="text-blue-100 mt-2">Academic Year 2024-2025 • 1st Semester</p>
-              </div>
-              
-              <div className="p-6">
-                <div className="space-y-6">
-                  {daysOfWeek.map((day, dayIndex) => (
-                    <div key={dayIndex} className="border border-gray-200 rounded-xl overflow-hidden">
-                      <div className="bg-gray-50 px-6 py-4 border-b">
-                        <h3 className="text-lg font-bold text-gray-800">{day}</h3>
-                      </div>
-                      <div className="p-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          {getScheduleForDay(day).map((classItem, classIndex) => (
-                            <div key={classIndex} className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
-                              <div className="flex items-start justify-between mb-3">
-                                <h4 className="font-semibold text-gray-800">{classItem.subject}</h4>
-                                <div className="px-2 py-1 bg-blue-200 text-blue-800 text-xs rounded-full">
-                                  Active
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-2 text-sm text-gray-600">
-                                <div className="flex items-center gap-2">
-                                  <FaClock className="w-3 h-3" />
-                                  <span>{classItem.time}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <FaMapMarkerAlt className="w-3 h-3" />
-                                  <span>{classItem.room}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <FaBookOpen className="w-3 h-3" />
-                                  <span>{classItem.teacher}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+              {enrollmentStatus === 'enrolled' && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+                    <div className="flex items-center space-x-4">
+                      <div className="relative">
+                        <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search subjects or teachers..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </div>
 
-            {/* Additional Information */}
-            <div className="mt-8 bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-              <div className="flex items-start gap-4">
-                <div className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
-                  <FaInfoCircle className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Important Notes</h3>
-                  <div className="text-gray-600 space-y-2">
-                    <p>• Classes start promptly at the scheduled time. Please arrive 5 minutes early.</p>
-                    <p>• Bring all required materials and textbooks for each subject.</p>
-                    <p>• Notify your teacher in advance if you cannot attend a class.</p>
-                    <p>• Check the school bulletin board for any schedule changes or announcements.</p>
+                    <div className="flex items-center space-x-6 text-sm text-gray-600">
+                      <div className="flex items-center space-x-2">
+                        <FaBookOpen className="text-blue-500" />
+                        <span>{weeklySchedule.reduce((total, day) => total + day.classes.length, 0)} Classes</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <FaGraduationCap className="text-green-500" />
+                        <span>6 Subjects</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {enrollmentStatus === 'enrolled' && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-6">
+                    <h2 className="text-2xl font-bold flex items-center">
+                      <FaCalendarWeek className="mr-3" />
+                      Weekly Schedule
+                    </h2>
+                    <p className="text-blue-100 mt-2">Academic Year 2024-2025 • 1st Semester</p>
+                  </div>
+                  
+                  <div className="p-6">
+                    <div className="space-y-6">
+                      {daysOfWeek.map((day, dayIndex) => {
+                        const dayClasses = getScheduleForDay(day);
+                        const filteredClasses = dayClasses.filter(cls => 
+                          cls.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          cls.teacher.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                        
+                        return (
+                          <div key={dayIndex} className="border border-gray-200 rounded-xl overflow-hidden">
+                            <div className="bg-gray-50 px-6 py-4 border-b flex items-center justify-between">
+                              <h3 className="text-lg font-bold text-gray-800">{day}</h3>
+                              <span className="text-sm text-gray-600">
+                                {filteredClasses.length} class{filteredClasses.length !== 1 ? 'es' : ''}
+                              </span>
+                            </div>
+                            <div className="p-4">
+                              {filteredClasses.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                  {filteredClasses.map((classItem, classIndex) => (
+                                    <div key={classIndex} className={`p-4 rounded-lg border-2 hover:shadow-md transition-all duration-200 ${getSubjectColor(classItem.color)}`}>
+                                      <div className="flex items-start justify-between mb-3">
+                                        <h4 className="font-bold text-lg">{classItem.subject}</h4>
+                                        <span className="px-2 py-1 bg-white bg-opacity-50 text-xs rounded-full font-medium">
+                                          {classItem.type}
+                                        </span>
+                                      </div>
+                                      
+                                      <div className="space-y-2 text-sm">
+                                        <div className="flex items-center">
+                                          <FaClock className="mr-2 w-4 h-4" />
+                                          <span className="font-medium">{classItem.time}</span>
+                                        </div>
+                                        <div className="flex items-center">
+                                          <FaMapMarkerAlt className="mr-2 w-4 h-4" />
+                                          <span>{classItem.room}</span>
+                                        </div>
+                                        <div className="flex items-center">
+                                          <FaUser className="mr-2 w-4 h-4" />
+                                          <span>{classItem.teacher}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-center py-8 text-gray-500">
+                                  <FaCalendarAlt className="mx-auto text-3xl mb-2" />
+                                  <p>No classes scheduled</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </>
-        )}
+          </main>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

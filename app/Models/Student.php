@@ -4,6 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Strand;
+use App\Models\Section;
+use App\Models\SchoolYear;
+use App\Models\StudentStrandPreference;
 
 class Student extends Model
 {
@@ -15,9 +19,8 @@ class Student extends Model
         'user_id',
         'school_year',
         'lrn',
+        'student_status',
         'grade_level',
-        'nongraded',
-        'psa',
         'extension_name',
         'birthdate',
         'age',
@@ -25,26 +28,17 @@ class Student extends Model
         'birth_place',
         'address',
         'religion',
-        'mother_tongue',
         'ip_community',
         'four_ps',
-        'special_needs',
         'pwd_id',
         'last_grade',
         'last_sy',
-        'psa_birth_certificate',
+        'guardian_name',
+        'guardian_contact',
+        'last_school',
         'report_card',
         'image',
-        'hs_grade',
-        'strand_id',
-        'section_id',
-        'school_year_id',
-        'strand_preferences',
-        'learning_modalities',
-        'enrollment_status',
-        'coordinator_notes',
-        'reviewed_at',
-        'reviewed_by',
+        'psa_birth_certificate',
     ];
 
     public function user()
@@ -52,76 +46,71 @@ class Student extends Model
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Get the strand that the student is enrolled in.
-     */
-    public function strand()
-    {
-        return $this->belongsTo(Strand::class);
-    }
-
-    /**
-     * Get the student's strand preferences as collection of Strand models.
-     */
-    public function getStrandPreferencesAttribute()
-    {
-        if (!$this->attributes['strand_preferences']) {
-            return collect();
-        }
-        
-        $strandIds = json_decode($this->attributes['strand_preferences'], true) ?? [];
-        return Strand::whereIn('id', $strandIds)->get();
-    }
-
-    public function section()
-    {
-        return $this->belongsTo(Section::class);
-    }
-
-    public function schoolYear()
-    {
-        return $this->belongsTo(SchoolYear::class);
-    }
-
     public function enrollments()
     {
-        return $this->hasMany(Enrollment::class);
+        return $this->hasMany(Enrollment::class, 'student_id', 'user_id');
     }
 
-    public function strandPreferences()
+    public function classDetails()
     {
-        return $this->hasMany(StudentStrandPreference::class);
+        return $this->hasMany(ClassDetail::class, 'student_id', 'user_id');
     }
 
     public function grades()
     {
-        return $this->hasMany(Grade::class);
+        return $this->hasMany(Grade::class, 'student_id', 'user_id');
     }
-
-    public function schedules()
-    {
-        return $this->hasMany(Schedule::class);
-    }
-
-    // Removed personalInfo relationship - data is now in this model
-
-
-    protected $casts = [
-        'learning_modalities' => 'array',
-        'strand_preferences' => 'array',
-        'reviewed_at' => 'datetime',
-        'birthdate' => 'date',
-        'age' => 'integer',
-    ];
 
     public function reviewer()
     {
         return $this->belongsTo(User::class, 'reviewed_by');
     }
 
+    // Added relationships to satisfy eager loads in CoordinatorController
+    public function strand()
+    {
+        // Note: if 'strand_id' column is absent, Eloquent will resolve as null (safe for eager load)
+        return $this->belongsTo(Strand::class, 'strand_id');
+    }
+
+    public function section()
+    {
+        // Note: if 'section_id' column is absent, Eloquent will resolve as null
+        return $this->belongsTo(Section::class, 'section_id');
+    }
+
+    public function schoolYear()
+    {
+        // Note: if 'school_year_id' column is absent, Eloquent will resolve as null
+        return $this->belongsTo(SchoolYear::class, 'school_year_id');
+    }
+
+    public function strandPreferences()
+    {
+        // Preferences table stores users.id in student_id; this model stores user_id
+        return $this->hasMany(StudentStrandPreference::class, 'student_id', 'user_id');
+    }
+
+    protected $casts = [
+        'reviewed_at' => 'datetime',
+        'birthdate' => 'date',
+        'age' => 'integer',
+    ];
 
     public function scopeByEnrollmentStatus($query, $status)
     {
         return $query->where('enrollment_status', $status);
+    }
+
+    // Get current enrollment for this student
+    public function getCurrentEnrollment()
+    {
+        return $this->enrollments()->where('status', 'approved')->latest()->first();
+    }
+
+    // Get current class details (enrolled classes)
+    public function getCurrentClassDetails()
+    {
+        return $this->classDetails()->where('is_enrolled', true)->get();
     }
 }

@@ -53,9 +53,16 @@ export default function FacultySidebar({ onToggle }) {
           axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
           const response = await axios.get('/user');
           
-          // Check if user is coordinator role
-          setIsCoordinator(response.data.role === 'coordinator');
+          // Check if user is coordinator role OR has is_coordinator flag
+          const userIsCoordinator = response.data.role === 'coordinator' || response.data.is_coordinator === true;
+          setIsCoordinator(userIsCoordinator);
           setUserRole(response.data.role);
+          
+          console.log('User role check:', {
+            role: response.data.role,
+            is_coordinator: response.data.is_coordinator,
+            final_coordinator_status: userIsCoordinator
+          });
         }
       } catch (error) {
         console.error('Error fetching user info:', error);

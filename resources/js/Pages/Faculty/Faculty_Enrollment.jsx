@@ -18,7 +18,8 @@ import {
   FaClipboardList,
   FaUserCheck,
   FaSpinner,
-  FaFileAlt
+  FaFileAlt,
+  FaInfoCircle
 } from "react-icons/fa";
 
 export default function FacultyEnrollment({ pendingStudents: initialPendingStudents = [], approvedStudents: initialApprovedStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, auth }) {
@@ -40,7 +41,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   const [currentTab, setCurrentTab] = useState("pending");
   const [activeTab, setActiveTab] = useState("pending");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   // COR Modal states
   const [showCORModal, setShowCORModal] = useState(false);
   const [selectedStudentForCOR, setSelectedStudentForCOR] = useState(null);
@@ -53,11 +54,13 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [subjects, setSubjects] = useState([]);
 
+  // existing: fetch sections/strands on mount
   useEffect(() => {
     // Initialize strands and sections on component mount
     fetchSectionsAndStrands();
   }, []);
 
+  // existing: sync lists when props change
   useEffect(() => {
     // Update state when props change
     setPendingStudents(initialPendingStudents);
@@ -65,6 +68,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     setRejectedStudents(initialRejectedStudents);
   }, [initialPendingStudents, initialApprovedStudents, initialRejectedStudents]);
 
+  // NEW: Auto-fetch subjects whenever the selected strand changes
+  useEffect(() => {
+    if (selectedStrand) {
+      fetchSubjectsForStrand(selectedStrand);
+    } else {
+      setSubjects([]);
+    }
+  }, [selectedStrand]);
   // Fetch sections and strands from API
   const fetchSectionsAndStrands = async (strandCode = null) => {
     try {
@@ -88,14 +99,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
           { id: 3, name: 'HUMSS', code: 'HUMSS' },
           { id: 4, name: 'GAS', code: 'GAS' }
         ];
-        
+
         const mockSections = [
           { id: 1, name: 'Section A', strand_code: 'STEM' },
           { id: 2, name: 'Section B', strand_code: 'STEM' },
           { id: 3, name: 'Section A', strand_code: 'ABM' },
           { id: 4, name: 'Section B', strand_code: 'ABM' }
         ];
-        
+
         setAvailableStrands(mockStrands);
         setAvailableSections(mockSections);
       }
@@ -108,14 +119,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
         { id: 3, name: 'HUMSS', code: 'HUMSS' },
         { id: 4, name: 'GAS', code: 'GAS' }
       ];
-      
+
       const mockSections = [
         { id: 1, name: 'Section A', strand_code: 'STEM' },
         { id: 2, name: 'Section B', strand_code: 'STEM' },
         { id: 3, name: 'Section A', strand_code: 'ABM' },
         { id: 4, name: 'Section B', strand_code: 'ABM' }
       ];
-      
+
       setAvailableStrands(mockStrands);
       setAvailableSections(mockSections);
     }
@@ -220,56 +231,107 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     if (student) {
       setSelectedStudentForCOR(student);
       // Use first preference as default if available
-      const defaultStrand = student.strand_preferences && student.strand_preferences.length > 0 
-        ? student.strand_preferences[0] 
+      const defaultStrand = student.strand_preferences && student.strand_preferences.length > 0
+        ? student.strand_preferences[0]
         : "";
       setSelectedStrand(defaultStrand);
       setShowCORModal(true);
-      
+
+      // Fetch sections for the selected strand
       // Fetch sections for the selected strand
       if (defaultStrand) {
         await fetchSectionsAndStrands(defaultStrand);
+        // Preload subjects for the default strand to reduce friction
+        await fetchSubjectsForStrand(defaultStrand);
       }
     }
   };
 
   // Fetch class schedules for enrolled student
-  const fetchClassSchedulesForStudent = async (studentId) => {
-    // For now, disable this feature since we need enrollment ID, not student ID
-    // This feature should only work for students who are already enrolled with class assignments
-    setClassSchedules([]);
-    setLoadingSchedules(false);
-    return;
+  const fetchClassSchedulesForStudent = async (studentId, strandCode, sectionId) => {
+    console.log('fetchClassSchedulesForStudent called with:', { studentId, strandCode, sectionId });
 
-    /* TODO: Implement this properly when we have enrollment ID available
-    if (!enrollmentId) {
+    if (!strandCode || !sectionId) {
+      console.log('Missing strand or section:', { strandCode, sectionId });
       setClassSchedules([]);
+      setLoadingSchedules(false);
       return;
     }
 
     try {
       setLoadingSchedules(true);
-      const response = await fetch(`/coordinator/enrollments/${enrollmentId}/schedules`, {
+
+      // Find the strand ID from the selected strand code
+      const strandObj = availableStrands.find(s => s.code === strandCode);
+      const strandId = strandObj ? strandObj.id : null;
+
+      console.log('Strand object found:', strandObj);
+
+      if (!strandId) {
+        console.error('Could not find strand ID for code:', strandCode);
+        setClassSchedules([]);
+        setLoadingSchedules(false);
+        return;
+      }
+
+      // Get authentication token
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('faculty_token');
+
+      if (!token) {
+        console.error('No authentication token found');
+        setClassSchedules([]);
+        setLoadingSchedules(false);
+        return;
+      }
+
+      // Use coordinator route for schedule fetching
+      const apiUrl = `/coordinator/schedules/section/${sectionId}/strand/${strandId}`;
+      console.log('Making request to:', apiUrl);
+
+      // Fetch schedules for the selected section and strand
+      const response = await fetch(apiUrl, {
+        method: 'GET',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-Requested-With': 'XMLHttpRequest'
         }
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (response.ok) {
-        const data = await response.json();
-        setClassSchedules(data.schedules || []);
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json();
+          console.log('Received schedule data:', data);
+          setClassSchedules(data.schedules || []);
+        } else {
+          console.error('Response is not JSON:', contentType);
+          const responseText = await response.text();
+          console.error('Response text:', responseText.substring(0, 200));
+          setClassSchedules([]);
+        }
       } else {
-        console.error('Failed to fetch class schedules');
+        console.error('Failed to fetch schedules, status:', response.status);
+        const responseText = await response.text();
+        console.error('Error response:', responseText.substring(0, 200));
+
+        // Check if it's an authentication error
+        if (response.status === 401 || response.status === 403) {
+          console.error('Authentication failed - user may not have coordinator permissions');
+        }
+
         setClassSchedules([]);
       }
     } catch (error) {
-      console.error('Error fetching class schedules:', error);
+      console.error('Error fetching schedules:', error);
       setClassSchedules([]);
     } finally {
       setLoadingSchedules(false);
     }
-    */
   };
 
   const handleRejectStudent = async (studentId) => {
@@ -334,13 +396,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
       });
       return;
     }
-
     try {
       setIsSubmitting(true);
-      
+
       router.post(`/coordinator/students/${selectedStudentForCOR.id}/finalize`, {
         strand: selectedStrand,
-        section_id: selectedSection
+        section_id: selectedSection,
+        // Include subjects only if selected; backend accepts nullable array
+        subjects: selectedSubjects && selectedSubjects.length > 0 ? selectedSubjects : undefined
       }, {
         onSuccess: () => {
           Swal.fire({
@@ -397,9 +460,9 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     return students.filter(student => {
       const studentName = `${student.user?.firstname || ''} ${student.user?.lastname || ''}`.trim();
       const matchesSearch = studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           (student.user?.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+        (student.user?.email || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStrand = filterStrand === "all" || (student.strand?.name === filterStrand);
-      
+
       return matchesSearch && matchesStrand;
     });
   };
@@ -434,7 +497,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   return (
     <div className="flex min-h-screen bg-gray-50">
       <FacultySidebar onToggle={setIsCollapsed} />
-      
+
       <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 bg-gray-50 min-h-screen transition-all duration-300`}>
         {/* Header */}
         <div className="mb-8">
@@ -523,11 +586,10 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${
-                    activeTab === tab.key
-                      ? `border-${tab.color}-500 text-${tab.color}-600`
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${activeTab === tab.key
+                    ? `border-${tab.color}-500 text-${tab.color}-600`
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                 >
                   {tab.label} ({getTabCount(tab.key)})
                 </button>
@@ -569,6 +631,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                       <div className="flex items-center space-x-2">
                         <button
                           onClick={() => handleViewStudent(student.id)}
+                          title="View detailed student information"
                           className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors duration-200 flex items-center space-x-1"
                         >
                           <FaEye className="text-sm" />
@@ -578,6 +641,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                           <>
                             <button
                               onClick={() => handleApproveStudent(student.id)}
+                              title="Approve and assign strand/section (opens dialog)"
                               className="px-3 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors duration-200 flex items-center space-x-1"
                             >
                               <FaCheck className="text-sm" />
@@ -585,6 +649,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                             </button>
                             <button
                               onClick={() => handleRejectStudent(student.id)}
+                              title="Reject pre-enrollment"
                               className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors duration-200 flex items-center space-x-1"
                             >
                               <FaTimes className="text-sm" />
@@ -640,6 +705,10 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.user?.firstname} {selectedStudent.user?.lastname}</p>
                   </div>
                   <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Name Extension</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.extension_name || 'N/A'}</p>
+                  </div>
+                  <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Email</label>
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.user?.email}</p>
                   </div>
@@ -652,6 +721,19 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.grade_level || 'N/A'}</p>
                   </div>
                   <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Student Status</label>
+                    <div className="mt-1">
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
+                        selectedStudent.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
+                        selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudent.student_status || 'New Student'}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Age</label>
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.age || 'N/A'}</p>
                   </div>
@@ -662,7 +744,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Birthdate</label>
                     <p className="text-gray-800 font-medium mt-1">
-                      {selectedStudent.birthdate ? 
+                      {selectedStudent.birthdate ?
                         new Date(selectedStudent.birthdate).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
@@ -723,6 +805,44 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                 </div>
               </div>
 
+              {/* Additional Information */}
+              <div className="bg-purple-50 rounded-2xl p-6">
+                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
+                  <FaInfoCircle className="mr-3 text-purple-600" />
+                  Additional Information
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">IP Community Member</label>
+                    <p className="text-gray-800 font-medium mt-1">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedStudent.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudent.ip_community || 'Not specified'}
+                      </span>
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">4Ps Beneficiary</label>
+                    <p className="text-gray-800 font-medium mt-1">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedStudent.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudent.four_ps || 'Not specified'}
+                      </span>
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">PWD ID</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.pwd_id || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Special Needs</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.special_needs || 'None specified'}</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Documents & Images */}
               <div className="bg-green-50 rounded-2xl p-6">
                 <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
@@ -735,7 +855,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <div className="space-y-2">
                       <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Student Photo</label>
                       <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
-                        <img 
+                        <img
                           src={`/storage/enrollment_documents/${selectedStudent.image}`}
                           alt="Student Photo"
                           className="w-32 h-32 object-cover rounded-lg mx-auto shadow-lg"
@@ -758,7 +878,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
                       {selectedStudent.psa_birth_certificate ? (
                         <div>
-                          <img 
+                          <img
                             src={`/storage/enrollment_documents/${selectedStudent.psa_birth_certificate}`}
                             alt="PSA Birth Certificate"
                             className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
@@ -787,7 +907,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
                       {selectedStudent.report_card ? (
                         <div>
-                          <img 
+                          <img
                             src={`/storage/enrollment_documents/${selectedStudent.report_card}`}
                             alt="Report Card"
                             className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
@@ -820,10 +940,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Mother Tongue</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.mother_tongue || 'N/A'}</p>
-                  </div>
-                  <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">IP Community</label>
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.ip_community || 'N/A'}</p>
                   </div>
@@ -853,175 +969,258 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             {/* COR Header */}
-            <div className="bg-white p-6 border-b-2 border-gray-300">
-              <div className="text-center">
-                <h2 className="text-xl font-bold text-gray-800">OPOL NATIONAL SECONDARY TECHNICAL SCHOOL - SENIOR HIGH SCHOOL</h2>
+            <div className="bg-white border rounded-lg overflow-hidden">
+              <div className="text-center py-4 border-b bg-gray-50">
+                <h3 className="text-lg font-bold text-gray-800">OPOL NATIONAL SECONDARY TECHNICAL SCHOOL - SENIOR HIGH SCHOOL</h3>
                 <p className="text-sm text-gray-600 mt-1">Opol, Misamis Oriental</p>
-                <h3 className="text-lg font-bold text-gray-800 mt-4">CLASS PROGRAM</h3>
-                <p className="text-sm text-gray-600">School Year: [{activeSchoolYear?.year_start} - {activeSchoolYear?.year_end}]</p>
-                <p className="text-sm text-gray-600">Semester: {activeSchoolYear?.semester || '1st Semester'}</p>
-                <p className="text-lg font-semibold text-gray-800 mt-2">
-                  {selectedStudentForCOR.grade_level?.toUpperCase() || 'GRADE 11'} - {availableSections.find(s => s.id == selectedSection)?.name || "___________"} ({selectedStrand || "___________"})
-                </p>
-              </div>
-            </div>
-
-            {/* Student Information */}
-            <div className="p-6 border-b">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p><strong>Student Name:</strong> {selectedStudentForCOR.user?.firstname} {selectedStudentForCOR.user?.lastname}</p>
-                  <p><strong>Email:</strong> {selectedStudentForCOR.user?.email}</p>
-                  <p><strong>Grade Level:</strong> {selectedStudentForCOR.grade_level || 'Grade 11'}</p>
-                </div>
-                <div>
-                  <p><strong>Birthdate:</strong> {selectedStudentForCOR.birthdate ? new Date(selectedStudentForCOR.birthdate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A'}</p>
-                  <p><strong>LRN:</strong> {selectedStudentForCOR.lrn || 'N/A'}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Assignment Section */}
-            <div className="p-6 border-b bg-blue-50 rounded-lg">
-              <h4 className="text-lg font-semibold mb-4">Enrollment Assignment</h4>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Assign Strand
-                  </label>
-                  <select
-                    value={selectedStrand}
-                    onChange={(e) => {
-                      setSelectedStrand(e.target.value);
-                      setSelectedSection(""); // Reset section when strand changes
-                      fetchSectionsAndStrands(e.target.value);
-                      fetchSubjectsForStrand(e.target.value);
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select Strand</option>
-                    {availableStrands.map(strand => (
-                      <option key={strand.id} value={strand.code}>{strand.name} ({strand.code})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Assign Section
-                  </label>
-                  <select
-                    value={selectedSection}
-                    onChange={(e) => {
-                      setSelectedSection(e.target.value);
-                      // Fetch class schedules when both strand and section are selected
-                      if (selectedStrand && e.target.value && selectedStudentForCOR) {
-                        fetchClassSchedulesForStudent(selectedStudentForCOR.id);
-                      }
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={!selectedStrand}
-                  >
-                    <option value="">Select Section</option>
-                    {availableSections
-                      .filter(section => !selectedStrand || section.strand_code === selectedStrand)
-                      .map(section => (
-                        <option key={section.id} value={section.id}>{section.name}</option>
-                      ))}
-                  </select>
+                <div className="mt-3">
+                  <p className="font-semibold">CLASS PROGRAM</p>
+                  <p className="text-sm">School Year: [{activeSchoolYear?.year_start} - {activeSchoolYear?.year_end}]</p>
+                  <p className="text-sm">Semester: {activeSchoolYear?.semester || '1st Semester'}</p>
+                  <p className="text-sm font-medium">GRADE 11 - "{selectedSection ? availableSections.find(s => s.id == selectedSection)?.name || selectedSection : 'SECTION'}" ({selectedStrand} NAME)</p>
                 </div>
               </div>
 
-              {/* Class Schedules Section */}
-              {selectedStrand && (
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Class Schedules for {selectedStrand} (Current Semester)
-                  </label>
-                  <div className="bg-white rounded-lg border p-4 max-h-48 overflow-y-auto">
-                    {loadingSchedules ? (
-                      <div className="flex items-center justify-center py-4">
-                        <FaSpinner className="animate-spin text-blue-600 mr-2" />
-                        <span className="text-gray-600">Loading class schedules...</span>
-                      </div>
-                    ) : classSchedules.length > 0 ? (
-                      classSchedules.map(schedule => (
-                        <div key={schedule.id} className="flex items-center justify-between py-2 border-b last:border-b-0">
-                          <div>
-                            <span className="font-medium">{schedule.subject_name}</span>
-                            <span className="text-sm text-gray-500 ml-2">({schedule.subject_code})</span>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Faculty: {schedule.faculty_name}
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                              {schedule.day_of_week}
-                            </span>
-                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                              {schedule.start_time} - {schedule.end_time}
-                            </span>
-                            <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">
-                              {schedule.room || 'TBA'}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    ) : selectedSection ? (
-                      <div className="text-center py-4 text-gray-500">
-                        <FaFileAlt className="mx-auto text-2xl mb-2" />
-                        <p>No class schedules available for this section yet.</p>
-                        <p className="text-xs mt-1">Schedules will be available after enrollment is finalized.</p>
-                      </div>
-                    ) : (
-                      <div className="text-center py-4 text-gray-400">
-                        <p>Please select a section to view class schedules.</p>
-                      </div>
+              {/* Student Information */}
+              <div className="p-6 border-b">
+                <div className="grid grid-cols-2 gap-8">
+                  <div>
+                    <p><strong>Student Name:</strong> {selectedStudentForCOR.user?.firstname} {selectedStudentForCOR.user?.lastname} {selectedStudentForCOR.extension_name || ''}</p>
+                    <p><strong>Email:</strong> {selectedStudentForCOR.user?.email}</p>
+                    <p><strong>Grade Level:</strong> {selectedStudentForCOR.grade_level || 'Grade 11'}</p>
+                    <p><strong>Student Status:</strong> 
+                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedStudentForCOR.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
+                        selectedStudentForCOR.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
+                        selectedStudentForCOR.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudentForCOR.student_status || 'New Student'}
+                      </span>
+                    </p>
+                    <p><strong>Religion:</strong> {selectedStudentForCOR.religion || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p><strong>Birthdate:</strong> {selectedStudentForCOR.birthdate ? new Date(selectedStudentForCOR.birthdate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A'}</p>
+                    <p><strong>LRN:</strong> {selectedStudentForCOR.lrn || 'N/A'}</p>
+                    <p><strong>IP Community:</strong> 
+                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedStudentForCOR.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudentForCOR.ip_community || 'N/A'}
+                      </span>
+                    </p>
+                    <p><strong>4Ps Beneficiary:</strong> 
+                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedStudentForCOR.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedStudentForCOR.four_ps || 'N/A'}
+                      </span>
+                    </p>
+                    {selectedStudentForCOR.pwd_id && (
+                      <p><strong>PWD ID:</strong> {selectedStudentForCOR.pwd_id}</p>
                     )}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Signature Section */}
-            <div className="p-6 border-b">
-              <div className="grid grid-cols-2 gap-8">
-                <div className="text-center">
-                  <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                  <p className="font-medium">Principal</p>
+              {/* Assignment Section */}
+              <div className="p-6 border-b bg-blue-50 rounded-lg">
+                <h4 className="text-lg font-semibold mb-4">Enrollment Assignment</h4>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assign Strand
+                    </label>
+                    <select
+                      value={selectedStrand}
+                      onChange={(e) => {
+                        console.log('Strand changed to:', e.target.value);
+                        console.log('Current strand:', selectedStrand);
+                        console.log('Available strands:', availableStrands);
+                        setSelectedStrand(e.target.value);
+                        setSelectedSection(""); // Reset section when strand changes
+                        fetchSectionsAndStrands(e.target.value);
+                        fetchSubjectsForStrand(e.target.value);
+                        // Clear schedules when strand changes
+                        setClassSchedules([]);
+                        // Fetch class schedules when both strand and section are selected
+                        if (e.target.value && selectedStudentForCOR) {
+                          console.log('Calling fetchClassSchedulesForStudent with section:', selectedSection, 'strand:', e.target.value);
+                          fetchClassSchedulesForStudent(selectedStudentForCOR?.id || 'no-student', e.target.value, selectedSection);
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select Strand</option>
+                      {availableStrands.map(strand => (
+                        <option key={strand.id} value={strand.code}>{strand.name} ({strand.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assign Section
+                    </label>
+                    <select
+                      value={selectedSection}
+                      onChange={(e) => {
+                        console.log('Section changed to:', e.target.value);
+                        console.log('Current strand:', selectedStrand);
+                        console.log('Available strands:', availableStrands);
+                        const newSectionId = e.target.value;
+                        setSelectedSection(newSectionId);
+
+                        // Fetch class schedules when both strand and section are selected
+                        if (selectedStrand && newSectionId) {
+                          console.log('Calling fetchClassSchedulesForStudent with section:', newSectionId, 'strand:', selectedStrand);
+                          fetchClassSchedulesForStudent(selectedStudentForCOR?.id || 'no-student', selectedStrand, newSectionId);
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!selectedStrand}
+                    >
+                      <option value="">Select Section</option>
+                      {availableSections
+                        .filter(section => !selectedStrand || section.strand_code === selectedStrand)
+                        .map(section => (
+                          <option key={section.id} value={section.id}>{section.name}</option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                  <p className="font-medium">Academic Supervisor</p>
+
+                {/* Class Schedules Section */}
+                {selectedStrand && (
+                  <div className="mt-6">
+                    <h4 className="text-lg font-semibold mb-4 text-gray-800">Class Schedule</h4>
+
+                    {/* Schedule Table */}
+                    <div className="bg-white border rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto">
+                        {loadingSchedules ? (
+                          <div className="flex items-center justify-center py-8">
+                            <FaSpinner className="animate-spin text-blue-600 mr-2" />
+                            <span className="text-gray-600">Loading class schedules...</span>
+                          </div>
+                        ) : (
+                          <table className="w-full border-collapse">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Time</th>
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Monday</th>
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Tuesday</th>
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Wednesday</th>
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Thursday</th>
+                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Friday</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {/* Time slots */}
+                              {[
+                                { time: '7:30am to 8:00am', label: 'Flag Ceremony (Monday Only)', colspan: true },
+                                { time: '8:00am to 10:00am', start: '08:00:00', end: '10:00:00' },
+                                { time: '10:00am to 10:30am', label: 'Break Time (Recess)', colspan: true },
+                                { time: '10:30am to 12:30pm', start: '10:30:00', end: '12:30:00' },
+                                { time: '12:30pm to 1:30pm', label: 'Break Time (Lunch)', colspan: true },
+                                { time: '1:30pm to 3:30pm', start: '13:30:00', end: '15:30:00' },
+                                { time: '3:30pm to 4:30pm', start: '15:30:00', end: '16:30:00' },
+                                { time: '4:30pm to 4:45pm', label: 'Flag Lowering (Friday Only)', colspan: true }
+                              ].map((slot, index) => (
+                                <tr key={index}>
+                                  <td className="border border-gray-400 px-2 py-1 text-xs font-medium bg-gray-50">
+                                    {slot.time}
+                                  </td>
+                                  {slot.colspan ? (
+                                    <td className="border border-gray-400 px-2 py-1 text-xs text-center bg-green-200" colSpan="5">
+                                      {slot.label}
+                                    </td>
+                                  ) : (
+                                    ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => {
+                                      // Find all schedules that match this day and time slot
+                                      const schedules = classSchedules.filter(s =>
+                                        s.day_of_week === day &&
+                                        s.start_time === slot.start
+                                      );
+
+                                      return (
+                                        <td key={day} className="border border-gray-400 px-2 py-1 text-xs text-center">
+                                          {schedules.length > 0 ? (
+                                            schedules.map((schedule, idx) => (
+                                              <div key={idx} className={idx > 0 ? 'mt-2 pt-2 border-t border-gray-300' : ''}>
+                                                <div className="font-medium text-blue-800">{schedule.subject_name}</div>
+                                                <div className="text-gray-600">({schedule.faculty_firstname} {schedule.faculty_lastname})</div>
+                                                {schedule.room && <div className="text-gray-500 text-xs">{schedule.room}</div>}
+                                              </div>
+                                            ))
+                                          ) : (
+                                            <div className="text-gray-400">-</div>
+                                          )}
+                                        </td>
+                                      );
+                                    })
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+
+                      {/* No schedules message */}
+                      {!loadingSchedules && classSchedules.length === 0 && selectedSection && (
+                        <div className="text-center py-8 text-gray-500 border-t">
+                          <FaFileAlt className="mx-auto text-3xl mb-3" />
+                          <p className="font-medium">No class schedules available for this section yet.</p>
+                          <p className="text-sm mt-1">Schedules will be available after enrollment is finalized.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Signature Section */}
+              <div className="p-6 border-b">
+                <div className="grid grid-cols-2 gap-8">
+                  <div className="text-center">
+                    <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                    <p className="font-medium">Principal</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                    <p className="font-medium">Academic Supervisor</p>
+                  </div>
+                </div>
+                <div className="text-center mt-6">
+                  <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
                 </div>
               </div>
-              <div className="text-center mt-6">
-                <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
-              </div>
-            </div>
 
-            {/* Modal Actions */}
-            <div className="p-6 bg-gray-50 rounded-b-lg flex justify-end space-x-4">
-              <button
-                onClick={() => {
-                  setShowCORModal(false);
-                  setSelectedStudentForCOR(null);
-                  setSelectedStrand("");
-                  setSelectedSection("");
-                  setSelectedSubjects([]);
-                }}
-                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                disabled={isSubmitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleFinalizeEnrollment}
-                disabled={isSubmitting || !selectedStrand || !selectedSection}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
-              >
-                {isSubmitting && <FaSpinner className="animate-spin" />}
-                <span>{isSubmitting ? 'Finalizing...' : 'Finalize Enrollment'}</span>
-              </button>
+              {/* Modal Actions */}
+              <div className="p-6 bg-gray-50 rounded-b-lg flex justify-end space-x-4">
+                <button
+                  onClick={() => {
+                    setShowCORModal(false);
+                    setSelectedStudentForCOR(null);
+                    setSelectedStrand("");
+                    setSelectedSection("");
+                    setSelectedSubjects([]);
+                  }}
+                  className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleFinalizeEnrollment}
+                  disabled={isSubmitting || !selectedStrand || !selectedSection}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isSubmitting && <FaSpinner className="animate-spin" />}
+                  <span>{isSubmitting ? 'Finalizing...' : 'Finalize Enrollment'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

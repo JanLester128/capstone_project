@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Head, router } from '@inertiajs/react';
 import { FaPlus, FaEdit, FaTrash, FaUsers, FaChalkboardTeacher, FaGraduationCap, FaSearch, FaFilter, FaExclamationTriangle, FaTimes } from 'react-icons/fa';
 import Sidebar from '../layouts/Sidebar';
 import Swal from 'sweetalert2';
 
-const RegistrarSections = ({ sections = [], faculties = [], strands = [], flash }) => {
+const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = {}, strands = [], flash }) => {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('registrar-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
@@ -248,6 +248,7 @@ const RegistrarSections = ({ sections = [], faculties = [], strands = [], flash 
           onClose={() => setModalOpen(false)}
           section={editSection}
           faculties={faculties}
+          facultiesByStrand={facultiesByStrand}
           strands={strands}
           sections={sections}
         />
@@ -257,7 +258,7 @@ const RegistrarSections = ({ sections = [], faculties = [], strands = [], flash 
 };
 
 // Section Modal Component
-const SectionModal = ({ isOpen, onClose, section, faculties, strands, sections }) => {
+const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, strands, sections }) => {
   const [formData, setFormData] = useState({
     section_name: section?.section_name || '',
     year_level: section?.year_level || '11',
@@ -268,6 +269,19 @@ const SectionModal = ({ isOpen, onClose, section, faculties, strands, sections }
   const [teacherWarning, setTeacherWarning] = useState('');
   const [strandSuggestion, setStrandSuggestion] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
+
+  // Debug: Log the data being received
+  React.useEffect(() => {
+    console.log('SectionModal Debug Data:', {
+      totalFaculties: faculties?.length || 0,
+      facultiesByStrand: facultiesByStrand,
+      facultiesByStrandKeys: Object.keys(facultiesByStrand || {}),
+      sampleFaculty: faculties?.[0],
+      strands: strands?.map(s => ({ id: s.id, name: s.name })),
+      currentStrandId: formData.strand_id,
+      teachersForCurrentStrand: formData.strand_id ? facultiesByStrand[formData.strand_id] : null
+    });
+  }, [faculties, facultiesByStrand, strands, formData.strand_id]);
 
   // Auto-detect strand based on section name prefix
   const detectStrandFromName = (sectionName) => {
@@ -584,13 +598,40 @@ const SectionModal = ({ isOpen, onClose, section, faculties, strands, sections }
               disabled={processing}
             >
               <option value="">No teacher assigned</option>
-              {faculties.map(teacher => (
-                <option key={teacher.id} value={teacher.id}>
-                  {teacher.firstname} {teacher.lastname}
-                  {teacher.role === 'coordinator' && ' (Coordinator)'}
-                </option>
-              ))}
+              {(() => {
+                // Convert strand_id to string for comparison since object keys are strings
+                const strandId = String(formData.strand_id);
+                
+                // If a strand is selected and has assigned teachers, show only those teachers
+                if (formData.strand_id && facultiesByStrand[strandId] && facultiesByStrand[strandId].length > 0) {
+                  console.log(`Showing ${facultiesByStrand[strandId].length} teachers for strand ID ${strandId}`);
+                  return facultiesByStrand[strandId].map(teacher => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.firstname} {teacher.lastname}
+                      {teacher.role === 'coordinator' && ' (Coordinator)'}
+                    </option>
+                  ));
+                }
+                // If no strand selected or no teachers assigned to strand, show all teachers
+                console.log(`Showing all ${faculties.length} teachers (no strand filter or no teachers for strand ${strandId})`);
+                return faculties.map(teacher => (
+                  <option key={teacher.id} value={teacher.id}>
+                    {teacher.firstname} {teacher.lastname}
+                    {teacher.role === 'coordinator' && ' (Coordinator)'}
+                  </option>
+                ));
+              })()}
             </select>
+            {formData.strand_id && facultiesByStrand[String(formData.strand_id)] && facultiesByStrand[String(formData.strand_id)].length > 0 && (
+              <p className="mt-1 text-xs text-blue-600">
+                Showing {facultiesByStrand[String(formData.strand_id)].length} teachers assigned to selected strand only
+              </p>
+            )}
+            {formData.strand_id && (!facultiesByStrand[String(formData.strand_id)] || facultiesByStrand[String(formData.strand_id)].length === 0) && (
+              <p className="mt-1 text-xs text-amber-600">
+                No teachers assigned to this strand. Showing all available teachers.
+              </p>
+            )}
             {teacherWarning && (
               <div className="mt-2 flex items-start gap-2 text-amber-700 text-sm bg-amber-50 p-2 rounded-lg border border-amber-200">
                 <FaExclamationTriangle className="text-amber-500 mt-0.5 flex-shrink-0" />

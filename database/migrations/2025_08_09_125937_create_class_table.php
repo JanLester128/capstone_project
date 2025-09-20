@@ -14,7 +14,8 @@ return new class extends Migration
         Schema::create('class', function (Blueprint $table) {
             $table->id();
             $table->foreignId('subject_id')->constrained('subjects')->onDelete('cascade');
-            $table->foreignId('faculty_id')->constrained('users')->onDelete('cascade');
+            $table->foreignId('faculty_id')->nullable()->constrained('users')->onDelete('cascade');
+            $table->foreignId('section_id')->nullable()->constrained('sections')->onDelete('cascade');
             $table->foreignId('school_year_id')->constrained('school_years')->onDelete('cascade');
             $table->enum('day_of_week', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
             $table->time('start_time');
@@ -25,8 +26,11 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             
-            // Ensure no overlapping schedules for the same faculty
-            $table->unique(['faculty_id', 'day_of_week', 'start_time', 'school_year_id', 'semester'], 'unique_faculty_schedule');
+            // Prevent duplicate subject/day/section combinations
+            $table->unique(['subject_id', 'section_id', 'day_of_week', 'school_year_id', 'semester'], 'unique_subject_section_day');
+            
+            // Ensure no overlapping schedules for the same faculty (only when faculty is assigned)
+            $table->index(['faculty_id', 'day_of_week', 'start_time', 'school_year_id', 'semester'], 'faculty_schedule_index');
             
             // Index for better schedule queries
             $table->index(['day_of_week', 'semester', 'school_year_id'], 'schedule_lookup_index');

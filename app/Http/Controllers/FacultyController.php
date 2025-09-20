@@ -3,8 +3,13 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use App\Models\Strand;
+use App\Models\SchoolYear;
+use App\Models\ClassSchedule;
+use App\Models\Student;
 // Removed Faculty model - using unified authentication
 
 class FacultyController extends Controller
@@ -31,7 +36,7 @@ class FacultyController extends Controller
      */
     public function profilePage()
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $assignedStrand = null;
         
         // Get assigned strand if user has one
@@ -51,7 +56,7 @@ class FacultyController extends Controller
      */
     public function schedulePage()
     {
-        $user = auth()->user();
+        $user = Auth::user();
         
         // Fetch all schedules for this faculty member with proper relationships
         $schedules = \App\Models\ClassSchedule::where('faculty_id', $user->id)
@@ -88,20 +93,42 @@ class FacultyController extends Controller
      */
     public function gradesPage()
     {
-        $user = auth()->user();
-        $classes = [];
-        $students = [];
+        $user = Auth::user();
         
-        // TODO: Fetch faculty classes and enrolled students
-        // $classes = ClassSchedule::where('faculty_id', $user->id)->get();
-        // $students = Student::whereHas('enrollments', function($q) use ($user) {
-        //     $q->whereIn('class_id', ClassSchedule::where('faculty_id', $user->id)->pluck('id'));
-        // })->get();
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Initialize empty collections
+        $schedules = collect([]);
+        $students = collect([]);
+        
+        if ($activeSchoolYear && $user) {
+            try {
+                // Get schedules where this faculty is assigned
+                $schedules = ClassSchedule::with(['section.strand', 'subject', 'faculty'])
+                    ->where('faculty_id', $user->id)
+                    ->where('school_year_id', $activeSchoolYear->id)
+                    ->get();
+                
+                // Get students enrolled in faculty's sections
+                $sectionIds = $schedules->pluck('section_id')->filter()->unique();
+                if ($sectionIds->isNotEmpty()) {
+                    $students = Student::with(['section.strand'])
+                        ->whereIn('section_id', $sectionIds)
+                        ->where('school_year_id', $activeSchoolYear->id)
+                        ->get();
+                }
+            } catch (\Exception $e) {
+                // Log error and continue with empty collections
+                Log::error('Error fetching faculty grades data: ' . $e->getMessage());
+            }
+        }
         
         return Inertia::render('Faculty/Faculty_Grades', [
-            'classes' => $classes,
+            'schedules' => $schedules,
             'students' => $students,
-            'user' => $user
+            'user' => $user,
+            'activeSchoolYear' => $activeSchoolYear
         ]);
     }
 

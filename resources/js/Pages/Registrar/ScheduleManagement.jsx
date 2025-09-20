@@ -1,37 +1,73 @@
 import React, { useState, useEffect } from 'react';
 import { usePage, router } from '@inertiajs/react';
 import Sidebar from '../layouts/Sidebar';
-import { FaPlus, FaEdit, FaTrash, FaClock, FaUser, FaBook, FaCalendarAlt, FaTimes, FaUsers, FaChalkboardTeacher, FaInfoCircle, FaEye } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaClock, FaUser, FaBook, FaCalendarAlt, FaTimes, FaUsers, FaChalkboardTeacher, FaInfoCircle, FaEye, FaMapMarkerAlt } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 
 export default function ScheduleManagement() {
-    const { schedules: initialSchedules, subjects, sections, faculties, schoolYears, activeSchoolYear, currentSchoolYear } = usePage().props;
-    
+    const { schedules: initialSchedules, subjects: initialSubjects, sections, faculties, schoolYears, activeSchoolYear, currentSchoolYear, swal } = usePage().props;
+
     const [schedules, setSchedules] = useState(initialSchedules || []);
+    const [subjects, setSubjects] = useState(initialSubjects || []);
+    const [semesterInfo, setSemesterInfo] = useState(null);
     const [isCollapsed, setIsCollapsed] = useState(() => {
         const saved = localStorage.getItem('registrar-sidebar-collapsed');
         return saved ? JSON.parse(saved) : false;
     });
     const [selectedStrand, setSelectedStrand] = useState(null);
     const [showStrandModal, setShowStrandModal] = useState(false);
-    
+
+    // Initialize subjects from props instead of making additional API call
+    useEffect(() => {
+        if (initialSubjects && initialSubjects.length > 0) {
+            setSubjects(initialSubjects);
+            console.log('Using initial subjects:', initialSubjects.length);
+        }
+        if (activeSchoolYear) {
+            setSemesterInfo(activeSchoolYear);
+            console.log('Using active school year:', activeSchoolYear.semester);
+        }
+    }, [initialSubjects, activeSchoolYear]);
+
+    // Handle SweetAlert from backend session data
+    useEffect(() => {
+        console.log('SweetAlert useEffect triggered, swal data:', swal);
+        if (swal) {
+            console.log('Showing SweetAlert with data:', swal);
+            Swal.fire({
+                icon: swal.icon || swal.type,
+                title: swal.title,
+                text: swal.text,
+                html: swal.html,
+                confirmButtonText: swal.confirmButtonText || 'OK',
+                timer: swal.timer,
+                showConfirmButton: swal.showConfirmButton !== false,
+                allowOutsideClick: swal.allowOutsideClick !== false,
+                allowEscapeKey: swal.allowEscapeKey !== false
+            });
+        } else {
+            console.log('No swal data found in props');
+        }
+    }, [swal]);
+
     // Update schedules when props change (after reload)
     useEffect(() => {
         if (initialSchedules && initialSchedules.length > 0) {
             setSchedules(initialSchedules || []);
         }
     }, [initialSchedules]);
-    
+
     const [showModal, setShowModal] = useState(false);
     const [editingSchedule, setEditingSchedule] = useState(null);
     const [errors, setErrors] = useState({});
     const [loading, setLoading] = useState(false);
-    
+
     // Form data for schedule creation
     const [formData, setFormData] = useState({
         section_id: '',
         subject_id: '',
         faculty_id: '',
+        grade_level: '', // Add grade level filter
         day_of_week: '',
         start_time: '',
         end_time: '',
@@ -39,83 +75,239 @@ export default function ScheduleManagement() {
         semester: '1st Semester',
         school_year: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025'
     });
-    
+
+    // Get filtered subjects based on selected grade level and section
+    const getFilteredSubjects = () => {
+        if (!formData.grade_level) return [];
+
+        const selectedSection = sections?.find(s => s.id == formData.section_id);
+
+        // Filter subjects by grade level
+        let filteredSubjects = subjects?.filter(subject => {
+            // Check if subject matches the selected grade level
+            const matchesGradeLevel = subject.year_level === formData.grade_level ||
+                subject.grade_level === formData.grade_level;
+
+            // Check if subject matches section's strand
+            const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
+
+            return matchesGradeLevel && matchesStrand;
+        }) || [];
+
+        // Get subjects already assigned to this section to disable them
+        const assignedSubjects = schedules
+            .filter(schedule => schedule.section_id == formData.section_id)
+            .map(schedule => schedule.subject_id);
+
+        // Mark subjects as disabled if already assigned
+        return filteredSubjects.map(subject => ({
+            ...subject,
+            isDisabled: assignedSubjects.includes(subject.id),
+            disabledReason: assignedSubjects.includes(subject.id) ? 'Already assigned to this section' : null
+        }));
+    };
+
+    // Get available subjects for display
+    const availableSubjects = getFilteredSubjects();
+
     // Calculate duration from start and end time - must be 60, 90, or 120 minutes
     const calculateDuration = (startTime, endTime) => {
         if (!startTime || !endTime) return 60; // Default to 60 minutes
-        
+
         const [startHours, startMinutes] = startTime.split(':').map(Number);
         const [endHours, endMinutes] = endTime.split(':').map(Number);
-        
+
         const startDate = new Date();
         startDate.setHours(startHours, startMinutes, 0, 0);
-        
+
         const endDate = new Date();
         endDate.setHours(endHours, endMinutes, 0, 0);
-        
+
         const diffMs = endDate - startDate;
         const diffMinutes = Math.round(diffMs / (1000 * 60));
-        
+
         // Round to nearest valid duration (60, 90, 120)
         if (diffMinutes <= 75) return 60;
         if (diffMinutes <= 105) return 90;
         return 120;
     };
-    
+
     // Auto-update duration when start or end time changes
-    // Removed useEffect hook here
+    useEffect(() => {
+        if (formData.start_time && formData.end_time) {
+            const newDuration = calculateDuration(formData.start_time, formData.end_time);
+            if (newDuration !== formData.duration) {
+                setFormData(prev => ({
+                    ...prev,
+                    duration: newDuration
+                }));
+            }
+        }
+    }, [formData.start_time, formData.end_time, formData.duration]);
 
     const openEditModal = (schedule) => {
+        console.log('openEditModal called with schedule:', schedule);
+        console.log('schedule.school_year type:', typeof schedule.school_year, 'value:', schedule.school_year);
+        console.log('activeSchoolYear:', activeSchoolYear);
+
         setEditingSchedule(schedule);
+
+        // Extract school year properly
+        let schoolYearValue;
+        if (schedule.school_year) {
+            if (typeof schedule.school_year === 'object' && schedule.school_year.year_start && schedule.school_year.year_end) {
+                schoolYearValue = `${schedule.school_year.year_start}-${schedule.school_year.year_end}`;
+            } else if (typeof schedule.school_year === 'string') {
+                schoolYearValue = schedule.school_year;
+            } else {
+                schoolYearValue = activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025';
+            }
+        } else {
+            schoolYearValue = activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025';
+        }
+
+        console.log('Final school year value:', schoolYearValue);
+
         setFormData({
             section_id: schedule.section_id,
             subject_id: schedule.subject_id,
             faculty_id: schedule.faculty_id,
+            grade_level: schedule.grade_level, // Add grade level filter
             day_of_week: schedule.day_of_week,
             start_time: schedule.start_time,
             end_time: schedule.end_time,
             duration: schedule.duration || 60,
-            semester: schedule.semester
+            semester: schedule.semester,
+            school_year: schoolYearValue
         });
         setShowModal(true);
-    };
-
-    const handleDelete = (scheduleId) => {
-        if (confirm('Are you sure you want to delete this schedule?')) {
-            router.delete(`/registrar/schedules/${scheduleId}`);
-        }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
-        
+
+        console.log('Form submission started', formData);
+
         try {
             const duration = formData.duration || calculateDuration(formData.start_time, formData.end_time);
-            
+
             // Ensure all required fields are present
             const submitData = {
                 section_id: formData.section_id,
                 subject_id: formData.subject_id,
                 faculty_id: formData.faculty_id,
+                grade_level: formData.grade_level, // Add grade level filter
                 day_of_week: formData.day_of_week,
-                start_time: formData.start_time,
-                end_time: formData.end_time,
+                start_time: formData.start_time, // Keep H:i format (HH:MM)
+                end_time: formData.end_time,     // Keep H:i format (HH:MM)
                 duration: duration,
                 semester: formData.semester || '1st Semester',
-                school_year: formData.school_year
+                school_year: (() => {
+                    let schoolYear = formData.school_year;
+
+                    // If it's an object, try to extract the value
+                    if (typeof schoolYear === 'object' && schoolYear !== null) {
+                        if (schoolYear.value) {
+                            schoolYear = schoolYear.value;
+                        } else if (schoolYear.year_start && schoolYear.year_end) {
+                            schoolYear = `${schoolYear.year_start}-${schoolYear.year_end}`;
+                        } else {
+                            schoolYear = activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025';
+                        }
+                    }
+
+                    // Fallback if still not a valid string
+                    if (!schoolYear || typeof schoolYear !== 'string') {
+                        schoolYear = activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025';
+                    }
+
+                    return String(schoolYear);
+                })()
             };
-            
+
+            console.log('Submit data prepared:', submitData);
+            console.log('School year value:', submitData.school_year, 'Type:', typeof submitData.school_year);
+
+            // Validate school year format (YYYY-YYYY)
+            const schoolYearRegex = /^\d{4}-\d{4}$/;
+            if (!schoolYearRegex.test(submitData.school_year)) {
+                console.error('Invalid school year format:', submitData.school_year);
+                setErrors({ school_year: 'School year must be in format YYYY-YYYY (e.g., 2024-2025)' });
+                setLoading(false);
+                return;
+            }
+
+            // Validate required fields
+            const requiredFields = ['section_id', 'subject_id', 'grade_level', 'day_of_week', 'start_time', 'end_time'];
+            const missingFields = requiredFields.filter(field => !submitData[field]);
+
+            if (missingFields.length > 0) {
+                console.error('Missing required fields:', missingFields);
+                setErrors({ form: `Missing required fields: ${missingFields.join(', ')}` });
+                setLoading(false);
+                return;
+            }
+
+            // Check for duplicate subject/day/section combinations
+            const existingSchedules = schedules.filter(schedule => {
+                return schedule.section_id === submitData.section_id &&
+                    schedule.subject_id === submitData.subject_id &&
+                    schedule.day_of_week === submitData.day_of_week &&
+                    schedule.start_time === submitData.start_time &&
+                    schedule.end_time === submitData.end_time;
+            });
+
+            if (existingSchedules.length > 0) {
+                console.error('Duplicate schedule found:', existingSchedules);
+                setErrors({ form: 'Duplicate schedule found for this subject, day, and section' });
+                setLoading(false);
+                return;
+            }
+
+            // Check teacher schedule limit (4 schedules max per teacher)
+            if (submitData.faculty_id) {
+                const teacherSchedules = schedules.filter(schedule => {
+                    // Skip the current schedule if we're editing
+                    if (editingSchedule && schedule.id === editingSchedule.id) {
+                        return false;
+                    }
+                    return parseInt(schedule.faculty_id) === parseInt(submitData.faculty_id);
+                });
+
+                if (teacherSchedules.length >= 4) {
+                    const faculty = faculties.find(f => f.id === submitData.faculty_id);
+                    const facultyName = faculty ? `${faculty.firstname} ${faculty.lastname}` : 'Selected Faculty';
+
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Teacher Schedule Limit Reached',
+                        html: `<div style="text-align: left;">
+                            <p><strong>${facultyName}</strong> is already assigned to 4 schedules, which is the maximum limit.</p>
+                            <p>Please choose a different teacher or remove one of their existing schedule assignments.</p>
+                        </div>`,
+                        confirmButtonText: 'OK',
+                        confirmButtonColor: '#f59e0b'
+                    });
+                    setLoading(false);
+                    return;
+                }
+            }
+
             // Function to proceed with submission
             const proceedWithSubmission = () => {
+                console.log('Proceeding with submission...');
                 if (editingSchedule) {
+                    console.log('Updating existing schedule:', editingSchedule.id);
                     router.put(`/registrar/schedules/${editingSchedule.id}`, submitData, {
                         onSuccess: (response) => {
+                            console.log('Update successful:', response);
                             setShowModal(false);
                             resetForm();
                             router.reload();
                         },
                         onError: (errors) => {
+                            console.error('Update failed:', errors);
                             setErrors(errors);
                         },
                         onFinish: () => {
@@ -123,13 +315,16 @@ export default function ScheduleManagement() {
                         }
                     });
                 } else {
+                    console.log('Creating new schedule');
                     router.post('/registrar/schedules', submitData, {
                         onSuccess: (response) => {
+                            console.log('Creation successful:', response);
                             setShowModal(false);
                             resetForm();
-                            window.location.reload();
+                            router.reload();
                         },
                         onError: (errors) => {
+                            console.error('Creation failed:', errors);
                             setErrors(errors);
                         },
                         onFinish: () => {
@@ -138,53 +333,53 @@ export default function ScheduleManagement() {
                     });
                 }
             };
-            
+
             // Check for faculty schedule conflicts
             const conflictingSchedules = schedules.filter(schedule => {
                 // Skip the current schedule if we're editing
                 if (editingSchedule && schedule.id === editingSchedule.id) {
                     return false;
                 }
-                
+
                 // Only check schedules for the same faculty, day, and semester
                 // Faculty conflicts apply across ALL sections and strands
                 const facultyMatch = parseInt(schedule.faculty_id) === parseInt(submitData.faculty_id);
                 const dayMatch = schedule.day_of_week === submitData.day_of_week;
                 const semesterMatch = schedule.semester === submitData.semester;
-                
+
                 if (!facultyMatch || !dayMatch || !semesterMatch) {
                     return false;
                 }
-                
+
                 // Parse times for proper comparison
                 const parseTime = (timeStr) => {
                     const [hours, minutes] = timeStr.split(':').map(Number);
                     return hours * 60 + minutes; // Convert to minutes since midnight
                 };
-                
+
                 const newStart = parseTime(submitData.start_time);
                 const newEnd = parseTime(submitData.end_time);
                 const existingStart = parseTime(schedule.start_time);
                 const existingEnd = parseTime(schedule.end_time);
-                
+
                 // Check for time overlap: schedules conflict if they overlap at any point
                 const hasConflict = newStart < existingEnd && newEnd > existingStart;
-                
+
                 return hasConflict;
             });
-            
+
             // Show debugging info if no conflicts found but we expect there should be
             if (conflictingSchedules.length === 0) {
-                const debugInfo = schedules.filter(schedule => 
+                const debugInfo = schedules.filter(schedule =>
                     parseInt(schedule.faculty_id) === parseInt(submitData.faculty_id)
                 ).map(schedule => ({
-                    subject: subjects.find(s => s.id === schedule.subject_id)?.subject_name || 'Unknown',
-                    section: sections.find(s => s.id === schedule.section_id)?.section_name || 'Unknown',
+                    subject: subjects.find(s => s.id === schedule.subject_id)?.name || subjects.find(s => s.id === schedule.subject_id)?.subject_name || 'No Subject Found',
+                    section: sections.find(s => s.id === schedule.section_id)?.section_name || 'No Section Found',
                     day: schedule.day_of_week,
                     time: `${schedule.start_time} - ${schedule.end_time}`,
                     semester: schedule.semester
                 }));
-                
+
                 if (debugInfo.length > 0) {
                     Swal.fire({
                         icon: 'info',
@@ -199,9 +394,9 @@ export default function ScheduleManagement() {
                                 <br>
                                 <p><strong>Existing schedules for this faculty:</strong></p>
                                 <ul style="margin: 10px 0; padding-left: 20px;">
-                                    ${debugInfo.map(info => 
-                                        `<li>${info.subject} (${info.section}) - ${info.day} ${info.time} - ${info.semester}</li>`
-                                    ).join('')}
+                                    ${debugInfo.map(info =>
+                            `<li>${info.subject} (${info.section}) - ${info.day} ${info.time} - ${info.semester}</li>`
+                        ).join('')}
                                 </ul>
                             </div>
                         `,
@@ -218,17 +413,17 @@ export default function ScheduleManagement() {
                     return;
                 }
             }
-            
+
             if (conflictingSchedules.length > 0) {
                 const faculty = faculties.find(f => f.id === submitData.faculty_id);
                 const facultyName = faculty ? `${faculty.firstname} ${faculty.lastname}` : 'Unknown Faculty';
-                
+
                 let conflictDetails = conflictingSchedules.map(conflict => {
                     const subject = subjects.find(s => s.id === conflict.subject_id);
                     const section = sections.find(s => s.id === conflict.section_id);
                     return `${subject?.subject_name || 'Unknown Subject'} (${section?.section_name || 'Unknown Section'}) from ${conflict.start_time} to ${conflict.end_time}`;
                 }).join('\n');
-                
+
                 Swal.fire({
                     icon: 'error',
                     title: 'Faculty Schedule Conflict',
@@ -236,10 +431,10 @@ export default function ScheduleManagement() {
                         <p><strong>${facultyName}</strong> is already scheduled for:</p>
                         <ul style="margin: 10px 0; padding-left: 20px;">
                             ${conflictingSchedules.map(conflict => {
-                                const subject = subjects.find(s => s.id === conflict.subject_id);
-                                const section = sections.find(s => s.id === conflict.section_id);
-                                return `<li>${subject?.subject_name || 'Unknown Subject'} (${section?.section_name || 'Unknown Section'}) from ${conflict.start_time} to ${conflict.end_time}</li>`;
-                            }).join('')}
+                        const subject = subjects.find(s => s.id === conflict.subject_id);
+                        const section = sections.find(s => s.id === conflict.section_id);
+                        return `<li>${subject?.subject_name || 'Unknown Subject'} (${section?.section_name || 'Unknown Section'}) from ${conflict.start_time} to ${conflict.end_time}</li>`;
+                    }).join('')}
                         </ul>
                         <p>Please choose a different time slot or faculty member.</p>
                     </div>`,
@@ -249,10 +444,10 @@ export default function ScheduleManagement() {
                 setLoading(false);
                 return;
             }
-            
+
             // No conflicts found, proceed with submission
             proceedWithSubmission();
-            
+
         } catch (error) {
             console.error('Error submitting form:', error);
             setLoading(false);
@@ -264,6 +459,7 @@ export default function ScheduleManagement() {
             section_id: '',
             subject_id: '',
             faculty_id: '',
+            grade_level: '', // Add grade level filter
             day_of_week: '',
             start_time: '',
             end_time: '',
@@ -283,94 +479,6 @@ export default function ScheduleManagement() {
         });
     };
 
-    // Group schedules by strand, then by section for better organization
-    const schedulesByStrand = schedules.reduce((acc, schedule) => {
-        const strandKey = schedule.section?.strand?.name || 'Unknown Strand';
-        const strandCode = schedule.section?.strand?.code || 'UNK';
-        const sectionKey = schedule.section ? 
-            `${schedule.section.section_name}` : 
-            'Unassigned Section';
-        
-        if (!acc[strandKey]) {
-            acc[strandKey] = {
-                code: strandCode,
-                name: strandKey,
-                sections: {}
-            };
-        }
-        
-        if (!acc[strandKey].sections[sectionKey]) {
-            acc[strandKey].sections[sectionKey] = [];
-        }
-        
-        acc[strandKey].sections[sectionKey].push(schedule);
-        return acc;
-    }, {});
-
-    // Legacy grouping for backward compatibility
-    const schedulesBySection = schedules.reduce((acc, schedule) => {
-        const sectionKey = schedule.section ? 
-            `${schedule.section.section_name} (${schedule.section.strand?.name || 'No Strand'})` : 
-            'Unassigned Section';
-        if (!acc[sectionKey]) {
-            acc[sectionKey] = [];
-        }
-        acc[sectionKey].push(schedule);
-        return acc;
-    }, {});
-    
-    // Create timetable data structure
-    const timeSlots = [
-        '7:30', '8:00', '8:30', '9:00', '9:30', '10:00', '10:30', '11:00', 
-        '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00'
-    ];
-    
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
-    const createTimetableGrid = (sectionSchedules) => {
-        const grid = {};
-        const fullDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        
-        fullDays.forEach(day => {
-            grid[day] = {};
-            timeSlots.forEach(time => {
-                grid[day][time] = null;
-            });
-        });
-        
-        sectionSchedules.forEach(schedule => {
-            const startTime = schedule.start_time.substring(0, 5); // Get HH:MM format
-            const endTime = schedule.end_time.substring(0, 5); // Get HH:MM format
-            const day = schedule.day_of_week;
-            
-            if (grid[day]) {
-                // Find all time slots that fall within the schedule duration
-                const startIndex = timeSlots.indexOf(startTime);
-                const endTimeMinutes = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1]);
-                
-                timeSlots.forEach((timeSlot, index) => {
-                    const slotMinutes = parseInt(timeSlot.split(':')[0]) * 60 + parseInt(timeSlot.split(':')[1]);
-                    const startMinutes = parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1]);
-                    
-                    // If this time slot falls within the schedule duration
-                    if (slotMinutes >= startMinutes && slotMinutes < endTimeMinutes) {
-                        if (grid[day][timeSlot] !== undefined) {
-                            // Mark different parts of the same schedule
-                            grid[day][timeSlot] = {
-                                ...schedule,
-                                isStart: slotMinutes === startMinutes,
-                                isMiddle: slotMinutes > startMinutes && slotMinutes < endTimeMinutes - 30,
-                                isEnd: slotMinutes >= endTimeMinutes - 30 && slotMinutes < endTimeMinutes
-                            };
-                        }
-                    }
-                });
-            }
-        });
-        
-        return grid;
-    };
-
     const formatTime12Hour = (time24) => {
         const [hours, minutes] = time24.split(':');
         const hour = parseInt(hours);
@@ -379,24 +487,239 @@ export default function ScheduleManagement() {
         return `${hour12}:${minutes} ${ampm}`;
     };
 
+    // Function to abbreviate long subject names for better display
+    const abbreviateSubjectName = (subjectName) => {
+        if (!subjectName) return 'No Subject';
+
+        // If subject name is short enough, return as is
+        if (subjectName.length <= 20) return subjectName;
+
+        // Common abbreviations for Filipino subjects
+        const abbreviations = {
+            '21st Century Literature from the Philippines': '21st Cent. Lit (PH)',
+            'Contemporary Philippine Arts from the Regions': 'Contemp. PH Arts',
+            'Media and Information Literacy': 'Media & Info Lit',
+            'Understanding Culture, Society and Politics': 'UCSP',
+            'Personal Development': 'Personal Dev',
+            'Physical Education and Health': 'PE & Health',
+            'Practical Research': 'Practical Research',
+            'Inquiries, Investigations and Immersion': 'III',
+            'Work Immersion': 'Work Immersion',
+            'Entrepreneurship': 'Entrepreneurship',
+            'Organization and Management': 'Org & Management',
+            'Business Ethics and Social Responsibility': 'Business Ethics',
+            'Business Finance': 'Bus. Finance',
+            'Business Marketing': 'Bus. Marketing',
+            'Fundamentals of Accountancy, Business and Management': 'FABM',
+            'Applied Economics': 'Applied Econ',
+            'Business Math': 'Bus. Math',
+            'Oral Communication': 'Oral Comm',
+            'Reading and Writing': 'Reading & Writing',
+            'Komunikasyon at Pananaliksik sa Wika at Kulturang Pilipino': 'Komsik',
+            'Pagbasa at Pagsusuri ng Iba\'t Ibang Teksto Tungo sa Pananaliksik': 'Pagbasa at Pagsusuri',
+            'Filipino sa Piling Larangan': 'Filipino sa Piling',
+            'General Mathematics': 'Gen. Math',
+            'Statistics and Probability': 'Stat & Prob',
+            'Earth and Life Science': 'Earth & Life Sci',
+            'Physical Science': 'Physical Sci',
+            'General Biology': 'Gen. Biology',
+            'General Chemistry': 'Gen. Chemistry',
+            'General Physics': 'Gen. Physics'
+        };
+
+        // Check if we have a specific abbreviation
+        if (abbreviations[subjectName]) {
+            return abbreviations[subjectName];
+        }
+
+        // Generic abbreviation logic
+        // Split by common words and abbreviate
+        let abbreviated = subjectName
+            .replace(/\bPhilippines?\b/gi, 'PH')
+            .replace(/\bPhilippine\b/gi, 'PH')
+            .replace(/\bContemporary\b/gi, 'Contemp.')
+            .replace(/\bLiterature\b/gi, 'Lit.')
+            .replace(/\bCentury\b/gi, 'Cent.')
+            .replace(/\bManagement\b/gi, 'Mgmt.')
+            .replace(/\bDevelopment\b/gi, 'Dev.')
+            .replace(/\bEducation\b/gi, 'Edu.')
+            .replace(/\bInformation\b/gi, 'Info')
+            .replace(/\bCommunication\b/gi, 'Comm.')
+            .replace(/\bMathematics\b/gi, 'Math')
+            .replace(/\bScience\b/gi, 'Sci.')
+            .replace(/\bTechnology\b/gi, 'Tech.')
+            .replace(/\bResearch\b/gi, 'Research')
+            .replace(/\bFundamentals?\b/gi, 'Fund.')
+            .replace(/\bAccountancy\b/gi, 'Acctg.')
+            .replace(/\bBusiness\b/gi, 'Bus.')
+            .replace(/\bEconomics\b/gi, 'Econ.')
+            .replace(/\bProbability\b/gi, 'Prob.')
+            .replace(/\bStatistics\b/gi, 'Stat.')
+            .replace(/\bPhysical\b/gi, 'Phys.')
+            .replace(/\bChemistry\b/gi, 'Chem.')
+            .replace(/\bBiology\b/gi, 'Bio.')
+            .replace(/\bGeography\b/gi, 'Geo.')
+            .replace(/\bHistory\b/gi, 'Hist.')
+            .replace(/\bSociety\b/gi, 'Soc.')
+            .replace(/\bPolitics\b/gi, 'Pol.')
+            .replace(/\bCulture\b/gi, 'Cult.')
+            .replace(/\bUnderstanding\b/gi, 'Und.')
+            .replace(/\bOrganization\b/gi, 'Org.')
+            .replace(/\bEntrepreneurship\b/gi, 'Entrep.')
+            .replace(/\bResponsibility\b/gi, 'Resp.')
+            .replace(/\bInvestigations?\b/gi, 'Invest.')
+            .replace(/\bInquiries\b/gi, 'Inq.')
+            .replace(/\bImmersion\b/gi, 'Immer.')
+            .replace(/\band\b/gi, '&')
+            .replace(/\bthe\b/gi, '')
+            .replace(/\bfrom\b/gi, '')
+            .replace(/\bof\b/gi, '')
+            .replace(/\bin\b/gi, '')
+            .replace(/\bto\b/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        // If still too long, truncate and add ellipsis
+        if (abbreviated.length > 25) {
+            abbreviated = abbreviated.substring(0, 22) + '...';
+        }
+
+        return abbreviated;
+    };
+
+    // Group schedules by strand, then by section for better organization
+    const schedulesByStrand = schedules.reduce((acc, schedule) => {
+        const strandKey = schedule.section?.strand?.name || 'Unknown Strand';
+        const strandCode = schedule.section?.strand?.code || 'UNK';
+        const sectionKey = schedule.section ?
+            `${schedule.section.section_name}` :
+            'Unassigned Section';
+
+        if (!acc[strandKey]) {
+            acc[strandKey] = {
+                code: strandCode,
+                name: strandKey,
+                sections: {}
+            };
+        }
+
+        if (!acc[strandKey].sections[sectionKey]) {
+            acc[strandKey].sections[sectionKey] = [];
+        }
+
+        acc[strandKey].sections[sectionKey].push(schedule);
+        return acc;
+    }, {});
+
+    // Legacy grouping for backward compatibility
+    const schedulesBySection = schedules.reduce((acc, schedule) => {
+        const sectionKey = schedule.section ?
+            `${schedule.section.section_name} (${schedule.section.strand?.name || 'No Strand'})` :
+            'Unassigned Section';
+        if (!acc[sectionKey]) {
+            acc[sectionKey] = [];
+        }
+        acc[sectionKey].push(schedule);
+        return acc;
+    }, {});
+
+    // Create timetable data structure
+    const timeSlots = [
+        '7:30', '8:00', '8:30', '9:00', '9:30', '10:00', '10:30', '11:00',
+        '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
+    ];
+
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    const createTimetableGrid = (sectionSchedules) => {
+        const grid = {};
+        const fullDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+        fullDays.forEach(day => {
+            grid[day] = {};
+            timeSlots.forEach(time => {
+                grid[day][time] = null;
+            });
+        });
+
+        sectionSchedules.forEach(schedule => {
+            const startTime = schedule.start_time.substring(0, 5); // Get HH:MM format
+            const endTime = schedule.end_time.substring(0, 5); // Get HH:MM format
+            const day = schedule.day_of_week;
+
+            // Convert time to minutes for comparison
+            const parseTime = (timeStr) => {
+                const [hours, minutes] = timeStr.split(':').map(Number);
+                return hours * 60 + minutes; // Convert to minutes since midnight
+            };
+
+            const scheduleStart = parseTime(startTime);
+            const scheduleEnd = parseTime(endTime);
+
+            // Fill all time slots that fall within the schedule duration
+            timeSlots.forEach(timeSlot => {
+                const slotTime = parseTime(timeSlot);
+                const nextSlotIndex = timeSlots.indexOf(timeSlot) + 1;
+                const nextSlotTime = nextSlotIndex < timeSlots.length ? parseTime(timeSlots[nextSlotIndex]) : slotTime + 30;
+
+                // Check if this time slot overlaps with the schedule
+                // Include slots that start at or before the schedule end time
+                if (slotTime >= scheduleStart && slotTime <= scheduleEnd) {
+                    if (grid[day] && grid[day][timeSlot] !== undefined) {
+                        // Mark different types of slots for better display
+                        const isStart = slotTime === scheduleStart;
+                        const isEnd = slotTime === scheduleEnd || nextSlotTime > scheduleEnd;
+
+                        grid[day][timeSlot] = {
+                            ...schedule,
+                            isStart: isStart,
+                            isEnd: isEnd,
+                            isMiddle: !isStart && !isEnd
+                        };
+                    }
+                }
+            });
+        });
+
+        return grid;
+    };
+
     const getScheduleColor = (subject) => {
-        if (!subject) return 'border-gray-300 bg-gray-50';
-        
+        if (!subject) return 'border-gray-300 bg-gray-100';
+
         const colors = [
-            'border-blue-300 bg-blue-50',
-            'border-green-300 bg-green-50',
-            'border-yellow-300 bg-yellow-50',
-            'border-red-300 bg-red-50',
-            'border-purple-300 bg-purple-50',
-            'border-pink-300 bg-pink-50',
-            'border-indigo-300 bg-indigo-50',
-            'border-orange-300 bg-orange-50'
+            'border-blue-500 bg-blue-200',
+            'border-green-500 bg-green-200',
+            'border-yellow-500 bg-yellow-200',
+            'border-red-500 bg-red-200',
+            'border-purple-500 bg-purple-200',
+            'border-pink-500 bg-pink-200',
+            'border-indigo-500 bg-indigo-200',
+            'border-orange-500 bg-orange-200',
+            'border-teal-500 bg-teal-200',
+            'border-cyan-500 bg-cyan-200',
+            'border-lime-500 bg-lime-200',
+            'border-emerald-500 bg-emerald-200',
+            'border-violet-500 bg-violet-200',
+            'border-fuchsia-500 bg-fuchsia-200',
+            'border-rose-500 bg-rose-200',
+            'border-amber-500 bg-amber-200'
         ];
-        
-        let hash = subject.name?.split('').reduce((a, b) => {
-            a = ((a << 5) - a) + b.charCodeAt(0);
-            return a & a;
-        }, 0) || 0;
+
+        // Create a more reliable hash based on subject name and ID
+        const subjectIdentifier = subject.name || subject.subject_name || `subject_${subject.id || 'unknown'}`;
+        let hash = 0;
+        for (let i = 0; i < subjectIdentifier.length; i++) {
+            const char = subjectIdentifier.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+
+        // Add subject ID to hash for more uniqueness
+        if (subject.id) {
+            hash += parseInt(subject.id) * 17;
+        }
+
         return colors[Math.abs(hash) % colors.length];
     };
 
@@ -413,7 +736,7 @@ export default function ScheduleManagement() {
     return (
         <div className="flex min-h-screen bg-gray-50">
             <Sidebar onToggle={setIsCollapsed} />
-            
+
             <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
                 <div className="max-w-7xl mx-auto">
                     {/* Header */}
@@ -455,7 +778,7 @@ export default function ScheduleManagement() {
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                             <div className="flex items-center gap-4">
                                 <div className="p-3 bg-green-100 rounded-lg">
@@ -467,7 +790,7 @@ export default function ScheduleManagement() {
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                             <div className="flex items-center gap-4">
                                 <div className="p-3 bg-purple-100 rounded-lg">
@@ -494,7 +817,7 @@ export default function ScheduleManagement() {
                                         </div>
                                         <p className="text-purple-100 font-medium">{strandData.name}</p>
                                     </div>
-                                    
+
                                     {/* Strand Statistics */}
                                     <div className="p-6">
                                         <div className="space-y-4">
@@ -507,7 +830,7 @@ export default function ScheduleManagement() {
                                                     {Object.keys(strandData.sections).length}
                                                 </span>
                                             </div>
-                                            
+
                                             <div className="flex items-center justify-between">
                                                 <span className="text-gray-600 flex items-center gap-2">
                                                     <FaCalendarAlt className="w-4 h-4" />
@@ -517,10 +840,10 @@ export default function ScheduleManagement() {
                                                     {Object.values(strandData.sections).flat().length}
                                                 </span>
                                             </div>
-                                            
+
                                             <div className="pt-4 border-t border-gray-200">
                                                 <button
-                                                    onClick={() => openStrandModal({data: strandData, name: strandName})}
+                                                    onClick={() => openStrandModal({ data: strandData, name: strandName })}
                                                     className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
                                                 >
                                                     <FaEye className="w-4 h-4" />
@@ -549,7 +872,7 @@ export default function ScheduleManagement() {
 
                     {/* Create/Edit Schedule Modal */}
                     {showModal && (
-                        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all duration-300">
+                        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-[60] p-4 transition-all duration-300">
                             <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-white/20">
                                 <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-t-3xl">
                                     <div className="flex items-center justify-between">
@@ -612,7 +935,7 @@ export default function ScheduleManagement() {
                                                 value={formData.section_id}
                                                 onChange={(e) => {
                                                     setFormData({
-                                                        ...formData, 
+                                                        ...formData,
                                                         section_id: e.target.value,
                                                         subject_id: '', // Reset dependent fields
                                                         faculty_id: ''
@@ -633,45 +956,69 @@ export default function ScheduleManagement() {
                                             )}
                                         </div>
 
+                                        {/* Grade Level Selection - Step 1 */}
+                                        <div className="bg-blue-50/80 backdrop-blur-sm border-2 border-blue-200/50 rounded-lg p-4">
+                                            <label className="block text-sm font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
+                                                Grade Level
+                                            </label>
+                                            <select
+                                                value={formData.grade_level}
+                                                onChange={(e) => {
+                                                    setFormData({
+                                                        ...formData,
+                                                        grade_level: e.target.value,
+                                                        subject_id: '', // Reset dependent fields
+                                                        faculty_id: ''
+                                                    })
+                                                }}
+                                                className="w-full px-4 py-3 border-2 border-blue-300/50 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white/90 backdrop-blur-sm"
+                                                required
+                                            >
+                                                <option value="">Choose a grade level...</option>
+                                                <option value="11">Grade 11</option>
+                                                <option value="12">Grade 12</option>
+                                            </select>
+                                            {!formData.grade_level && (
+                                                <p className="text-blue-600 text-xs mt-1">⚠️ Select a grade level to enable other fields</p>
+                                            )}
+                                        </div>
+
                                         {/* Subject Selection - Step 2 */}
-                                        <div className={`${formData.section_id ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
-                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id ? 'text-green-800' : 'text-gray-500'}`}>
-                                                <span className={`${formData.section_id ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2</span>
-                                                Subject {formData.section_id ? '(Filtered by Section)' : '(Select Section First)'}
+                                        <div className={`${formData.section_id && formData.grade_level ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
+                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level ? 'text-green-800' : 'text-gray-500'}`}>
+                                                <span className={`${formData.section_id && formData.grade_level ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2</span>
+                                                Subject {formData.section_id && formData.grade_level ? '(Filtered by Section and Grade Level)' : '(Select Section and Grade Level First)'}
                                             </label>
                                             <select
                                                 value={formData.subject_id}
-                                                onChange={(e) => setFormData({...formData, subject_id: e.target.value})}
-                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                disabled={!formData.section_id}
+                                                onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                disabled={!(formData.section_id && formData.grade_level)}
                                                 required
                                             >
-                                                <option value="">{formData.section_id ? 'Select Subject' : 'Select section first'}</option>
-                                                {formData.section_id && subjects?.filter(subject => {
-                                                    const selectedSection = sections?.find(s => s.id == formData.section_id);
-                                                    return selectedSection ? subject.strand_id == selectedSection.strand_id : true;
-                                                }).map((subject) => (
-                                                    <option key={subject.id} value={subject.id}>
-                                                        {subject.code} - {subject.name}
+                                                <option value="">Select Subject</option>
+                                                {availableSubjects.map((subject) => (
+                                                    <option key={subject.id} value={subject.id} disabled={subject.isDisabled}>
+                                                        {subject.code} - {subject.name} {subject.disabledReason ? `(${subject.disabledReason})` : ''}
                                                     </option>
                                                 ))}
                                             </select>
                                         </div>
 
                                         {/* Faculty Selection - Step 2 */}
-                                        <div className={`${formData.section_id ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
-                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id ? 'text-green-800' : 'text-gray-500'}`}>
-                                                <span className={`${formData.section_id ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2</span>
-                                                Faculty {formData.section_id ? '(Available Teachers)' : '(Select Section First)'}
+                                        <div className={`${formData.section_id && formData.grade_level ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
+                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level ? 'text-green-800' : 'text-gray-500'}`}>
+                                                <span className={`${formData.section_id && formData.grade_level ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2</span>
+                                                Faculty {formData.section_id && formData.grade_level ? '(Available Teachers - Optional)' : '(Select Section and Grade Level First - Optional)'}
                                             </label>
                                             <select
                                                 value={formData.faculty_id}
-                                                onChange={(e) => setFormData({...formData, faculty_id: e.target.value})}
-                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                disabled={!formData.section_id}
-                                                required
+                                                onChange={(e) => setFormData({ ...formData, faculty_id: e.target.value })}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                disabled={!(formData.section_id && formData.grade_level)}
                                             >
-                                                <option value="">{formData.section_id ? 'Select Faculty' : 'Select section first'}</option>
+                                                <option value="">No Faculty Assigned</option>
                                                 {formData.section_id && faculties?.map((faculty) => (
                                                     <option key={faculty.id} value={faculty.id}>
                                                         {faculty.firstname} {faculty.lastname}
@@ -681,9 +1028,9 @@ export default function ScheduleManagement() {
                                         </div>
 
                                         {/* Day and Time Selection - Step 3 */}
-                                        <div className={`${formData.section_id && formData.subject_id && formData.faculty_id ? 'bg-yellow-50/80 backdrop-blur-sm border-2 border-yellow-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
-                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.subject_id && formData.faculty_id ? 'text-yellow-800' : 'text-gray-500'}`}>
-                                                <span className={`${formData.section_id && formData.subject_id && formData.faculty_id ? 'bg-yellow-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>3</span>
+                                        <div className={`${formData.section_id && formData.grade_level && formData.subject_id ? 'bg-yellow-50/80 backdrop-blur-sm border-2 border-yellow-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
+                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level && formData.subject_id ? 'text-yellow-800' : 'text-gray-500'}`}>
+                                                <span className={`${formData.section_id && formData.grade_level && formData.subject_id ? 'bg-yellow-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>3</span>
                                                 Schedule Details
                                             </label>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -691,9 +1038,9 @@ export default function ScheduleManagement() {
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">Day of Week</label>
                                                     <select
                                                         value={formData.day_of_week}
-                                                        onChange={(e) => setFormData({...formData, day_of_week: e.target.value})}
-                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.subject_id && formData.faculty_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                        disabled={!(formData.section_id && formData.subject_id && formData.faculty_id)}
+                                                        onChange={(e) => setFormData({ ...formData, day_of_week: e.target.value })}
+                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level && formData.subject_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                        disabled={!(formData.section_id && formData.grade_level && formData.subject_id)}
                                                         required
                                                     >
                                                         <option value="">Day</option>
@@ -708,28 +1055,64 @@ export default function ScheduleManagement() {
 
                                                 <div>
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">Start Time</label>
-                                                    <input
-                                                        type="time"
+                                                    <select
                                                         value={formData.start_time}
-                                                        onChange={(e) => setFormData({...formData, start_time: e.target.value})}
-                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.subject_id && formData.faculty_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                        disabled={!(formData.section_id && formData.subject_id && formData.faculty_id)}
+                                                        onChange={(e) => {
+                                                            const selectedTime = e.target.value;
+
+                                                            // Auto-set end time based on valid time slots
+                                                            const validTimeSlots = {
+                                                                '08:00': '10:00', // 1st Period
+                                                                '10:30': '12:30', // 2nd Period
+                                                                '13:30': '15:30', // 3rd Period
+                                                                '15:30': '16:30'  // 4th Period
+                                                            };
+
+                                                            if (validTimeSlots[selectedTime]) {
+                                                                setFormData(prev => ({
+                                                                    ...prev,
+                                                                    start_time: selectedTime,
+                                                                    end_time: validTimeSlots[selectedTime]
+                                                                }));
+                                                            }
+                                                        }}
+                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level && formData.subject_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                        disabled={!(formData.section_id && formData.grade_level && formData.subject_id)}
                                                         required
-                                                    />
+                                                    >
+                                                        <option value="">Select Start Time</option>
+                                                        <option value="08:00">8:00 AM (1st Period)</option>
+                                                        <option value="10:30">10:30 AM (2nd Period)</option>
+                                                        <option value="13:30">1:30 PM (3rd Period)</option>
+                                                        <option value="15:30">3:30 PM (4th Period)</option>
+                                                    </select>
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        <strong>Valid time slots only:</strong> 4 periods per day system
+                                                    </div>
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">End Time</label>
-                                                    <input
-                                                        type="time"
+                                                    <select
                                                         value={formData.end_time}
-                                                        onChange={(e) => setFormData({...formData, end_time: e.target.value})}
-                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.subject_id && formData.faculty_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                        disabled={!(formData.section_id && formData.subject_id && formData.faculty_id)}
+                                                        onChange={(e) => {
+                                                            setFormData({ ...formData, end_time: e.target.value });
+                                                        }}
+                                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level && formData.subject_id ? 'border-yellow-300/50 focus:ring-yellow-500 focus:border-yellow-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                        disabled={!(formData.section_id && formData.grade_level && formData.subject_id)}
                                                         required
-                                                    />
+                                                    >
+                                                        <option value="">Select End Time</option>
+                                                        <option value="10:00">10:00 AM (1st Period End)</option>
+                                                        <option value="12:30">12:30 PM (2nd Period End)</option>
+                                                        <option value="15:30">3:30 PM (3rd Period End)</option>
+                                                        <option value="16:30">4:30 PM (4th Period End)</option>
+                                                    </select>
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        <strong>Auto-filled based on start time selection</strong>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            
+
                                             {/* Duration, Semester, and School Year Selection */}
                                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 <div>
@@ -745,9 +1128,9 @@ export default function ScheduleManagement() {
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">Semester</label>
                                                     <select
                                                         value={formData.semester}
-                                                        onChange={(e) => setFormData({...formData, semester: e.target.value})}
+                                                        onChange={(e) => setFormData({ ...formData, semester: e.target.value })}
                                                         className="w-full px-3 py-2 border border-gray-300/50 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none bg-white/90 backdrop-blur-sm"
-                                                        disabled={!(formData.section_id && formData.subject_id && formData.faculty_id)}
+                                                        disabled={!(formData.section_id && formData.grade_level && formData.subject_id)}
                                                         required
                                                     >
                                                         <option value="1st Semester">1st Semester</option>
@@ -759,9 +1142,9 @@ export default function ScheduleManagement() {
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">School Year</label>
                                                     <select
                                                         value={formData.school_year}
-                                                        onChange={(e) => setFormData({...formData, school_year: e.target.value})}
+                                                        onChange={(e) => setFormData({ ...formData, school_year: e.target.value })}
                                                         className="w-full px-3 py-2 border border-gray-300/50 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none bg-white/90 backdrop-blur-sm"
-                                                        disabled={!(formData.section_id && formData.subject_id && formData.faculty_id)}
+                                                        disabled={!(formData.section_id && formData.grade_level && formData.subject_id)}
                                                         required
                                                     >
                                                         {schoolYears?.map((year) => (
@@ -789,11 +1172,10 @@ export default function ScheduleManagement() {
                                         <button
                                             type="submit"
                                             disabled={loading}
-                                            className={`px-6 py-2 rounded-lg text-white font-semibold transition-all duration-200 ${
-                                                loading 
-                                                    ? 'bg-gray-400 cursor-not-allowed' 
-                                                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-lg hover:shadow-xl'
-                                            }`}
+                                            className={`px-6 py-2 rounded-lg text-white font-semibold transition-all duration-200 ${loading
+                                                ? 'bg-gray-400 cursor-not-allowed'
+                                                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-lg hover:shadow-xl'
+                                                }`}
                                         >
                                             {loading ? 'Creating...' : (editingSchedule ? 'Update Schedule' : 'Create Schedule')}
                                         </button>
@@ -832,7 +1214,7 @@ export default function ScheduleManagement() {
                                     <div className="space-y-8">
                                         {Object.entries(selectedStrand.data.sections).map(([sectionName, sectionSchedules]) => {
                                             const timetableGrid = createTimetableGrid(sectionSchedules);
-                                            
+
                                             return (
                                                 <div key={sectionName} className="bg-gray-50/80 backdrop-blur-sm rounded-xl p-6 border border-gray-200/50">
                                                     {/* Section Header */}
@@ -843,135 +1225,153 @@ export default function ScheduleManagement() {
                                                         </h3>
                                                         <p className="text-blue-600 mt-1">{sectionSchedules.length} scheduled classes</p>
                                                     </div>
-                                                    
+
                                                     {/* Timetable Grid */}
-                                                    <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 overflow-x-auto border border-gray-200/30">
-                                                        <div className="min-w-full">
-                                                            {/* Header Row */}
-                                                            <div className="grid grid-cols-7 gap-1 mb-2">
-                                                                <div className="bg-gray-100/80 backdrop-blur-sm p-3 text-center font-semibold text-gray-700 rounded text-sm border border-gray-200/50">
-                                                                    Time
+                                                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                                                        <div className="overflow-x-auto">
+                                                            <div className="min-w-[800px]">
+                                                                {/* Header Row */}
+                                                                <div className="grid grid-cols-7 bg-gradient-to-r from-indigo-50 to-purple-50 border-b-2 border-indigo-100">
+                                                                    <div className="p-4 text-center font-bold text-gray-800 bg-gray-50 border-r border-gray-200 flex items-center justify-center">
+                                                                        <FaClock className="w-4 h-4 mr-2 text-gray-600" />
+                                                                        <span>Time</span>
+                                                                    </div>
+                                                                    {days.map(day => (
+                                                                        <div key={day} className="p-4 text-center font-bold text-indigo-800 border-r border-indigo-100 last:border-r-0">
+                                                                            <div className="flex flex-col items-center">
+                                                                                <span className="text-lg">{day}</span>
+                                                                                <span className="text-xs text-indigo-600 mt-1 font-normal">
+                                                                                    {day === 'Mon' ? 'Monday' :
+                                                                                        day === 'Tue' ? 'Tuesday' :
+                                                                                            day === 'Wed' ? 'Wednesday' :
+                                                                                                day === 'Thu' ? 'Thursday' :
+                                                                                                    day === 'Fri' ? 'Friday' : 'Saturday'}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
                                                                 </div>
-                                                                {days.map(day => (
-                                                                    <div key={day} className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 backdrop-blur-sm p-3 text-center font-semibold text-gray-700 rounded border border-blue-200/50 text-sm">
-                                                                        {day}
+
+                                                                {/* Time Slots */}
+                                                                {timeSlots.map((timeSlot, index) => (
+                                                                    <div key={timeSlot} className={`grid grid-cols-7 border-b border-gray-100 hover:bg-gray-50/50 transition-colors duration-150 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                                                                        {/* Time Column */}
+                                                                        <div className="p-3 text-center bg-gray-50 border-r border-gray-200 flex flex-col items-center justify-center min-h-[60px]">
+                                                                            <div className="text-sm font-semibold text-gray-800">
+                                                                                {formatTime12Hour(timeSlot)}
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-500 mt-1">
+                                                                                {timeSlot}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Day Columns */}
+                                                                        {days.map(day => {
+                                                                            const fullDay = day === 'Mon' ? 'Monday' :
+                                                                                day === 'Tue' ? 'Tuesday' :
+                                                                                    day === 'Wed' ? 'Wednesday' :
+                                                                                        day === 'Thu' ? 'Thursday' :
+                                                                                            day === 'Fri' ? 'Friday' : 'Saturday';
+                                                                            const schedule = timetableGrid[fullDay] && timetableGrid[fullDay][timeSlot] ? timetableGrid[fullDay][timeSlot] : null;
+
+                                                                            return (
+                                                                                <div key={`${day}-${timeSlot}`} className="min-h-[60px] border-r border-gray-100 last:border-r-0 relative p-1">
+                                                                                    {schedule ? (
+                                                                                        <div className={`h-full ${getScheduleColor(schedule.subject)} relative group cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-200 ${schedule.isStart && schedule.isEnd ? 'rounded-lg' :
+                                                                                            schedule.isStart ? 'rounded-t-lg rounded-b-none border-b-0' :
+                                                                                                schedule.isMiddle ? 'rounded-none border-t-0 border-b-0' :
+                                                                                                    schedule.isEnd ? 'rounded-b-lg rounded-t-none border-t-0' : 'rounded-lg'
+                                                                                            }`}>
+                                                                                            <div className="p-2 h-full flex flex-col justify-center">
+                                                                                                {/* Only show full details on start block */}
+                                                                                                {schedule.isStart ? (
+                                                                                                    <>
+                                                                                                        {/* Subject Name - Primary Info */}
+                                                                                                        <div className="text-center mb-2">
+                                                                                                            <div className="text-sm font-bold text-gray-800 leading-tight mb-1">
+                                                                                                                {abbreviateSubjectName(schedule.subject?.name || subjects.find(s => s.id === schedule.subject_id)?.name || 'No Subject')}
+                                                                                                            </div>
+                                                                                                            <div className="text-xs text-gray-600 bg-white/70 rounded px-2 py-1">
+                                                                                                                {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)}
+                                                                                                            </div>
+                                                                                                        </div>
+
+                                                                                                        {/* Secondary Info */}
+                                                                                                        <div className="space-y-1">
+                                                                                                            <div className="text-xs flex items-center justify-center gap-1 text-gray-700">
+                                                                                                                <FaUser className="w-3 h-3" />
+                                                                                                                <span className="truncate font-medium">
+                                                                                                                    {schedule.faculty ?
+                                                                                                                        `${schedule.faculty.firstname?.charAt(0)}. ${schedule.faculty.lastname}` :
+                                                                                                                        faculties.find(f => f.id === schedule.faculty_id) ?
+                                                                                                                            `${faculties.find(f => f.id === schedule.faculty_id).firstname?.charAt(0)}. ${faculties.find(f => f.id === schedule.faculty_id).lastname}` :
+                                                                                                                            'TBA'
+                                                                                                                    }
+                                                                                                                </span>
+                                                                                                            </div>
+
+                                                                                                            <div className="text-xs flex items-center justify-center gap-1 text-gray-600">
+                                                                                                                <FaMapMarkerAlt className="w-3 h-3" />
+                                                                                                                <span className="truncate">{schedule.room || 'TBA'}</span>
+                                                                                                            </div>
+                                                                                                            <div className="text-xs flex items-center justify-center gap-1 text-gray-600">
+                                                                                                                <FaClock className="w-3 h-3" />
+                                                                                                                <span>{schedule.duration || 60} minutes</span>
+                                                                                                            </div>
+                                                                                                        </div>
+
+                                                                                                        {/* Action Button - Only visible on hover */}
+                                                                                                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                                                                            <button
+                                                                                                                onClick={(e) => {
+                                                                                                                    e.stopPropagation();
+                                                                                                                    openEditModal(schedule);
+                                                                                                                }}
+                                                                                                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                                                                                                title="Edit Schedule"
+                                                                                                                aria-label="Edit schedule"
+                                                                                                            >
+                                                                                                                <FaEdit className="w-3 h-3" />
+                                                                                                            </button>
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                ) : (
+                                                                                                    /* Empty continuation blocks - no content to maintain seamless appearance */
+                                                                                                    <div className="h-full"></div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <div className="h-full flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors duration-150 rounded">
+                                                                                            <span className="text-xs font-medium opacity-0 hover:opacity-100 transition-opacity duration-200">Free</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            );
+                                                                        })}
                                                                     </div>
                                                                 ))}
                                                             </div>
-                                                            
-                                                            {/* Time Slots */}
-                                                            {timeSlots.map(timeSlot => (
-                                                                <div key={timeSlot} className="grid grid-cols-7 gap-1 mb-1">
-                                                                    {/* Time Column */}
-                                                                    <div className="bg-gray-50/80 backdrop-blur-sm p-2 text-center text-sm font-medium text-gray-600 rounded border border-gray-200/50 flex items-center justify-center min-h-[48px]">
-                                                                        <FaClock className="w-3 h-3 mr-2" />
-                                                                        {formatTime12Hour(timeSlot)}
-                                                                    </div>
-                                                                    
-                                                                    {/* Day Columns */}
-                                                                    {days.map(day => {
-                                                                        const fullDay = day === 'Mon' ? 'Monday' : 
-                                                                                       day === 'Tue' ? 'Tuesday' : 
-                                                                                       day === 'Wed' ? 'Wednesday' : 
-                                                                                       day === 'Thu' ? 'Thursday' : 
-                                                                                       day === 'Fri' ? 'Friday' : 'Saturday';
-                                                                        const schedule = timetableGrid[fullDay] && timetableGrid[fullDay][timeSlot] ? timetableGrid[fullDay][timeSlot] : null;
-                                                                        
-                                                                        return (
-                                                                            <div key={`${day}-${timeSlot}`} className="min-h-[48px] border border-gray-200/50 rounded relative">
-                                                                                {schedule ? (
-                                                                                    <div className={`h-full p-2 border-2 ${getScheduleColor(schedule.subject)} relative group cursor-pointer hover:shadow-md transition-all duration-200 backdrop-blur-sm ${
-                                                                                        schedule.isStart ? 'rounded-t-lg border-b-0' : 
-                                                                                        schedule.isEnd ? 'rounded-b-lg border-t-0' : 
-                                                                                        schedule.isMiddle ? 'rounded-none border-t-0 border-b-0' : 'rounded-lg'
-                                                                                    }`}>
-                                                                                        {schedule.isStart && (
-                                                                                            <div className="text-center">
-                                                                                                {/* Faculty Name */}
-                                                                                                <div className="text-xs mb-1 flex items-center gap-1">
-                                                                                                    <FaUser className="w-2 h-2" />
-                                                                                                    <span className="truncate font-medium">
-                                                                                                        {schedule.faculty ? 
-                                                                                                            `${schedule.faculty.firstname?.charAt(0)}. ${schedule.faculty.lastname}` : 
-                                                                                                            faculties.find(f => f.id === schedule.faculty_id) ? 
-                                                                                                                `${faculties.find(f => f.id === schedule.faculty_id).firstname?.charAt(0)}. ${faculties.find(f => f.id === schedule.faculty_id).lastname}` : 
-                                                                                                                'No Faculty'
-                                                                                                        }
-                                                                                                    </span>
-                                                                                                </div>
-                                                                                                
-                                                                                                {/* Section */}
-                                                                                                <div className="text-xs flex items-center gap-1">
-                                                                                                    <FaUsers className="w-2 h-2" />
-                                                                                                    <span className="truncate">{schedule.section?.section_name || sections.find(s => s.id === schedule.section_id)?.section_name || 'N/A'}</span>
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-                                                                        
-                                                                                        {schedule.isMiddle && (
-                                                                                            <div className="h-full flex items-center justify-center">
-                                                                                                <div className="text-xs font-medium text-center">
-                                                                                                    <div className="truncate mb-1 font-semibold">
-                                                                                                        {schedule.subject?.name || subjects.find(s => s.id === schedule.subject_id)?.name || 'No Subject'}
-                                                                                                    </div>
-                                                                                                    <div className="opacity-75">
-                                                                                                        {Math.round((schedule.duration || 60) / 60 * 10) / 10}h
-                                                                                                    </div>
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-                                                                        
-                                                                                        {schedule.isEnd && (
-                                                                                            <div className="text-center">
-                                                                                                <div className="text-xs font-medium">
-                                                                                                    {schedule.duration || 60} min
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        )}
-                                                                        
-                                                                                        {/* Tooltip on Hover */}
-                                                                                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900/90 backdrop-blur-sm text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 whitespace-nowrap border border-gray-700/50">
-                                                                                            <div className="font-semibold">{schedule.subject?.name || subjects.find(s => s.id === schedule.subject_id)?.name || 'No Subject'}</div>
-                                                                                            <div>Faculty: {schedule.faculty ? `${schedule.faculty.firstname} ${schedule.faculty.lastname}` : faculties.find(f => f.id === schedule.faculty_id) ? `${faculties.find(f => f.id === schedule.faculty_id).firstname} ${faculties.find(f => f.id === schedule.faculty_id).lastname}` : 'No Faculty'}</div>
-                                                                                            <div>Time: {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)}</div>
-                                                                                            <div>Room: {schedule.room || 'TBA'}</div>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div className="h-full bg-gray-50/60 hover:bg-gray-100/60 backdrop-blur-sm transition-colors duration-200 rounded flex items-center justify-center border border-gray-200/30">
-                                                                                        <span className="text-gray-400 text-xs">Free</span>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            ))}
                                                         </div>
-                                                    </div>
-                                                    
-                                                    {/* Legend */}
-                                                    <div className="mt-4 p-4 bg-white/80 backdrop-blur-sm rounded-lg border border-gray-200/50">
-                                                        <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                                                            <FaInfoCircle className="w-4 h-4" />
-                                                            Legend
-                                                        </h4>
-                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-4 h-4 bg-blue-100/80 backdrop-blur-sm border border-blue-300/50 rounded"></div>
-                                                                <span>Hover for details</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <FaEdit className="w-4 h-4 text-blue-600" />
-                                                                <span>Edit</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <FaTrash className="w-4 h-4 text-red-600" />
-                                                                <span>Delete</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="w-4 h-4 bg-gray-50/80 backdrop-blur-sm border border-gray-200/50 rounded"></span>
-                                                                <span>Free slot</span>
+
+                                                        {/* Timetable Legend */}
+                                                        <div className="bg-gray-50 border-t border-gray-200 p-4">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex items-center gap-4">
+                                                                    <span className="text-sm font-medium text-gray-700">Legend:</span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-4 h-4 bg-blue-100 border-2 border-blue-300 rounded"></div>
+                                                                        <span className="text-xs text-gray-600">Scheduled Class</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded"></div>
+                                                                        <span className="text-xs text-gray-600">Free Period</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-xs text-gray-500 flex items-center gap-1">
+                                                                    <FaInfoCircle className="w-3 h-3" />
+                                                                    <span>Hover over classes for details • Click to edit</span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>

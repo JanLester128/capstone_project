@@ -1,9 +1,30 @@
 import React, { useState, useEffect } from "react";
 import { router } from "@inertiajs/react";
 import Swal from "sweetalert2";
-import { FaUpload, FaFileImage, FaFilePdf, FaTimes } from "react-icons/fa";
+import {
+  FaUpload,
+  FaFileImage,
+  FaFilePdf,
+  FaTimes,
+  FaUser,
+  FaGraduationCap,
+  FaFileAlt,
+  FaCheckCircle,
+  FaExclamationTriangle,
+  FaInfoCircle,
+  FaSpinner,
+  FaArrowLeft,
+  FaArrowRight,
+  FaCalendarAlt,
+  FaIdCard,
+  FaMapMarkerAlt,
+  FaClipboardCheck,
+  FaEye,
+  FaEyeSlash
+} from "react-icons/fa";
 
 export default function EnrollmentForm({ isOpen, onClose, user, availableStrands = [], activeSchoolYear = null }) {
+  const [currentStep, setCurrentStep] = useState(1);
   const [form, setForm] = useState({
     // Pre-fill student name from authenticated user
     studentName: user ? `${user.firstname || ''} ${user.middlename ? user.middlename + ' ' : ''}${user.lastname || ''}` : '',
@@ -15,14 +36,134 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     middleName: user?.middlename || '',
     // Use active school year from registrar
     schoolYear: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '',
-    lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : ''
+    lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : '',
+    // Initialize strand choices so selects are controlled and values are posted
+    firstChoice: '',
+    secondChoice: '',
+    thirdChoice: '',
+    // Add student status with default value - HCI Principle 5: Error prevention
+    studentStatus: 'New Student',
+    extensionName: '',
+    religion: '',
+    // Additional fields for complete database coverage
+    ipCommunity: '',
+    fourPs: '',
+    pwdId: '',
+    guardianName: '',
+    guardianContact: '',
+    lastSchool: ''
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [uploadedFiles, setUploadedFiles] = useState({
-    psaBirthCertificate: null,
-    reportCard: null
+    reportCard: null,
+    image: null,
+    psaBirthCertificate: null
   });
+  const [showValidation, setShowValidation] = useState(false);
+
+  // Enforce allowed grade levels on the client to match server validation
+  const allowedGrades = ["Grade 11", "Grade 12"];
+
+  // HCI Principle 8: Aesthetic and minimalist design - Clear step structure
+  const steps = [
+    {
+      id: 1,
+      title: "Personal Information",
+      icon: FaUser,
+      description: "Basic student details",
+      color: "blue"
+    },
+    {
+      id: 2,
+      title: "Strand Preferences",
+      icon: FaGraduationCap,
+      description: "Choose your academic track",
+      color: "green"
+    },
+    {
+      id: 3,
+      title: "Additional Details",
+      icon: FaFileAlt,
+      description: "Complete your information",
+      color: "purple"
+    },
+    {
+      id: 4,
+      title: "Document Upload",
+      icon: FaClipboardCheck,
+      description: "Submit required documents",
+      color: "indigo"
+    }
+  ];
+
+  // HCI Principle 5: Error prevention - Real-time validation
+  const validateStep = (step) => {
+    const stepErrors = {};
+
+    switch (step) {
+      case 1:
+        if (!form.lrn || form.lrn.length !== 12) stepErrors.lrn = "LRN must be exactly 12 digits";
+        if (!form.studentStatus) stepErrors.studentStatus = "Student status is required";
+        if (!form.gradeLevel) stepErrors.gradeLevel = "Grade level is required";
+        if (!form.birthdate) stepErrors.birthdate = "Birthdate is required";
+        if (!form.sex) stepErrors.sex = "Sex is required";
+        if (!form.birthPlace) stepErrors.birthPlace = "Place of birth is required";
+        if (!form.address) stepErrors.address = "Address is required";
+        break;
+      case 2:
+        if (!form.firstChoice) stepErrors.firstChoice = "First choice is required";
+        if (!form.secondChoice) stepErrors.secondChoice = "Second choice is required";
+        if (!form.thirdChoice) stepErrors.thirdChoice = "Third choice is required";
+        break;
+      case 3:
+        if (!form.lastGrade) stepErrors.lastGrade = "Last grade completed is required";
+        break;
+      case 4:
+        if (!uploadedFiles.reportCard) stepErrors.reportCard = "Report card is required";
+        if (!uploadedFiles.image) stepErrors.image = "Student photo is required";
+        if (!uploadedFiles.psaBirthCertificate) stepErrors.psaBirthCertificate = "PSA Birth certificate is required";
+        break;
+    }
+
+    return stepErrors;
+  };
+
+  // HCI Principle 9: Help users recognize, diagnose, and recover from errors
+  const handleChoiceChange = (name, value) => {
+    const others = {
+      firstChoice: [form.secondChoice, form.thirdChoice],
+      secondChoice: [form.firstChoice, form.thirdChoice],
+      thirdChoice: [form.firstChoice, form.secondChoice]
+    }[name].filter(Boolean);
+
+    if (value && others.includes(value)) {
+      Swal.fire({
+        title: 'Duplicate Strand Selection',
+        text: 'You cannot select the same strand more than once. Please choose a different strand for each preference.',
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b',
+        confirmButtonText: 'I Understand'
+      });
+      setForm(prev => ({ ...prev, [name]: '' }));
+      return;
+    }
+    setForm(prev => ({ ...prev, [name]: value }));
+
+    // Clear error when user makes valid selection
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  // Disable options already chosen in other selects
+  const isOptionDisabled = (optionId, currentName) => {
+    const idStr = String(optionId);
+    if (currentName !== 'firstChoice' && form.firstChoice === idStr) return true;
+    if (currentName !== 'secondChoice' && form.secondChoice === idStr) return true;
+    if (currentName !== 'thirdChoice' && form.thirdChoice === idStr) return true;
+    return false;
+  };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -30,6 +171,11 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
       ...form,
       [name]: type === "checkbox" ? checked : value,
     });
+
+    // Clear error when user starts typing - HCI Principle 3: User control and freedom
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
   };
 
   // Auto-calculate age when birthdate changes
@@ -39,11 +185,11 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
       const today = new Date();
       let age = today.getFullYear() - birthDate.getFullYear();
       const monthDiff = today.getMonth() - birthDate.getMonth();
-      
+
       if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
         age--;
       }
-      
+
       setForm(prev => ({
         ...prev,
         age: age
@@ -107,8 +253,32 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     setLoading(true);
     setErrors({});
 
+    // Client-side guards
+    if (!allowedGrades.includes(form.gradeLevel || '')) {
+      setLoading(false);
+      Swal.fire({
+        title: 'Invalid Grade Level',
+        text: 'Please select a valid grade level (Grade 11 or Grade 12).',
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+
+    const picks = [form.firstChoice, form.secondChoice, form.thirdChoice].filter(Boolean);
+    if ((new Set(picks)).size !== picks.length) {
+      setLoading(false);
+      Swal.fire({
+        title: 'Duplicate Strand',
+        text: 'Please choose three distinct strand preferences.',
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+
     const formData = new FormData();
-    
+
     // Add all form fields to FormData
     Object.keys(form).forEach(key => {
       if (form[key] !== null && form[key] !== undefined && form[key] !== '') {
@@ -116,10 +286,10 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
       }
     });
 
-    // Add strand preferences directly
-    formData.append('firstChoice', form.firstChoice);
-    formData.append('secondChoice', form.secondChoice);
-    formData.append('thirdChoice', form.thirdChoice);
+    // Add strand preferences directly (ensure they exist on payload)
+    formData.append('firstChoice', form.firstChoice || '');
+    formData.append('secondChoice', form.secondChoice || '');
+    formData.append('thirdChoice', form.thirdChoice || '');
 
     router.post('/student/enroll', formData, {
       forceFormData: true,
@@ -151,7 +321,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                 <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
               </div>
             `,
-            icon: 'success',                                                                
+            icon: 'success',
             confirmButtonText: 'Continue to Dashboard',
             confirmButtonColor: '#10B981',
             width: '500px'
@@ -166,11 +336,24 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
               lastName: user?.lastname || '',
               middleName: user?.middlename || '',
               schoolYear: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '',
-              lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : ''
+              lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : '',
+              firstChoice: '',
+              secondChoice: '',
+              thirdChoice: '',
+              studentStatus: 'New Student',
+              extensionName: '',
+              religion: '',
+              ipCommunity: '',
+              fourPs: '',
+              pwdId: '',
+              guardianName: '',
+              guardianContact: '',
+              lastSchool: ''
             });
             setUploadedFiles({
-              psaBirthCertificate: null,
-              reportCard: null
+              reportCard: null,
+              image: null,
+              psaBirthCertificate: null
             });
           });
         } else if (page.props.flash?.error) {
@@ -185,319 +368,887 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     });
   };
 
+  const renderAdditionalDetails = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Last Grade Completed */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaGraduationCap className="inline mr-2 text-blue-600" />
+            Last Grade Completed *
+          </label>
+          <select
+            name="lastGrade"
+            value={form.lastGrade || ''}
+            onChange={handleChange}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lastGrade ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select Last Grade</option>
+            <option value="Grade 10">Grade 10</option>
+            <option value="Grade 11">Grade 11</option>
+          </select>
+          {showValidation && errors.lastGrade && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.lastGrade}
+            </p>
+          )}
+        </div>
+
+        {/* Last School Attended */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Last School Attended
+          </label>
+          <input
+            type="text"
+            name="lastSchool"
+            value={form.lastSchool || ''}
+            onChange={handleChange}
+            placeholder="Enter last school attended"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+        </div>
+
+        {/* Guardian Information */}
+        <div className="md:col-span-2">
+          <h4 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+            Guardian Information
+          </h4>
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Guardian Name
+          </label>
+          <input
+            type="text"
+            name="guardianName"
+            value={form.guardianName || ''}
+            onChange={handleChange}
+            placeholder="Enter guardian's full name"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Guardian Contact Number
+          </label>
+          <input
+            type="tel"
+            name="guardianContact"
+            value={form.guardianContact || ''}
+            onChange={handleChange}
+            placeholder="Enter contact number"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+        </div>
+
+        {/* Additional Information */}
+        <div className="md:col-span-2">
+          <h4 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+            Additional Information
+          </h4>
+        </div>
+
+        {/* Indigenous People Community */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Indigenous People (IP) Community
+          </label>
+          <select
+            name="ipCommunity"
+            value={form.ipCommunity || ''}
+            onChange={handleChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          >
+            <option value="">Select IP Community Status</option>
+            <option value="Yes">Yes, I belong to an IP community</option>
+            <option value="No">No, I do not belong to an IP community</option>
+          </select>
+        </div>
+
+        {/* 4Ps Beneficiary */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            4Ps Beneficiary
+          </label>
+          <select
+            name="fourPs"
+            value={form.fourPs || ''}
+            onChange={handleChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          >
+            <option value="">Select 4Ps Status</option>
+            <option value="Yes">Yes, I am a 4Ps beneficiary</option>
+            <option value="No">No, I am not a 4Ps beneficiary</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Pantawid Pamilyang Pilipino Program beneficiary status
+          </p>
+        </div>
+
+        {/* PWD ID */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            PWD ID Number
+          </label>
+          <input
+            type="text"
+            name="pwdId"
+            value={form.pwdId || ''}
+            onChange={handleChange}
+            placeholder="Enter PWD ID number if applicable"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Person with Disability ID number (if applicable)
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDocumentUpload = () => (
+    <div className="space-y-6">
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+        <div className="flex items-start">
+          <FaExclamationTriangle className="text-yellow-600 mt-0.5 mr-3 flex-shrink-0" />
+          <div>
+            <h4 className="font-semibold text-yellow-800 mb-1">Document Requirements</h4>
+            <p className="text-sm text-yellow-700">
+              Please upload clear, readable copies of the required documents. Accepted formats: JPEG, PNG, PDF (Max 5MB each)
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        {/* Report Card Upload */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            <FaFileAlt className="inline mr-2 text-blue-600" />
+            Report Card (Grade 10 or Latest) *
+          </label>
+
+          {!uploadedFiles.reportCard ? (
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+              <FaUpload className="mx-auto text-4xl text-gray-400 mb-4" />
+              <p className="text-gray-600 mb-4">Click to upload or drag and drop</p>
+              <input
+                type="file"
+                name="reportCard"
+                accept=".jpg,.jpeg,.png,.pdf"
+                onChange={(e) => handleFileUpload(e, 'reportCard')}
+                className="hidden"
+                id="reportCard"
+              />
+              <label
+                htmlFor="reportCard"
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors"
+              >
+                <FaUpload className="mr-2" />
+                Choose File
+              </label>
+            </div>
+          ) : (
+            <div className="border border-green-300 bg-green-50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <FaCheckCircle className="text-green-600 mr-3" />
+                  <div>
+                    <p className="font-medium text-green-800">{uploadedFiles.reportCard.name}</p>
+                    <p className="text-sm text-green-600">
+                      {(uploadedFiles.reportCard.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFile('reportCard')}
+                  className="text-red-600 hover:text-red-800 transition-colors"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showValidation && errors.reportCard && (
+            <p className="mt-2 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.reportCard}
+            </p>
+          )}
+        </div>
+
+        {/* Student Photo Upload */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            <FaFileImage className="inline mr-2 text-green-600" />
+            Student Photo *
+          </label>
+
+          {!uploadedFiles.image ? (
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+              <FaUpload className="mx-auto text-4xl text-gray-400 mb-4" />
+              <p className="text-gray-600 mb-4">Click to upload or drag and drop</p>
+              <input
+                type="file"
+                name="image"
+                accept=".jpg,.jpeg,.png"
+                onChange={(e) => handleFileUpload(e, 'image')}
+                className="hidden"
+                id="image"
+              />
+              <label
+                htmlFor="image"
+                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer transition-colors"
+              >
+                <FaUpload className="mr-2" />
+                Choose File
+              </label>
+            </div>
+          ) : (
+            <div className="border border-green-300 bg-green-50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <FaCheckCircle className="text-green-600 mr-3" />
+                  <div>
+                    <p className="font-medium text-green-800">{uploadedFiles.image.name}</p>
+                    <p className="text-sm text-green-600">
+                      {(uploadedFiles.image.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFile('image')}
+                  className="text-red-600 hover:text-red-800 transition-colors"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showValidation && errors.image && (
+            <p className="mt-2 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.image}
+            </p>
+          )}
+        </div>
+
+        {/* PSA Birth Certificate Upload */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-3">
+            <FaFileAlt className="inline mr-2 text-green-600" />
+            PSA Birth Certificate *
+          </label>
+
+          {!uploadedFiles.psaBirthCertificate ? (
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+              <FaUpload className="mx-auto text-4xl text-gray-400 mb-4" />
+              <p className="text-gray-600 mb-4">Click to upload or drag and drop</p>
+              <input
+                type="file"
+                name="psaBirthCertificate"
+                accept=".jpg,.jpeg,.png,.pdf"
+                onChange={(e) => handleFileUpload(e, 'psaBirthCertificate')}
+                className="hidden"
+                id="psaBirthCertificate"
+              />
+              <label
+                htmlFor="psaBirthCertificate"
+                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer transition-colors"
+              >
+                <FaUpload className="mr-2" />
+                Choose File
+              </label>
+            </div>
+          ) : (
+            <div className="border border-green-300 bg-green-50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <FaCheckCircle className="text-green-600 mr-3" />
+                  <div>
+                    <p className="font-medium text-green-800">{uploadedFiles.psaBirthCertificate.name}</p>
+                    <p className="text-sm text-green-600">
+                      {(uploadedFiles.psaBirthCertificate.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFile('psaBirthCertificate')}
+                  className="text-red-600 hover:text-red-800 transition-colors"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showValidation && errors.psaBirthCertificate && (
+            <p className="mt-2 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.psaBirthCertificate}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderPersonalInformation = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* LRN Field */}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaIdCard className="inline mr-2 text-blue-600" />
+            Learner Reference Number (LRN) *
+          </label>
+          <input
+            type="text"
+            name="lrn"
+            value={form.lrn || ''}
+            onChange={handleChange}
+            maxLength="12"
+            placeholder="Enter your 12-digit LRN"
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lrn ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          />
+          {showValidation && errors.lrn && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.lrn}
+            </p>
+          )}
+        </div>
+
+        {/* Student Status - HCI Principle 6: Recognition rather than recall */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaUser className="inline mr-2 text-purple-600" />
+            Student Status *
+          </label>
+          <select
+            name="studentStatus"
+            value={form.studentStatus || 'New Student'}
+            onChange={handleChange}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.studentStatus ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="New Student">New Student</option>
+            <option value="Continuing">Continuing</option>
+            <option value="Transferee">Transferee</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Select your enrollment status for this academic year
+          </p>
+          {showValidation && errors.studentStatus && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.studentStatus}
+            </p>
+          )}
+        </div>
+
+        {/* Grade Level */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaGraduationCap className="inline mr-2 text-green-600" />
+            Grade Level *
+          </label>
+          <select
+            name="gradeLevel"
+            value={form.gradeLevel || ''}
+            onChange={handleChange}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.gradeLevel ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select Grade Level</option>
+            {allowedGrades.map(grade => (
+              <option key={grade} value={grade}>{grade}</option>
+            ))}
+          </select>
+          {showValidation && errors.gradeLevel && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.gradeLevel}
+            </p>
+          )}
+        </div>
+
+        {/* Birthdate */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaCalendarAlt className="inline mr-2 text-purple-600" />
+            Birthdate *
+          </label>
+          <input
+            type="date"
+            name="birthdate"
+            value={form.birthdate || ''}
+            onChange={handleChange}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthdate ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          />
+          {showValidation && errors.birthdate && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.birthdate}
+            </p>
+          )}
+        </div>
+
+        {/* Age (Auto-calculated) */}
+        {form.age && (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Age
+            </label>
+            <input
+              type="number"
+              value={form.age}
+              readOnly
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-600"
+            />
+          </div>
+        )}
+
+        {/* Sex */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Sex *
+          </label>
+          <select
+            name="sex"
+            value={form.sex || ''}
+            onChange={handleChange}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.sex ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select Sex</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+          </select>
+          {showValidation && errors.sex && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.sex}
+            </p>
+          )}
+        </div>
+
+        {/* Name Extension */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Name Extension
+          </label>
+          <select
+            name="extensionName"
+            value={form.extensionName || ''}
+            onChange={handleChange}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          >
+            <option value="">Select Extension (Optional)</option>
+            <option value="Jr.">Jr.</option>
+            <option value="Sr.">Sr.</option>
+            <option value="II">II</option>
+            <option value="III">III</option>
+            <option value="IV">IV</option>
+            <option value="V">V</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Select if applicable (Jr., Sr., III, etc.)
+          </p>
+        </div>
+
+        {/* Religion */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Religion
+          </label>
+          <input
+            type="text"
+            name="religion"
+            value={form.religion || ''}
+            onChange={handleChange}
+            placeholder="Enter your religion"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+        </div>
+
+        {/* Place of Birth */}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaMapMarkerAlt className="inline mr-2 text-red-600" />
+            Place of Birth *
+          </label>
+          <input
+            type="text"
+            name="birthPlace"
+            value={form.birthPlace || ''}
+            onChange={handleChange}
+            placeholder="Enter place of birth"
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthPlace ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          />
+          {showValidation && errors.birthPlace && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.birthPlace}
+            </p>
+          )}
+        </div>
+
+        {/* Address */}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <FaMapMarkerAlt className="inline mr-2 text-indigo-600" />
+            Complete Address *
+          </label>
+          <textarea
+            name="address"
+            value={form.address || ''}
+            onChange={handleChange}
+            rows="3"
+            placeholder="Enter your complete address"
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none ${showValidation && errors.address ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          />
+          {showValidation && errors.address && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.address}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStrandPreferences = () => (
+    <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div className="flex items-start">
+          <FaInfoCircle className="text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+          <div>
+            <h4 className="font-semibold text-blue-800 mb-1">Strand Selection Guide</h4>
+            <p className="text-sm text-blue-700">
+              Choose three different strands in order of preference. Your first choice will be prioritized during enrollment.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {/* First Choice */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <span className="inline-flex items-center justify-center w-6 h-6 bg-green-600 text-white text-xs font-bold rounded-full mr-2">1</span>
+            First Choice *
+          </label>
+          <select
+            name="firstChoice"
+            value={form.firstChoice || ''}
+            onChange={(e) => handleChoiceChange('firstChoice', e.target.value)}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.firstChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select your first choice</option>
+            {availableStrands.map(strand => (
+              <option
+                key={strand.id}
+                value={strand.id}
+                disabled={isOptionDisabled(strand.id, 'firstChoice')}
+              >
+                {strand.name}
+              </option>
+            ))}
+          </select>
+          {showValidation && errors.firstChoice && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.firstChoice}
+            </p>
+          )}
+        </div>
+
+        {/* Second Choice */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <span className="inline-flex items-center justify-center w-6 h-6 bg-yellow-600 text-white text-xs font-bold rounded-full mr-2">2</span>
+            Second Choice *
+          </label>
+          <select
+            name="secondChoice"
+            value={form.secondChoice || ''}
+            onChange={(e) => handleChoiceChange('secondChoice', e.target.value)}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.secondChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select your second choice</option>
+            {availableStrands.map(strand => (
+              <option
+                key={strand.id}
+                value={strand.id}
+                disabled={isOptionDisabled(strand.id, 'secondChoice')}
+              >
+                {strand.name}
+              </option>
+            ))}
+          </select>
+          {showValidation && errors.secondChoice && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.secondChoice}
+            </p>
+          )}
+        </div>
+
+        {/* Third Choice */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <span className="inline-flex items-center justify-center w-6 h-6 bg-orange-600 text-white text-xs font-bold rounded-full mr-2">3</span>
+            Third Choice *
+          </label>
+          <select
+            name="thirdChoice"
+            value={form.thirdChoice || ''}
+            onChange={(e) => handleChoiceChange('thirdChoice', e.target.value)}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.thirdChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
+          >
+            <option value="">Select your third choice</option>
+            {availableStrands.map(strand => (
+              <option
+                key={strand.id}
+                value={strand.id}
+                disabled={isOptionDisabled(strand.id, 'thirdChoice')}
+              >
+                {strand.name}
+              </option>
+            ))}
+          </select>
+          {showValidation && errors.thirdChoice && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.thirdChoice}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 1:
+        return renderPersonalInformation();
+      case 2:
+        return renderStrandPreferences();
+      case 3:
+        return (
+          <section>
+            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Additional Information</h3>
+            {renderAdditionalDetails()}
+          </section>
+        );
+      case 4:
+        return (
+          <section>
+            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Required Documents</h3>
+            {renderDocumentUpload()}
+          </section>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const prevStep = () => {
+    setCurrentStep(prev => prev - 1);
+  };
+
+  const nextStep = () => {
+    console.log('nextStep called, current step:', currentStep);
+    console.log('Total steps:', steps.length);
+    
+    const stepErrors = validateStep(currentStep);
+    console.log('Step errors:', stepErrors);
+    
+    if (Object.keys(stepErrors).length > 0) {
+      setErrors(stepErrors);
+      setShowValidation(true);
+      console.log('Validation failed, staying on step:', currentStep);
+      return;
+    }
+    
+    console.log('Moving to next step:', currentStep + 1);
+    setCurrentStep(prev => prev + 1);
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 px-4 sm:px-6">
-      {/* Background */}
-      <div className="absolute inset-0 backdrop-blur-xl"></div>
-
-      {/* Modal */}
-      <div className="relative bg-white bg-opacity-90 backdrop-blur-sm rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6 sm:p-8">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
         {/* Header */}
-        <div className="flex justify-between items-center border-b pb-3 mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Basic Education Enrollment Form</h2>
-          <button
-            className="text-red-500 font-bold text-xl sm:text-2xl hover:text-red-700 transition"
-            onClick={onClose}
-          >
-            ✖
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Front Page */}
-          <section>
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Front Page</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-              {[
-                { label: "School Year", name: "schoolYear", required: true, value: form.schoolYear, readonly: true },
-                { label: "LRN (12 digits)", name: "lrn", required: true, maxLength: 12, pattern: "[0-9]{12}", title: "Please enter exactly 12 digits" },
-                { label: "Grade Level to Enroll", name: "gradeLevel", required: true, type: "select", options: ["Select Grade Level", "Grade 11", "Grade 12"] },
-                { label: "Non-Graded (SPED only)", name: "nongraded", type: "select", options: ["Yes", "No"] },
-                { label: "PSA Birth Certificate No.", name: "psa" },
-                { label: "Last Name", name: "lastName", required: true, value: form.lastName, readonly: true },
-                { label: "First Name", name: "firstName", required: true, value: form.firstName, readonly: true },
-                { label: "Middle Name", name: "middleName", value: form.middleName, readonly: true },
-                { label: "Extension Name (Jr., III)", name: "extensionName", type: "select", options: ["Jr.", "Sr.", "II", "III", "IV", "V"] },
-                { label: "Birthdate", name: "birthdate", type: "date", required: true },
-                { label: "Age", name: "age", required: true, readonly: true },
-                { label: "Sex", name: "sex", type: "select", options: ["Select Sex", "Male", "Female"], required: true },
-                { label: "Place of Birth", name: "birthPlace", required: true },
-                { label: "Address", name: "address", required: true },
-                { label: "Religion", name: "religion" },
-                { label: "Indigenous Peoples Community", name: "ipCommunity", type: "select", options: ["Yes", "No", "Prefer not to say"] },
-                { label: "4Ps Beneficiary? (Pantawid Pamilyang Pilipino Program)", name: "fourPs", type: "select", options: ["Yes", "No", "Unknown"] },
-              ].map((field) => (
-                <div key={field.name}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
-                  {field.type === "select" ? (
-                    <select
-                      name={field.name}
-                      value={field.value || form[field.name] || ''}
-                      onChange={handleChange}
-                      className="border border-gray-300 p-2 rounded w-full focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                    >
-                      {!field.required && <option value="">Select {field.label}</option>}
-                      {field.options.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={field.type || "text"}
-                      name={field.name}
-                      value={field.value || form[field.name] || ''}
-                      onChange={handleChange}
-                      readOnly={field.readonly}
-                      maxLength={field.maxLength}
-                      pattern={field.pattern}
-                      title={field.title}
-                      className={`border p-2 rounded w-full focus:ring-2 focus:ring-blue-400 focus:outline-none ${
-                        errors[field.name] ? 'border-red-500' : 'border-gray-300'
-                      } ${field.readonly ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                    />
-                  )}
-                  {errors[field.name] && (
-                    <p className="text-sm text-red-500 mt-1">{errors[field.name]}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Strand Preferences */}
-          <section>
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Strand Preferences</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Please select your top 3 preferred strands in order of preference. Note that STEM requires an entrance exam.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                { label: "1st Choice", name: "firstChoice" },
-                { label: "2nd Choice", name: "secondChoice" },
-                { label: "3rd Choice", name: "thirdChoice" }
-              ].map((choice) => (
-                <div key={choice.name}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {choice.label} <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    name={choice.name}
-                    onChange={handleChange}
-                    required
-                    className={`border p-2 rounded w-full focus:ring-2 focus:ring-blue-400 focus:outline-none ${
-                      errors[choice.name] ? 'border-red-500' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="">Select Strand</option>
-                    {availableStrands.length > 0 ? (
-                      availableStrands.map(strand => (
-                        <option key={strand.id} value={strand.id}>
-                          {strand.code} - {strand.name}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No strands available - Wait for registrar to create strands</option>
-                    )}
-                  </select>
-                  {errors[choice.name] && (
-                    <p className="text-sm text-red-500 mt-1">{errors[choice.name]}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-sm text-yellow-800">
-                <strong>Important:</strong> STEM strand requires passing an entrance examination. 
-                If you don't pass the STEM exam, you will be enrolled in your next preferred strand.
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 flex-shrink-0">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold">Student Enrollment Form</h2>
+              <p className="text-blue-100 mt-1">
+                School Year: {activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 'N/A'}
               </p>
             </div>
-          </section>
-
-          {/* Back Page */}
-          <section>
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Additional Information</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-              {[
-                { label: "PWD ID?", name: "pwdId", type: "select", options: ["Yes (With ID)", "No (But PWD)", "No", "Applied / Pending"] },
-                { label: "Last Grade Level Completed", name: "lastGrade", required: true },
-                { label: "Last School Year Completed", name: "lastSY", value: form.lastSY, readonly: true },
-              ].map((field) => (
-                <div key={field.name}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
-                  {field.type === "select" ? (
-                    <select
-                      name={field.name}
-                      value={field.value || form[field.name] || ''}
-                      onChange={handleChange}
-                      className={`border p-2 rounded w-full focus:ring-2 focus:ring-blue-400 focus:outline-none ${
-                        errors[field.name] ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                    >
-                      {!field.required && <option value="">Select {field.label}</option>}
-                      {field.options.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      name={field.name}
-                      value={field.value || form[field.name] || ''}
-                      onChange={handleChange}
-                      readOnly={field.readonly}
-                      className={`border p-2 rounded w-full focus:ring-2 focus:ring-blue-400 focus:outline-none ${
-                        errors[field.name] ? 'border-red-500' : 'border-gray-300'
-                      } ${field.readonly ? 'bg-gray-100' : ''}`}
-                    />
-                  )}
-                  {errors[field.name] && (
-                    <p className="text-sm text-red-500 mt-1">{errors[field.name]}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-          </section>
-
-          {/* Document Upload Section */}
-          <section>
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 border-b pb-1">Required Documents</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              
-              {/* PSA Birth Certificate Upload */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  PSA Birth Certificate <span className="text-red-500">*</span>
-                </label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                  {uploadedFiles.psaBirthCertificate ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-center gap-2 text-green-600">
-                        {uploadedFiles.psaBirthCertificate.type.includes('pdf') ? (
-                          <FaFilePdf className="w-8 h-8" />
-                        ) : (
-                          <FaFileImage className="w-8 h-8" />
-                        )}
-                        <span className="font-medium">File uploaded successfully</span>
-                      </div>
-                      <p className="text-sm text-gray-600 truncate">
-                        {uploadedFiles.psaBirthCertificate.name}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {(uploadedFiles.psaBirthCertificate.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => removeFile('psaBirthCertificate')}
-                        className="flex items-center gap-1 text-red-600 hover:text-red-700 text-sm font-medium mx-auto"
-                      >
-                        <FaTimes className="w-3 h-3" />
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <FaUpload className="w-12 h-12 text-gray-400 mx-auto" />
-                      <div>
-                        <p className="text-gray-600 font-medium">Upload PSA Birth Certificate</p>
-                        <p className="text-sm text-gray-500">JPG, PNG, or PDF (Max 5MB)</p>
-                      </div>
-                      <label className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md cursor-pointer transition-colors">
-                        Choose File
-                        <input
-                          type="file"
-                          accept=".jpg,.jpeg,.png,.pdf"
-                          onChange={(e) => handleFileUpload(e, 'psaBirthCertificate')}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
-                </div>
-                {errors.psaBirthCertificate && (
-                  <p className="text-sm text-red-500 mt-1">{errors.psaBirthCertificate}</p>
-                )}
-              </div>
-
-              {/* Report Card Upload */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Report Card <span className="text-red-500">*</span>
-                </label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                  {uploadedFiles.reportCard ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-center gap-2 text-green-600">
-                        {uploadedFiles.reportCard.type.includes('pdf') ? (
-                          <FaFilePdf className="w-8 h-8" />
-                        ) : (
-                          <FaFileImage className="w-8 h-8" />
-                        )}
-                        <span className="font-medium">File uploaded successfully</span>
-                      </div>
-                      <p className="text-sm text-gray-600 truncate">
-                        {uploadedFiles.reportCard.name}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {(uploadedFiles.reportCard.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => removeFile('reportCard')}
-                        className="flex items-center gap-1 text-red-600 hover:text-red-700 text-sm font-medium mx-auto"
-                      >
-                        <FaTimes className="w-3 h-3" />
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <FaUpload className="w-12 h-12 text-gray-400 mx-auto" />
-                      <div>
-                        <p className="text-gray-600 font-medium">Upload Report Card</p>
-                        <p className="text-sm text-gray-500">JPG, PNG, or PDF (Max 5MB)</p>
-                      </div>
-                      <label className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md cursor-pointer transition-colors">
-                        Choose File
-                        <input
-                          type="file"
-                          accept=".jpg,.jpeg,.png,.pdf"
-                          onChange={(e) => handleFileUpload(e, 'reportCard')}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
-                </div>
-                {errors.reportCard && (
-                  <p className="text-sm text-red-500 mt-1">{errors.reportCard}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Upload Instructions */}
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <h4 className="font-semibold text-blue-800 mb-2">Document Upload Guidelines</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Ensure documents are clear and readable</li>
-                <li>• PSA Birth Certificate must be an official copy</li>
-                <li>• Report Card should be from your most recent completed grade level</li>
-                <li>• Accepted formats: JPG, PNG, PDF (Maximum 5MB per file)</li>
-                <li>• All documents are required for enrollment processing</li>
-              </ul>
-            </div>
-          </section>
-
-          {/* Submit Button */}
-          <div className="flex justify-end mt-8">
             <button
-              type="submit"
+              onClick={onClose}
+              className="text-white hover:text-gray-200 transition-colors p-2 hover:bg-white hover:bg-opacity-20 rounded-lg"
               disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2 rounded-md font-semibold transition duration-200 shadow"
             >
-              {loading ? 'Submitting...' : 'Submit Enrollment'}
+              <FaTimes className="w-6 h-6" />
             </button>
+          </div>
+        </div>
+
+        {/* Step Indicators - HCI Principle 1: Visibility of system status */}
+        <div className="bg-gray-50 px-6 py-4 border-b flex-shrink-0">
+          <div className="flex items-center justify-between">
+            {steps.map((step, index) => {
+              const StepIcon = step.icon;
+              const isActive = currentStep === step.id;
+              const isCompleted = currentStep > step.id;
+
+              return (
+                <div key={step.id} className="flex items-center flex-1">
+                  <div className="flex items-center">
+                    <div className={`
+                      flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-300
+                      ${isActive
+                        ? `bg-${step.color}-600 border-${step.color}-600 text-white`
+                        : isCompleted
+                          ? 'bg-green-600 border-green-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-400'
+                      }
+                    `}>
+                      {isCompleted ? (
+                        <FaCheckCircle className="w-5 h-5" />
+                      ) : (
+                        <StepIcon className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="ml-3 hidden sm:block">
+                      <p className={`text-sm font-semibold ${isActive ? `text-${step.color}-600` : isCompleted ? 'text-green-600' : 'text-gray-400'
+                        }`}>
+                        {step.title}
+                      </p>
+                      <p className="text-xs text-gray-500">{step.description}</p>
+                    </div>
+                  </div>
+
+                  {index < steps.length - 1 && (
+                    <div className={`flex-1 h-0.5 mx-4 ${currentStep > step.id ? 'bg-green-600' : 'bg-gray-300'
+                      }`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Form Content - Scrollable Area */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1">
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* HCI Principle 6: Recognition rather than recall - Clear step content */}
+            {renderStepContent()}
+          </div>
+
+          {/* Navigation Buttons - HCI Principle 3: User control and freedom */}
+          <div className="bg-gray-50 px-6 py-4 border-t flex justify-between items-center flex-shrink-0">
+            <button
+              type="button"
+              onClick={prevStep}
+              disabled={currentStep === 1 || loading}
+              className={`
+                flex items-center px-4 py-2 rounded-lg font-medium transition-colors
+                ${currentStep === 1 || loading
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-gray-600 text-white hover:bg-gray-700'
+                }
+              `}
+            >
+              <FaArrowLeft className="mr-2" />
+              Previous
+            </button>
+
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-600">
+                Step {currentStep} of {steps.length}
+              </span>
+            </div>
+
+            {currentStep < steps.length ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Next button clicked, currentStep:', currentStep, 'steps.length:', steps.length);
+                  nextStep();
+                }}
+                disabled={loading}
+                className={`
+                  flex items-center px-6 py-2 rounded-lg font-medium transition-colors
+                  ${loading
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }
+                `}
+              >
+                {loading ? (
+                  <>
+                    <FaSpinner className="mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    Next
+                    <FaArrowRight className="ml-2" />
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={loading}
+                className={`
+                  flex items-center px-6 py-2 rounded-lg font-medium transition-colors
+                  ${loading
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                  }
+                `}
+              >
+                {loading ? (
+                  <>
+                    <FaSpinner className="mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <FaCheckCircle className="mr-2" />
+                    Submit Enrollment
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </form>
       </div>

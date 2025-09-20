@@ -9,14 +9,18 @@ class Section extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['section_name', 'strand_id', 'year_level', 'teacher_id'];
+    protected $fillable = ['section_name', 'strand_id', 'year_level', 'teacher_id', 'school_year_id'];
 
     public function strand() {
         return $this->belongsTo(Strand::class);
     }
 
+    public function schoolYear() {
+        return $this->belongsTo(SchoolYear::class);
+    }
+
     public function schedules() {
-        return $this->hasMany(Schedule::class);
+        return $this->hasMany(ClassSchedule::class);
     }
 
     public function students() {
@@ -28,4 +32,8 @@ class Section extends Model
         return $this->belongsTo(User::class, 'teacher_id');
     }
 
+    public function enrollments()
+    {
+        return $this->hasMany(Enrollment::class);
+    }
 }

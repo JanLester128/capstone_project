@@ -15,24 +15,23 @@ class DatabaseSeeder extends Seeder
     {
         echo "Creating registrar account...\n";
         
-        // Create Registrar account only
-        $user = User::updateOrCreate(
-            ['email' => 'registrar@gmail.com'], // Email for the registrar
+        // Create registrar account
+        User::updateOrCreate(
+            ['email' => 'registrar@gmail.com'],
             [
-                'name' => 'Opol National Secondary Technical School', // Add the required name field
-                'firstname' => 'ONSTS',
+                'firstname' => 'System',
                 'lastname' => 'Registrar',
-                'middlename' => null,
-                'password' => Hash::make('admin123'), // Change to a strong password
+                'password' => Hash::make('admin123'),
                 'role' => 'registrar',
+                'status' => 'active',
             ]
         );
-        
-        echo "Registrar account created: {$user->email}\n";
+
+        echo "Registrar account created: registrar@gmail.com\n";
         
         echo "Seeding default strands and subjects...\n";
         
-        // Seed default K-12 strands and subjects
+        // Seed strands and subjects
         $this->call([
             StrandSeeder::class,
             SubjectSeeder::class,

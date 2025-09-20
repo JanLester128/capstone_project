@@ -24,6 +24,8 @@ return new class extends Migration
             $table->enum('status', ['active', 'inactive', 'pending'])->default('active');
             $table->boolean('password_change_required')->default(false);
             $table->boolean('is_disabled')->default(false);
+            $table->boolean('is_coordinator')->default(false);
+            $table->unsignedBigInteger('assigned_strand_id')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });

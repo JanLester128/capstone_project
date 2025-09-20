@@ -19,6 +19,9 @@ return new class extends Migration
         $table->string('year_level', 100);
         $table->foreignId('school_year_id')->nullable()->constrained('school_years')->onDelete('cascade');
         $table->foreignId('strand_id')->nullable()->constrained()->onDelete('cascade');
+        $table->string('prerequisites', 100)->nullable();
+        $table->string('corequisites', 100)->nullable();
+        $table->string('description', 100)->nullable();
         $table->foreignId('faculty_id')->nullable()->constrained('users')->onDelete('set null');
         $table->timestamps();
     });

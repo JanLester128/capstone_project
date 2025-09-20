@@ -145,28 +145,28 @@ class ClassScheduleSeeder extends Seeder
         // Create class schedules using existing sections and faculty
         $schedules = [
             // Monday
-            ['subject_id' => 'MATH101', 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Monday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
-            ['subject_id' => 'ENG101', 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Monday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 102'],
-            ['subject_id' => 'SCI101', 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Monday', 'start_time' => '13:00:00', 'end_time' => '14:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
+            ['subject_id' => $mathSubject->id, 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Monday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
+            ['subject_id' => $engSubject->id, 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Monday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 102'],
+            ['subject_id' => $sciSubject->id, 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Monday', 'start_time' => '13:00:00', 'end_time' => '14:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
             
             // Tuesday
-            ['subject_id' => 'FIL101', 'faculty_id' => $facultyArray[3]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 104'],
-            ['subject_id' => 'STEM101', 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
-            ['subject_id' => 'PE101', 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '14:00:00', 'end_time' => '15:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Gym'],
+            ['subject_id' => $filSubject->id, 'faculty_id' => $facultyArray[3]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 104'],
+            ['subject_id' => $stemSubject->id, 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
+            ['subject_id' => $peSubject->id, 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Tuesday', 'start_time' => '14:00:00', 'end_time' => '15:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Gym'],
             
             // Wednesday
-            ['subject_id' => 'MATH101', 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
-            ['subject_id' => 'SCI101', 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
-            ['subject_id' => 'ENG101', 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '13:00:00', 'end_time' => '14:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 102'],
+            ['subject_id' => $mathSubject->id, 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
+            ['subject_id' => $sciSubject->id, 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
+            ['subject_id' => $engSubject->id, 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Wednesday', 'start_time' => '13:00:00', 'end_time' => '14:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 102'],
             
             // Thursday
-            ['subject_id' => 'FIL101', 'faculty_id' => $facultyArray[3]['id'], 'day_of_week' => 'Thursday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 104'],
-            ['subject_id' => 'STEM101', 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Thursday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
-            ['subject_id' => 'PE101', 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Thursday', 'start_time' => '14:00:00', 'end_time' => '15:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Gym'],
+            ['subject_id' => $filSubject->id, 'faculty_id' => $facultyArray[3]['id'], 'day_of_week' => 'Thursday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 104'],
+            ['subject_id' => $stemSubject->id, 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Thursday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
+            ['subject_id' => $peSubject->id, 'faculty_id' => $facultyArray[1]['id'], 'day_of_week' => 'Thursday', 'start_time' => '14:00:00', 'end_time' => '15:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Gym'],
             
             // Friday
-            ['subject_id' => 'MATH101', 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Friday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
-            ['subject_id' => 'SCI101', 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Friday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
+            ['subject_id' => $mathSubject->id, 'faculty_id' => $facultyArray[0]['id'], 'day_of_week' => 'Friday', 'start_time' => '08:00:00', 'end_time' => '09:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 101'],
+            ['subject_id' => $sciSubject->id, 'faculty_id' => $facultyArray[2]['id'], 'day_of_week' => 'Friday', 'start_time' => '10:00:00', 'end_time' => '11:30:00', 'duration' => 90, 'semester' => '1st Semester', 'room' => 'Room 103'],
         ];
 
         foreach ($schedules as $scheduleData) {
@@ -186,12 +186,14 @@ class ClassScheduleSeeder extends Seeder
             DB::table('class')->updateOrInsert([
                 'subject_id' => $scheduleData['subject_id'],
                 'faculty_id' => $scheduleData['faculty_id'],
+                'section_id' => $firstSection->id,
                 'school_year_id' => $schoolYear->id,
                 'day_of_week' => $scheduleData['day_of_week'],
                 'start_time' => $scheduleData['start_time'],
             ], [
                 'subject_id' => $scheduleData['subject_id'],
                 'faculty_id' => $scheduleData['faculty_id'],
+                'section_id' => $firstSection->id,
                 'school_year_id' => $schoolYear->id,
                 'day_of_week' => $scheduleData['day_of_week'],
                 'start_time' => $scheduleData['start_time'],

@@ -208,7 +208,7 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
           /* Compact Weekly Schedule Grid */
           <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[900px] table-fixed">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="w-16 p-2 text-left font-semibold text-gray-700 text-xs">Time</th>
@@ -237,14 +237,14 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
                                   return (
                                     <div 
                                       key={`${schedule.id}-${idx}`}
-                                      className={`bg-gradient-to-r ${subjectColor.bg} border-l-3 ${subjectColor.border} p-1.5 rounded-r-md shadow-sm hover:shadow-md transition-all duration-200`}
+                                      className={`bg-gradient-to-r ${subjectColor.bg} border-l-3 ${subjectColor.border} p-1.5 rounded-r-md shadow-sm hover:shadow-md transition-all duration-200 min-h-12 flex flex-col justify-center`}
                                     >
                                       <div className={`font-semibold ${subjectColor.text} text-xs mb-0.5 truncate`}>
                                         {schedule.subject?.name || 'Subject TBA'}
                                       </div>
                                       <div className={`text-xs ${subjectColor.accent} mb-0.5 flex items-center`}>
                                         <FaClock className="mr-1 w-2.5 h-2.5" />
-                                        <span className="truncate">{schedule.start_time}-{schedule.end_time}</span>
+                                        <span className="truncate">{formatTime12Hour(schedule.start_time)}-{formatTime12Hour(schedule.end_time)}</span>
                                       </div>
                                       <div className={`text-xs ${subjectColor.accent} mb-0.5 flex items-center`}>
                                         <FaUsers className="mr-1 w-2.5 h-2.5" />
@@ -252,7 +252,7 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
                                       </div>
                                       <div className={`text-xs ${subjectColor.accent} mb-0.5 flex items-center`}>
                                         <FaBook className="mr-1 w-2.5 h-2.5" />
-                                        <span className="truncate">{schedule.subject?.strand?.strand_name || 'No Strand'}</span>
+                                        <span className="truncate">{schedule.subject?.strand?.name || 'No Strand'}</span>
                                       </div>
                                       <div className="text-xs text-gray-500">
                                         Room: TBA
@@ -285,12 +285,12 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <h3 className="text-lg font-bold text-gray-800 mb-2">
-                        {schedule.subject?.subject_name || 'Subject TBA'}
+                        {schedule.subject?.name || 'Subject TBA'}
                       </h3>
                       <div className="flex items-center gap-4 text-gray-600 mb-3">
                         <div className="flex items-center gap-2">
                           <FaClock className="w-4 h-4 text-purple-500" />
-                          <span className="text-sm">{schedule.day_of_week} {schedule.start_time} - {schedule.end_time}</span>
+                          <span className="text-sm">{schedule.day_of_week} {formatTime12Hour(schedule.start_time)} - {formatTime12Hour(schedule.end_time)}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <FaUsers className="w-4 h-4 text-purple-500" />
@@ -302,8 +302,8 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`px-3 py-1 bg-gradient-to-r ${subjectColor.bg} text-${subjectColor.text} rounded-full text-sm font-medium`}>
-                          {schedule.subject?.strand?.strand_name || 'No Strand'}
+                        <span className={`px-3 py-1 bg-gradient-to-r ${subjectColor.bg} ${subjectColor.text} rounded-full text-sm font-medium`}>
+                          {schedule.subject?.strand?.name || 'No Strand'}
                         </span>
                         <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
                           {schedule.semester || '1st Semester'}
@@ -341,13 +341,13 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
             </div>
             <div className="text-center p-3 bg-purple-50 rounded-lg">
               <div className="text-xl font-bold text-purple-600">
-                {[...new Set(weekSchedules.map(s => s.subject?.subject_name))].filter(Boolean).length}
+                {[...new Set(weekSchedules.map(s => s.subject?.name))].filter(Boolean).length}
               </div>
               <div className="text-sm text-gray-600">Subjects Taught</div>
             </div>
             <div className="text-center p-3 bg-purple-50 rounded-lg">
               <div className="text-xl font-bold text-purple-600">
-                {[...new Set(weekSchedules.map(s => s.subject?.strand?.strand_name))].filter(Boolean).length}
+                {[...new Set(weekSchedules.map(s => s.subject?.strand?.name))].filter(Boolean).length}
               </div>
               <div className="text-sm text-gray-600">Strands Covered</div>
             </div>

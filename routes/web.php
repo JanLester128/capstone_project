@@ -79,7 +79,7 @@ Route::get('/sanctum/csrf-cookie', [\Laravel\Sanctum\Http\Controllers\CsrfCookie
 |--------------------------------------------------------------------------
 */
 
-// Authentication routes moved to separate auth.php file
+
 
 /*
 |--------------------------------------------------------------------------
@@ -96,26 +96,21 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', fn(Request $request) => $request->user())
         ->name('user');
 
-    // Student schedule routes
-    Route::get('/student/{student}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule']);
+    // Debug route to check database data
+    Route::get('/debug/database', [App\Http\Controllers\ScheduleController::class, 'debugDatabaseData'])
+        ->name('debug.database');
 
     // Student routes (protected by auth middleware)
     Route::middleware(['auth:sanctum', 'role:student'])->group(function () {
         Route::get('/student/enrollment', fn() => Inertia::render('Student/EnrollmentForm'))
             ->name('student.enrollment');
         
-        Route::post('/student/enroll', [StudentController::class, 'enroll'])
-            ->name('student.enroll');
-            
+       
         Route::get('/student/schedule', [StudentController::class, 'getSchedule'])
             ->name('student.schedule');
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Registrar Pages & API
-    |--------------------------------------------------------------------------
-    */
+    
     // Direct registrar dashboard route (no prefix)
     Route::get('/registrar/dashboard', fn() => Inertia::render('Registrar/RegistrarDashboard'))
         ->middleware('auth:sanctum')
@@ -161,7 +156,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Class/Subject Management
         Route::get('/class', [RegistrarController::class, 'classPage'])->name('registrar.class');
         Route::get('/subjects', [RegistrarController::class, 'subjectsPage'])->name('registrar.subjects');
-        Route::get('/subjects/cor/{sectionId}', [RegistrarController::class, 'sectionCOR'])->name('registrar.subjects.cor');
+        Route::get('/subjects/cor/{strandId}', [RegistrarController::class, 'subjectsCOR'])->name('registrar.subjects.cor');
+        Route::get('/subjects/cor/{sectionId}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
         Route::post('/strands', [RegistrarController::class, 'createStrand'])->name('registrar.strands.create');
         Route::put('/strands/{id}', [RegistrarController::class, 'updateStrand'])->name('registrar.strands.update');
         Route::delete('/strands/{id}', [RegistrarController::class, 'deleteStrand'])->name('registrar.strands.delete');
@@ -175,36 +171,44 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/semesters/{id}', [RegistrarController::class, 'updateSemester'])->name('registrar.semesters.update');
         Route::delete('/semesters/{id}', [RegistrarController::class, 'deleteSemester'])->name('registrar.semesters.delete');
 
-        // API Routes for data retrieval
-        Route::get('/api/strands', [RegistrarController::class, 'getStrands'])->name('registrar.api.strands');
-        Route::get('/api/subjects', [RegistrarController::class, 'getSubjects'])->name('registrar.api.subjects');
-        Route::get('/api/faculty', [RegistrarController::class, 'getFaculty'])->name('registrar.api.faculty');
-        Route::get('/api/sections', [RegistrarController::class, 'getSections'])->name('registrar.api.sections');
-        Route::get('/api/dashboard-stats', [RegistrarController::class, 'getDashboardStats'])->name('registrar.api.dashboard-stats');
+        // Profile Management
+        Route::get('/profile', [RegistrarController::class, 'profilePage'])->name('registrar.profile');
+        Route::put('/profile', [RegistrarController::class, 'updateProfile'])->name('registrar.profile.update');
 
-        // COR Routes
-        Route::get('/subjects/cor/{strandId}', [RegistrarController::class, 'subjectsCOR'])->name('registrar.subjects.cor');
-        Route::get('/subjects/cor/{sectionId}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
+        // Grades Management
+        Route::get('/grades', [RegistrarController::class, 'gradesPage'])->name('registrar.grades');
 
         // School Year Management Routes
         Route::post('/school-years', [RegistrarController::class, 'createSchoolYear'])->name('registrar.school-years.create');
+        Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])->name('registrar.school-years.update');
         Route::put('/school-years/{id}/activate', [RegistrarController::class, 'activateSchoolYear'])->name('registrar.school-years.activate');
         Route::put('/school-years/switch-semester', [RegistrarController::class, 'switchSemester'])->name('registrar.school-years.switch-semester');
+        Route::put('/school-years/{id}/toggle', [RegistrarController::class, 'toggleSchoolYear'])->name('registrar.school-years.toggle');
+        Route::put('/school-years/deactivate-expired', [RegistrarController::class, 'deactivateExpired'])->name('registrar.school-years.deactivate-expired');
+        Route::get('/school-years/status/{id?}', [RegistrarController::class, 'getSemesterStatus'])->name('registrar.school-years.status');
+        Route::post('/school-years/auto-deactivate', [RegistrarController::class, 'autoDeactivateExpired'])->name('registrar.school-years.auto-deactivate');
+
+        // Data fetching routes for schedule management - REMOVED CONFLICTING ROUTES
+        // These routes were conflicting with page routes and causing JSON responses
+        // Route::get('/strands', [RegistrarController::class, 'getStrands'])->name('registrar.strands');
+        // Route::get('/faculty-data', [RegistrarController::class, 'getFaculty'])->name('registrar.faculty.data');
+        // Route::get('/subjects', [RegistrarController::class, 'getSubjects'])->name('registrar.subjects.data');
+
     });
 
-    // School Years API route - accessible without registrar prefix
+    // School Years route - accessible without registrar prefix
     Route::get('/school-years', [RegistrarController::class, 'getSchoolYears'])
         ->middleware(['hybrid.auth'])
-        ->name('api.school-years');
+        ->name('school-years');
     Route::post('/school-years', [RegistrarController::class, 'storeSchoolYear'])
         ->middleware(['hybrid.auth'])
-        ->name('api.school-years.store');
+        ->name('school-years.store');
     Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])
         ->middleware(['hybrid.auth'])
-        ->name('api.school-years.update');
+        ->name('school-years.update');
     Route::put('/school-years/{id}/toggle', [RegistrarController::class, 'toggleSchoolYear'])
         ->middleware(['hybrid.auth'])
-        ->name('api.school-years.toggle');
+        ->name('school-years.toggle');
 
     /*
     |--------------------------------------------------------------------------
@@ -219,11 +223,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/coordinators/count', [RegistrarController::class, 'getCoordinatorsCount']);
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Student Pages & API
-    |--------------------------------------------------------------------------
-    */
+   
     // Direct student dashboard route (no prefix)
     Route::get('/student/dashboard', fn() => Inertia::render('Student/Student_Dashboard'))
         ->middleware('auth:sanctum')
@@ -260,29 +260,25 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/profile', [App\Http\Controllers\StudentController::class, 'profile'])
             ->name('student.profile');
 
-        // Enrollment Status API
+        // Enrollment Status 
         Route::get('/enrollment-status', [App\Http\Controllers\StudentController::class, 'getEnrollmentStatus'])
             ->name('student.enrollment.status');
 
-        // Schedule Data API
+        // Schedule Data 
         Route::get('/schedule-data', [App\Http\Controllers\StudentController::class, 'getScheduleData'])
             ->name('student.schedule.data');
 
         // Enrollment endpoint
         Route::post('/enroll', [App\Http\Controllers\StudentController::class, 'enroll'])->name('student.enroll.store');
 
-        // (Optional) API endpoints
+        // (Optional) 
         Route::get('/', [AuthController::class, 'listStudents'])->name('students.index');
         Route::get('/{id}', [AuthController::class, 'showStudent'])->name('students.show');
         Route::put('/{id}', [AuthController::class, 'updateStudent'])->name('students.update');
         Route::delete('/{id}', [AuthController::class, 'deleteStudent'])->name('students.delete');
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Faculty Pages & API
-    |--------------------------------------------------------------------------
-    */
+   
     // Direct faculty dashboard route (no prefix)
     Route::get('/faculty/dashboard', fn() => Inertia::render('Faculty/Faculty_Dashboard'))
         ->middleware('auth:sanctum')
@@ -319,7 +315,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | Coordinator API Routes (Faculty with Coordinator Status)
+    | Coordinator  Routes (Faculty with Coordinator Status)
     |--------------------------------------------------------------------------
     */
     Route::prefix('coordinator')->middleware(['hybrid.auth'])->group(function () {
@@ -335,14 +331,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/enrollments/{enrollment}/schedules', [EnrollmentController::class, 'getClassSchedules'])
             ->name('coordinator.enrollment.schedules');
 
-        // API routes for enrollment management
-        Route::get('/sections-and-strands', [App\Http\Controllers\CoordinatorController::class, 'getSectionsAndStrands'])
-            ->name('coordinator.sections-and-strands');
-        Route::get('/subjects/{strandCode}', [App\Http\Controllers\CoordinatorController::class, 'getSubjectsByStrand'])
-            ->name('coordinator.subjects-by-strand');
-        Route::get('/students/{id}', [App\Http\Controllers\CoordinatorController::class, 'getStudentDetails'])
-            ->name('coordinator.student.details');
-
         // Student enrollment actions
         Route::post('/students/{id}/approve', [App\Http\Controllers\CoordinatorController::class, 'approveEnrollment'])
             ->name('coordinator.enrollment.approve');
@@ -351,42 +339,58 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/students/{id}/finalize', [App\Http\Controllers\CoordinatorController::class, 'finalizeEnrollmentWithAssignment'])
             ->name('coordinator.enrollment.finalize');
 
+        // Coordinator data routes 
+        Route::get('/sections-and-strands', [App\Http\Controllers\CoordinatorController::class, 'getSectionsAndStrands'])
+            ->name('coordinator.sections-and-strands');
+        Route::get('/subjects/{strandCode}', [App\Http\Controllers\CoordinatorController::class, 'getSubjectsByStrand'])
+            ->name('coordinator.subjects-by-strand');
+        Route::get('/students/{id}', [App\Http\Controllers\CoordinatorController::class, 'getStudentDetails'])
+            ->name('coordinator.student.details');
+
+        // Schedule fetching route for coordinator enrollment
+        Route::get('/schedules/section/{sectionId}/strand/{strandId}', [App\Http\Controllers\ScheduleController::class, 'getSchedulesBySectionAndStrand'])
+            ->name('coordinator.schedules.section-strand');
+
         // Additional coordinator routes
         Route::get('/subjects-for-enrollment', [App\Http\Controllers\CoordinatorController::class, 'getSubjectsForEnrollment'])
             ->name('coordinator.subjects-for-enrollment');
         Route::get('/students', [App\Http\Controllers\CoordinatorController::class, 'studentsPage'])
             ->name('coordinator.students');
     });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage File Access Routes
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/storage/enrollment_documents/{filename}', function ($filename) {
+        $path = storage_path('app/public/enrollment_documents/' . $filename);
+        
+        if (!file_exists($path)) {
+            abort(404);
+        }
+        
+        return response()->file($path);
+    })->middleware(['auth:sanctum'])->name('enrollment.document');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage File Access
+    |--------------------------------------------------------------------------
+    */
+
+    // Protected file access for enrollment documents
+    Route::middleware(['auth:sanctum'])->group(function () {
+        // Student schedule route
+        Route::get('/student/{id}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule'])
+            ->name('student.schedule.data');
+        
+        // Student notifications route
+        Route::get('/student/notifications', [App\Http\Controllers\StudentController::class, 'getNotifications'])
+            ->name('student.notifications.data');
+    });
+
 });
 
-/*
-|--------------------------------------------------------------------------
-| Storage File Access Routes
-|--------------------------------------------------------------------------
-*/
-Route::get('/storage/enrollment_documents/{filename}', function ($filename) {
-    $path = storage_path('app/public/enrollment_documents/' . $filename);
-    
-    if (!file_exists($path)) {
-        abort(404);
-    }
-    
-    return response()->file($path);
-})->middleware(['auth:sanctum'])->name('enrollment.document');
-
-/*
-|--------------------------------------------------------------------------
-| Storage File Access
-|--------------------------------------------------------------------------
-*/
-
-// Protected file access for enrollment documents
-Route::middleware(['auth:sanctum'])->group(function () {
-    // Student schedule route
-    Route::get('/student/{id}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule'])
-        ->name('student.schedule.data');
-    
-    // Student notifications route
-    Route::get('/student/notifications', [App\Http\Controllers\StudentController::class, 'getNotifications'])
-        ->name('student.notifications.data');
-});
+// Student schedule routes
+Route::get('/student/{student}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule']);

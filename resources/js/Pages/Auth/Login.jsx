@@ -328,9 +328,18 @@ export default function Login() {
                 </label>
                 <button
                   type="button"
-                  className="text-blue-600 hover:text-blue-800 font-medium focus:outline-none focus:underline"
-                  onClick={() => alert('Forgot password functionality coming soon!')}
+                  className="text-blue-600 hover:text-blue-800 font-medium focus:outline-none focus:underline transition-colors duration-200 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => {
+                    // Navigate to forgot password page with current email if provided
+                    const email = formData.email.trim();
+                    const forgotPasswordUrl = email 
+                      ? `/forgot-password?email=${encodeURIComponent(email)}`
+                      : '/forgot-password';
+                    handleNavigation(forgotPasswordUrl);
+                  }}
+                  disabled={isNavigating || isLoading}
                 >
+                  <span>🔑</span>
                   Forgot password?
                 </button>
               </div>

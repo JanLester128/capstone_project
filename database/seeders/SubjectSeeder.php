@@ -5,39 +5,52 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\Subject;
 use App\Models\Strand;
+use App\Models\SchoolYear;
 
 class SubjectSeeder extends Seeder
 {
     public function run(): void
     {
+        // Get the active school year - subjects should be linked to it
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            echo "No active school year found. Please create and activate a school year first.\n";
+            echo "Subjects will be created without school year assignment.\n";
+        }
+
         // Get strands
         $abm = Strand::where('code', 'ABM')->first();
         $humss = Strand::where('code', 'HUMSS')->first();
         $stem = Strand::where('code', 'STEM')->first();
         $tvl = Strand::where('code', 'TVL')->first();
 
-        // Create subjects without school_year_id (will be assigned when school years are created)
+        // Create subjects and link them to the active school year
         if ($abm) {
-            $this->createABMSubjects($abm->id);
+            $this->createABMSubjects($abm->id, $activeSchoolYear ? $activeSchoolYear->id : null);
         }
 
         if ($humss) {
-            $this->createHUMSSSubjects($humss->id);
+            $this->createHUMSSSubjects($humss->id, $activeSchoolYear ? $activeSchoolYear->id : null);
         }
 
         if ($stem) {
-            $this->createSTEMSubjects($stem->id);
+            $this->createSTEMSubjects($stem->id, $activeSchoolYear ? $activeSchoolYear->id : null);
         }
 
         if ($tvl) {
-            $this->createTVLSubjects($tvl->id);
+            $this->createTVLSubjects($tvl->id, $activeSchoolYear ? $activeSchoolYear->id : null);
         }
 
-        echo "Default K-12 subjects created successfully.\n";
-        echo "Note: Subjects will be linked to school years when school years are created dynamically.\n";
+        if ($activeSchoolYear) {
+            echo "Default K-12 subjects created successfully and linked to active school year: {$activeSchoolYear->semester} ({$activeSchoolYear->year_start}-{$activeSchoolYear->year_end}).\n";
+        } else {
+            echo "Default K-12 subjects created successfully.\n";
+            echo "Note: Subjects will be linked to school years when school years are created dynamically.\n";
+        }
     }
 
-    private function createABMSubjects($strandId)
+    private function createABMSubjects($strandId, $schoolYearId = null)
     {
         $subjects = [
             // Grade 11 - 1st Semester
@@ -88,13 +101,13 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => null // Will be assigned when school years are created
+                    'school_year_id' => $schoolYearId
                 ])
             );
         }
     }
 
-    private function createHUMSSSubjects($strandId)
+    private function createHUMSSSubjects($strandId, $schoolYearId = null)
     {
         $subjects = [
             // Grade 11 - 1st Semester
@@ -145,13 +158,13 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => null // Will be assigned when school years are created
+                    'school_year_id' => $schoolYearId
                 ])
             );
         }
     }
 
-    private function createSTEMSubjects($strandId)
+    private function createSTEMSubjects($strandId, $schoolYearId = null)
     {
         $subjects = [
             // Grade 11 - 1st Semester
@@ -201,13 +214,13 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => null // Will be assigned when school years are created
+                    'school_year_id' => $schoolYearId
                 ])
             );
         }
     }
 
-    private function createTVLSubjects($strandId)
+    private function createTVLSubjects($strandId, $schoolYearId = null)
     {
         $subjects = [
             // Grade 11 - 1st Semester
@@ -254,7 +267,7 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => null // Will be assigned when school years are created
+                    'school_year_id' => $schoolYearId
                 ])
             );
         }
