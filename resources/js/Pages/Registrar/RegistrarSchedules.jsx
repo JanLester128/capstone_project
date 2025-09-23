@@ -393,6 +393,7 @@ const RegistrarSchedules = () => {
   const [editSchedule, setEditSchedule] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDay, setSelectedDay] = useState("");
+  const [viewType, setViewType] = useState('table');
 
   const filteredSchedules = schedules.filter(schedule => {
     const matchesSearch = 
@@ -572,7 +573,35 @@ const RegistrarSchedules = () => {
           {/* Schedule Table */}
           <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg border border-white/40 overflow-hidden">
             <div className="p-6">
-              <h3 className="text-xl font-semibold text-gray-800 mb-4">Class Schedules</h3>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-gray-800">Class Schedules</h3>
+                
+                {/* View Toggle */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setViewType('table')}
+                    className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                      viewType === 'table' 
+                        ? "bg-purple-600 text-white" 
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    <FaFilter className="w-4 h-4" />
+                    Table View
+                  </button>
+                  <button
+                    onClick={() => setViewType('timetable')}
+                    className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                      viewType === 'timetable' 
+                        ? "bg-purple-600 text-white" 
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    <FaCalendarAlt className="w-4 h-4" />
+                    Timetable
+                  </button>
+                </div>
+              </div>
               
               {filteredSchedules.length === 0 ? (
                 <div className="text-center py-12">
@@ -594,7 +623,7 @@ const RegistrarSchedules = () => {
                     </button>
                   )}
                 </div>
-              ) : (
+              ) : viewType === 'table' ? (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -659,6 +688,151 @@ const RegistrarSchedules = () => {
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                /* Timetable Grid View */
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[900px]">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300 w-24">
+                          Time
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Monday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Tuesday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Wednesday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Thursday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Friday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                          Saturday
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">
+                          Sunday
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const timeSlots = [
+                          '7:30 - 8:00', '8:00 - 8:30', '8:30 - 9:00', '9:00 - 9:30', '9:30 - 10:00',
+                          '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00', '12:00 - 12:30',
+                          '12:30 - 1:00', '1:00 - 1:30', '1:30 - 2:00', '2:00 - 2:30', '2:30 - 3:00',
+                          '3:00 - 3:30', '3:30 - 4:00', '4:00 - 4:30', '4:30 - 5:00', '5:00 - 5:30',
+                          '5:30 - 6:00', '6:00 - 6:30', '6:30 - 7:00', '7:00 - 7:30', '7:30 - 8:00',
+                          '8:00 - 8:30', '8:30 - 9:00'
+                        ];
+                        
+                        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                        
+                        // Create a grid to track occupied cells
+                        const grid = {};
+                        days.forEach(day => {
+                          grid[day] = {};
+                        });
+                        
+                        // Function to convert time to slot index
+                        const timeToSlotIndex = (timeStr) => {
+                          const [time, period] = timeStr.split(' ');
+                          let [hours, minutes] = time.split(':').map(Number);
+                          
+                          if (period === 'PM' && hours !== 12) hours += 12;
+                          if (period === 'AM' && hours === 12) hours = 0;
+                          
+                          const totalMinutes = hours * 60 + minutes;
+                          const startMinutes = 7 * 60 + 30; // 7:30 AM
+                          const slotMinutes = (totalMinutes - startMinutes) / 30;
+                          
+                          return Math.floor(slotMinutes);
+                        };
+                        
+                        // Parse schedule data and fill grid
+                        if (filteredSchedules && filteredSchedules.length > 0) {
+                          filteredSchedules.forEach(schedule => {
+                            if (schedule.start_time && schedule.end_time && schedule.day_of_week) {
+                              const startTime = formatTime(schedule.start_time);
+                              const endTime = formatTime(schedule.end_time);
+                              const startSlot = timeToSlotIndex(startTime);
+                              const endSlot = timeToSlotIndex(endTime);
+                              
+                              if (startSlot >= 0 && startSlot < timeSlots.length && endSlot > startSlot) {
+                                const duration = endSlot - startSlot;
+                                grid[schedule.day_of_week][startSlot] = {
+                                  ...schedule,
+                                  duration: duration
+                                };
+                                
+                                // Mark occupied slots
+                                for (let i = startSlot + 1; i < endSlot; i++) {
+                                  grid[schedule.day_of_week][i] = 'occupied';
+                                }
+                              }
+                            }
+                          });
+                        }
+                        
+                        const getSubjectColor = (subject) => {
+                          const colors = {
+                            'IT Elective 6: Internet of Things': 'bg-green-400',
+                            'Capstone Project and Research 2': 'bg-yellow-400',
+                            'Systems Administration and Maintenance': 'bg-yellow-300',
+                            'IT Elective 5: Cloud Computing': 'bg-green-300'
+                          };
+                          return colors[subject] || 'bg-blue-300';
+                        };
+                        
+                        return timeSlots.map((timeSlot, index) => (
+                          <tr key={index} className="border-b border-gray-200">
+                            <td className="px-2 py-2 text-xs text-center font-medium text-gray-700 border-r border-gray-300 bg-gray-50">
+                              {timeSlot}
+                            </td>
+                            {days.map(day => {
+                              const cell = grid[day][index];
+                              
+                              if (cell === 'occupied') {
+                                return null; // This cell is part of a multi-slot class
+                              }
+                              
+                              if (cell && typeof cell === 'object') {
+                                return (
+                                  <td 
+                                    key={day} 
+                                    className={`px-2 py-1 text-xs text-center border-r border-gray-300 ${getSubjectColor(cell.subject?.name)} text-gray-800`}
+                                    rowSpan={cell.duration}
+                                  >
+                                    <div className="font-semibold leading-tight">
+                                      {cell.subject?.name || 'Subject TBA'}
+                                    </div>
+                                    <div className="text-xs mt-1">
+                                      {cell.room || 'TBA'}
+                                    </div>
+                                    <div className="text-xs">
+                                      {cell.faculty?.firstname} {cell.faculty?.lastname}
+                                    </div>
+                                  </td>
+                                );
+                              }
+                              
+                              return (
+                                <td key={day} className="px-2 py-2 border-r border-gray-300 bg-white">
+                                  {/* Empty cell */}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ));
+                      })()}
                     </tbody>
                   </table>
                 </div>

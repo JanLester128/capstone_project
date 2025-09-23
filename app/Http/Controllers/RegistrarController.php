@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -181,9 +182,17 @@ class RegistrarController extends Controller
             return redirect()->back()->withErrors(['year_end' => 'End year must be one year after start year']);
         }
 
+        // Debug database schema
+        Log::info('Schema check', [
+            'year_col' => Schema::hasColumn('school_years', 'year'),
+            'start_date_col' => Schema::hasColumn('school_years', 'start_date')
+        ]);
+
+        // Create year string for compatibility with current schema
+        $yearString = $validated['year_start'] . '-' . $validated['year_end'];
+
         // Check if this school year and semester combination already exists
-        $exists = SchoolYear::where('year_start', $validated['year_start'])
-            ->where('year_end', $validated['year_end'])
+        $exists = SchoolYear::where('year', $yearString)
             ->where('semester', $validated['semester'])
             ->exists();
 
@@ -191,17 +200,18 @@ class RegistrarController extends Controller
             return redirect()->back()->withErrors(['general' => 'This school year and semester combination already exists']);
         }
 
+        // Deactivate all existing school years if this is being set as active
+        SchoolYear::where('is_active', true)->update(['is_active' => false]);
+
+        // Create the school year - basic columns only (emergency fallback)
         $schoolYear = SchoolYear::create([
-            'year_start' => $validated['year_start'],
-            'year_end' => $validated['year_end'],
+            'year' => $validated['year_start'] . '-' . $validated['year_end'],
             'semester' => $validated['semester'],
-            'start_date' => $validated['start_date'],
-            'end_date' => $validated['end_date'],
-            'is_active' => false, // Don't activate automatically
-            'current_semester' => $validated['semester'] === '1st Semester' ? 1 : 2
+            'is_active' => true,
+            'current_semester' => 1
         ]);
 
-        return redirect()->back()->with('success', 'School year created successfully');
+        return redirect()->back()->with('success', 'School year ' . $validated['year_start'] . '-' . $validated['year_end'] . ' created successfully and set as active.');
     }
 
     public function activateSchoolYear($id)
@@ -466,34 +476,52 @@ class RegistrarController extends Controller
         ]);
     }
 
-    // Semesters Management Method
-    public function semestersPage()
+    // Strands Management Page
+    public function strandsPage()
     {
-        // Get active school year
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $strands = Strand::orderBy('code')->get();
 
-        // Get all school years/semesters
-        $semesters = SchoolYear::orderBy('year_start', 'desc')
-            ->orderBy('semester')
-            ->get()
-            ->map(function ($semester) {
-                return [
-                    'id' => $semester->id,
-                    'year_start' => $semester->year_start,
-                    'year_end' => $semester->year_end,
-                    'semester' => $semester->semester,
-                    'start_date' => $semester->start_date,
-                    'end_date' => $semester->end_date,
-                    'is_active' => $semester->is_active,
-                    'current_semester' => $semester->current_semester ?? 1,
-                    'display_name' => $semester->year_start . '-' . $semester->year_end . ' (Semester ' . $semester->semester . ')'
-                ];
-            });
-
-        return Inertia::render('Registrar/RegistrarSemester', [
-            'schoolYears' => $semesters,
+        return Inertia::render('Registrar/RegistrarClass', [
+            'strands' => $strands,
             'activeSchoolYear' => $activeSchoolYear
         ]);
+    }
+
+    // School Years Management Page
+    public function schoolYearsPage()
+    {
+        $schoolYears = SchoolYear::orderBy('year_start', 'desc')->get();
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
+        return Inertia::render('Registrar/RegistrarSemester', [
+            'schoolYears' => $schoolYears,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    // Semester Management Page
+    public function semestersPage()
+    {
+        try {
+            // Get all school years/semesters ordered by year and semester
+            $schoolYears = SchoolYear::orderBy('year_start', 'desc')
+                ->orderBy('year_end', 'desc')
+                ->orderBy('semester')
+                ->get();
+
+            return Inertia::render('Registrar/RegistrarSemester', [
+                'schoolYears' => $schoolYears,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error loading semesters page: ' . $e->getMessage());
+            
+            return Inertia::render('Registrar/RegistrarSemester', [
+                'schoolYears' => [],
+                'error' => 'Failed to load semesters. Please try again.'
+            ]);
+        }
     }
 
     public function toggleSchoolYear($id)
@@ -523,42 +551,72 @@ class RegistrarController extends Controller
     // School Year Creation Method
     public function storeSchoolYear(Request $request)
     {
-        $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
-            'semester' => 'required|string|in:1st Semester,2nd Semester',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after:start_date'
-        ]);
-
         try {
-            // Check if school year already exists
-            $existingSchoolYear = SchoolYear::where('year_start', $request->year_start)
-                ->where('year_end', $request->year_end)
-                ->where('semester', $request->semester)
-                ->first();
-
-            if ($existingSchoolYear) {
-                return redirect()->back()->withErrors(['general' => 'This school year and semester combination already exists']);
-            }
-
-            // Deactivate all existing school years if this is being set as active
-            SchoolYear::where('is_active', true)->update(['is_active' => false]);
-
-            // Create the school year
-            $schoolYear = SchoolYear::create([
-                'year_start' => $request->year_start,
-                'year_end' => $request->year_end,
-                'semester' => $request->semester,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'current_semester' => $request->semester === '1st Semester' ? 1 : 2,
-                'is_active' => true
+            // Log the incoming request data for debugging
+            Log::info('School year creation attempt', [
+                'request_data' => $request->all()
             ]);
 
-            return redirect()->back()->with('success', 'School year ' . $request->year_start . '-' . $request->year_end . ' created successfully and set as active.');
+            $validatedData = $request->validate([
+                'year_start' => 'required|integer|min:2020|max:2050',
+                'year_end' => 'required|integer|min:2020|max:2050',
+                'semester' => 'required|string|in:1st Semester,2nd Semester,Summer',
+                'start_date' => 'required|date',
+                'end_date' => 'required|date|after:start_date',
+            ]);
+
+            Log::info('Validation passed', [
+                'validated_data' => $validatedData
+            ]);
+
+            // Check for duplicate semester
+            $existingSemester = SchoolYear::where('year_start', $validatedData['year_start'])
+                ->where('year_end', $validatedData['year_end'])
+                ->where('semester', $validatedData['semester'])
+                ->first();
+
+            if ($existingSemester) {
+                Log::warning('Duplicate semester attempt', [
+                    'existing_semester_id' => $existingSemester->id,
+                    'attempted_data' => $validatedData
+                ]);
+                return redirect()->back()->with('error', 'A semester with this name and year already exists.');
+            }
+
+            $schoolYear = SchoolYear::create([
+                'year_start' => $validatedData['year_start'],
+                'year_end' => $validatedData['year_end'],
+                'year' => $validatedData['year_start'] . '-' . $validatedData['year_end'], // For backward compatibility
+                'semester' => $validatedData['semester'],
+                'start_date' => $validatedData['start_date'],
+                'end_date' => $validatedData['end_date'],
+                'is_active' => false,
+            ]);
+
+            Log::info('School year created successfully', [
+                'school_year_id' => $schoolYear->id,
+                'semester' => $schoolYear->semester,
+                'year_range' => $schoolYear->year_start . '-' . $schoolYear->year_end
+            ]);
+
+            return redirect()->back()->with('success', 'Semester created successfully!');
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Validation failed for school year creation', [
+                'errors' => $e->errors(),
+                'request_data' => $request->all()
+            ]);
+            return redirect()->back()->withErrors($e->errors())->withInput();
+
         } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create school year: ' . $e->getMessage()]);
+            Log::error('Error creating school year', [
+                'error_message' => $e->getMessage(),
+                'error_line' => $e->getLine(),
+                'error_file' => $e->getFile(),
+                'request_data' => $request->all(),
+                'stack_trace' => $e->getTraceAsString()
+            ]);
+            return redirect()->back()->with('error', 'Failed to create semester: ' . $e->getMessage());
         }
     }
 
@@ -588,6 +646,50 @@ class RegistrarController extends Controller
         } catch (\Exception $e) {
             Log::error('Error updating school year: ' . $e->getMessage());
             return redirect()->back()->with('error', 'Failed to update school year: ' . $e->getMessage());
+        }
+    }
+
+    public function deleteSchoolYear($id)
+    {
+        try {
+            $schoolYear = SchoolYear::findOrFail($id);
+
+            // Check if this school year has any associated data that would prevent deletion
+            $hasEnrollments = $schoolYear->enrollments()->count() > 0;
+            $hasSubjects = $schoolYear->subjects()->count() > 0;
+
+            if ($hasEnrollments || $hasSubjects) {
+                return redirect()->back()->with('error', 
+                    'Cannot delete this semester. It has associated enrollments or subjects. Please remove them first.');
+            }
+
+            // Prevent deletion of active school year
+            if ($schoolYear->is_active) {
+                return redirect()->back()->with('error', 
+                    'Cannot delete an active semester. Please deactivate it first.');
+            }
+
+            $semesterName = $schoolYear->semester;
+            $yearRange = $schoolYear->year_start . '-' . $schoolYear->year_end;
+            
+            $schoolYear->delete();
+
+            Log::info('School year deleted successfully', [
+                'school_year_id' => $id,
+                'semester' => $semesterName,
+                'year_range' => $yearRange
+            ]);
+
+            return redirect()->back()->with('success', 
+                "Semester '{$semesterName} ({$yearRange})' deleted successfully!");
+
+        } catch (\Exception $e) {
+            Log::error('Error deleting school year: ' . $e->getMessage(), [
+                'school_year_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return redirect()->back()->with('error', 'Failed to delete semester. Please try again.');
         }
     }
 

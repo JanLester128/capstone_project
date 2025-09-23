@@ -13,11 +13,29 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->unsignedBigInteger('assigned_strand_id')->nullable()->after('role');
-            $table->boolean('is_coordinator')->default(false)->after('assigned_strand_id');
+            // Only add assigned_strand_id if it doesn't exist
+            if (!Schema::hasColumn('users', 'assigned_strand_id')) {
+                $table->unsignedBigInteger('assigned_strand_id')->nullable()->after('role');
+                $table->foreign('assigned_strand_id')->references('id')->on('strands')->onDelete('set null');
+            }
             
-            $table->foreign('assigned_strand_id')->references('id')->on('strands')->onDelete('set null');
-            $table->index(['role', 'assigned_strand_id']);
+            // Only add is_coordinator if it doesn't exist
+            if (!Schema::hasColumn('users', 'is_coordinator')) {
+                $table->boolean('is_coordinator')->default(false)->after('assigned_strand_id');
+            }
+            
+            // Check if index exists before creating
+            $indexExists = DB::select("
+                SELECT INDEX_NAME 
+                FROM information_schema.STATISTICS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'users' 
+                AND INDEX_NAME = 'users_role_assigned_strand_id_index'
+            ");
+            
+            if (empty($indexExists)) {
+                $table->index(['role', 'assigned_strand_id']);
+            }
         });
     }
 

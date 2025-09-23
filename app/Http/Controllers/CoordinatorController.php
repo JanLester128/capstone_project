@@ -42,7 +42,6 @@ class CoordinatorController extends Controller
         if (!$activeSchoolYear) {
             return Inertia::render('Faculty/Faculty_Enrollment', [
                 'pendingStudents' => [],
-                'approvedStudents' => [],
                 'rejectedStudents' => [],
                 'activeSchoolYear' => null
             ]);
@@ -63,9 +62,9 @@ class CoordinatorController extends Controller
         };
 
         // Build lists by deriving status from enrollments (active school year)
+        // Only show students that are NOT yet enrolled (pending/rejected only)
         $studentsAll = Student::with(['user', 'strand', 'section'])->get();
         $pendingStudents = collect();
-        $approvedStudents = collect();
         $rejectedStudents = collect();
 
         foreach ($studentsAll as $student) {
@@ -76,18 +75,20 @@ class CoordinatorController extends Controller
                 ->first();
             $status = $latest->status ?? 'pending';
             $processed = $processStudent($student);
-            if ($status === 'approved') {
-                $approvedStudents->push($processed);
-            } elseif ($status === 'rejected') {
+            
+            // Only include pending and rejected students in Enrollment Management
+            // Students with 'enrolled' status should appear in Student Assignment tab
+            if ($status === 'rejected') {
                 $rejectedStudents->push($processed);
-            } else {
+            } elseif ($status === 'pending' || $status === 'approved') {
+                // Include both pending and approved (not yet enrolled) students
                 $pendingStudents->push($processed);
             }
+            // Skip students with 'enrolled' status - they belong in Student Assignment
         }
 
         return Inertia::render('Faculty/Faculty_Enrollment', [
             'pendingStudents' => $pendingStudents,
-            'approvedStudents' => $approvedStudents,
             'rejectedStudents' => $rejectedStudents,
             'activeSchoolYear' => $activeSchoolYear,
             'auth' => [
@@ -107,7 +108,6 @@ class CoordinatorController extends Controller
         if (!$activeSchoolYear) {
             return Inertia::render('Faculty/Faculty_Enrollment', [
                 'pendingStudents' => [],
-                'approvedStudents' => [],
                 'rejectedStudents' => [],
                 'activeSchoolYear' => null,
                 'message' => 'No active school year found. Please contact the registrar.'
@@ -146,7 +146,6 @@ class CoordinatorController extends Controller
 
         return Inertia::render('Faculty/Faculty_Enrollment', [
             'pendingStudents' => $pendingStudents,
-            'approvedStudents' => $approvedStudents,
             'rejectedStudents' => $rejectedStudents,
             'activeSchoolYear' => $activeSchoolYear
         ]);
@@ -957,6 +956,85 @@ class CoordinatorController extends Controller
             Log::info('Enrollment notification sent to: ' . $user->email);
         } catch (\Exception $e) {
             Log::error('Failed to send enrollment notification: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reject a student's enrollment
+     */
+    public function rejectStudent(Request $request, $studentId)
+    {
+        try {
+            $student = Student::findOrFail($studentId);
+            
+            // Update enrollment status to rejected
+            $student->update([
+                'enrollment_status' => 'rejected'
+            ]);
+            
+            Log::info('Student enrollment rejected', [
+                'student_id' => $studentId,
+                'coordinator_id' => $request->user()->id
+            ]);
+            
+            return redirect()->back()->with('success', 'Student enrollment has been rejected.');
+            
+        } catch (\Exception $e) {
+            Log::error('Error rejecting student enrollment', [
+                'student_id' => $studentId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->back()->with('error', 'Failed to reject student enrollment.');
+        }
+    }
+
+    /**
+     * Finalize a student's enrollment with section assignment
+     */
+    public function finalizeStudent(Request $request, $studentId)
+    {
+        try {
+            $validated = $request->validate([
+                'strand' => 'required|string',
+                'section_id' => 'required|exists:sections,id'
+            ]);
+            
+            $student = Student::findOrFail($studentId);
+            $section = Section::findOrFail($validated['section_id']);
+            
+            // Update student with section assignment and enrolled status
+            $student->update([
+                'enrollment_status' => 'enrolled',
+                'section_id' => $validated['section_id'],
+                'assigned_strand_id' => $section->strand_id
+            ]);
+            
+            // Create enrollment record
+            Enrollment::create([
+                'student_id' => $studentId,
+                'school_year_id' => SchoolYear::where('is_active', true)->first()->id,
+                'section_id' => $validated['section_id'],
+                'strand_id' => $section->strand_id,
+                'status' => 'enrolled',
+                'enrollment_date' => now()
+            ]);
+            
+            Log::info('Student enrollment finalized', [
+                'student_id' => $studentId,
+                'section_id' => $validated['section_id'],
+                'coordinator_id' => $request->user()->id
+            ]);
+            
+            return redirect()->back()->with('success', 'Student enrollment has been finalized successfully.');
+            
+        } catch (\Exception $e) {
+            Log::error('Error finalizing student enrollment', [
+                'student_id' => $studentId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->back()->with('error', 'Failed to finalize student enrollment.');
         }
     }
 }

@@ -151,6 +151,7 @@ class ScheduleController extends Controller
             $schoolYear = \App\Models\SchoolYear::create([
                 'year_start' => $yearStart,
                 'year_end' => $yearEnd,
+                'year' => $yearStart . '-' . $yearEnd, // Add the missing year field
                 'semester' => '1st Semester',
                 'is_active' => true,
                 'current_semester' => 1,
@@ -390,6 +391,7 @@ class ScheduleController extends Controller
             $schoolYear = \App\Models\SchoolYear::create([
                 'year_start' => $yearStart,
                 'year_end' => $yearEnd,
+                'year' => $yearStart . '-' . $yearEnd, // Add the missing year field
                 'semester' => '1st Semester',
                 'is_active' => true,
                 'current_semester' => 1,
@@ -635,6 +637,7 @@ class ScheduleController extends Controller
             $schoolYear = \App\Models\SchoolYear::create([
                 'year_start' => $yearStart,
                 'year_end' => $yearEnd,
+                'year' => $yearStart . '-' . $yearEnd, // Add the missing year field
                 'semester' => '1st Semester',
                 'is_active' => true,
                 'current_semester' => 1,

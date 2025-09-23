@@ -137,7 +137,7 @@ export default function StudentRegister() {
     setErrors({});
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/auth/register/student', {
+      const response = await fetch(`${window.location.protocol}//${window.location.host}/auth/register/student`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

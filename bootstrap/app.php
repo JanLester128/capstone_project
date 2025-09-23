@@ -11,8 +11,7 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
         then: function () {
-            Route::middleware(['api'])
-                ->group(base_path('routes/auth.php'));
+            Route::group([], base_path('routes/auth.php'));
             Route::middleware(['web'])
                 ->group(base_path('routes/student.php'));
         },

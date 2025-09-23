@@ -66,6 +66,17 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
           actionColor: "bg-red-100 text-red-800",
           status: "Action Required"
         };
+      case 'enrolled':
+        return {
+          icon: <FaCheckCircle className="w-12 h-12 text-green-500" />,
+          title: "Enrollment Successful",
+          message: "You have successfully enrolled. Please note that you will need to visit the coordinator's office for further instructions.",
+          bgColor: "bg-gradient-to-br from-green-50 to-emerald-50",
+          borderColor: "border-green-300",
+          textColor: "text-green-800",
+          actionColor: "bg-green-100 text-green-800",
+          status: "Enrolled"
+        };
       default:
         return {
           icon: <FaUserGraduate className="w-12 h-12 text-blue-500" />,
@@ -167,6 +178,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
 
                   {/* Action Buttons */}
                   <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+                    {/* No enrollment status - Show Start Enrollment button */}
                     {!enrollmentStatus?.status && canEnroll() && (
                       <button
                         onClick={() => setShowEnrollmentForm(true)}
@@ -178,6 +190,19 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                       </button>
                     )}
 
+                    {/* Pending status - Show disabled button */}
+                    {enrollmentStatus?.status === 'pending' && (
+                      <button
+                        disabled
+                        className="flex items-center px-8 py-4 bg-gradient-to-r from-gray-400 to-gray-500 text-white font-semibold rounded-lg cursor-not-allowed opacity-75 shadow-lg"
+                      >
+                        <FaClock className="mr-3 text-xl" />
+                        Enrollment Pending Review
+                        <FaSpinner className="ml-3 animate-spin" />
+                      </button>
+                    )}
+
+                    {/* Rejected status - Show resubmit button */}
                     {enrollmentStatus?.status === 'rejected' && (
                       <button
                         onClick={() => setShowEnrollmentForm(true)}
@@ -189,6 +214,36 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                       </button>
                     )}
 
+                    {/* Enrolled status - Show ENROLLED button */}
+                    {enrollmentStatus?.status === 'enrolled' && (
+                      <div className="text-center space-y-4">
+                        <button
+                          disabled
+                          className="flex items-center px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-lg shadow-lg cursor-default"
+                        >
+                          <FaCheckCircle className="mr-3 text-xl" />
+                          ENROLLED
+                          <FaCheckCircle className="ml-3 text-xl" />
+                        </button>
+                        
+                        {/* Grade 12 Note */}
+                        {user?.grade_level === '12' && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
+                            <div className="flex items-start space-x-3">
+                              <FaInfoCircle className="text-blue-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-sm text-blue-800 font-medium">Grade 12 Students</p>
+                                <p className="text-sm text-blue-700 mt-1">
+                                  For Grade 12 enrollment, please visit the coordinator's office with your Grade 11 report card and academic records.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Approved status - Show schedule button */}
                     {enrollmentStatus?.status === 'approved' && (
                       <button
                         onClick={() => window.location.href = '/student/schedule'}

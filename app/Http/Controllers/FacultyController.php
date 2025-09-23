@@ -10,6 +10,7 @@ use App\Models\Strand;
 use App\Models\SchoolYear;
 use App\Models\ClassSchedule;
 use App\Models\Student;
+use App\Models\Section;
 // Removed Faculty model - using unified authentication
 
 class FacultyController extends Controller
@@ -129,6 +130,50 @@ class FacultyController extends Controller
             'students' => $students,
             'user' => $user,
             'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    /**
+     * Display student assignment page showing enrolled students by section
+     */
+    public function studentsPage(Request $request)
+    {
+        $user = $request->user();
+        
+        // Get all sections with their strands
+        $sections = Section::with(['strand'])->orderBy('section_name')->get();
+        
+        // Get all enrolled students with their section and enrollment data
+        $enrolledStudents = Student::with(['section', 'section.strand', 'user'])
+            ->whereHas('enrollments', function($query) {
+                $query->where('status', 'enrolled');
+            })
+            ->get()
+            ->map(function($student) {
+                return [
+                    'id' => $student->id,
+                    'student_id' => $student->student_id,
+                    'firstname' => $student->firstname,
+                    'lastname' => $student->lastname,
+                    'email' => $student->user ? $student->user->email : null,
+                    'grade_level' => $student->grade_level,
+                    'section' => $student->section ? [
+                        'id' => $student->section->id,
+                        'section_name' => $student->section->section_name,
+                        'strand' => $student->section->strand ? [
+                            'code' => $student->section->strand->code,
+                            'name' => $student->section->strand->name
+                        ] : null
+                    ] : null
+                ];
+            });
+
+        return Inertia::render('Faculty/Faculty_Students', [
+            'auth' => [
+                'user' => $user
+            ],
+            'sections' => $sections,
+            'enrolledStudents' => $enrolledStudents
         ]);
     }
 

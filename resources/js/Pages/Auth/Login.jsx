@@ -13,15 +13,26 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Check for existing session on component mount
   useEffect(() => {
-    const existingSession = AuthManager.checkForExistingSession();
-    if (existingSession.hasSession) {
-      // User is already authenticated, redirect to appropriate dashboard
-      const redirectUrl = AuthManager.getRedirectUrl();
-      router.visit(redirectUrl);
-    }
+    const checkAuth = async () => {
+      // Wait a bit to let AuthCheck complete its work first
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const existingSession = AuthManager.checkForExistingSession();
+      if (existingSession.hasSession) {
+        // User is already authenticated, redirect to appropriate dashboard
+        const redirectUrl = AuthManager.getRedirectUrl();
+        router.visit(redirectUrl);
+      } else {
+        // Not authenticated, safe to show login form
+        setIsInitializing(false);
+      }
+    };
+    
+    checkAuth();
   }, []);
 
   // Page transition animation on mount
@@ -31,6 +42,19 @@ export default function Login() {
       container.classList.add('animate-fadeIn');
     }
   }, []);
+
+  // Show loading while initializing to prevent flash
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
+        <Head title="Login - ONSTS" />
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white text-lg font-medium">Please wait...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -73,12 +97,14 @@ export default function Login() {
     if (!validateForm()) {
       return;
     }
-
+    
     setIsLoading(true);
     setErrors({});
-
+    
     try {
-      const response = await fetch('http://localhost:8000/auth/login', {
+      // Use current domain instead of hardcoded localhost
+      const baseUrl = `${window.location.protocol}//${window.location.host}`;
+      const response = await fetch(`${baseUrl}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -90,7 +116,7 @@ export default function Login() {
       });
 
       const data = await response.json();
-
+      
       if (!response.ok) {
         if (data.errors) {
           setErrors(data.errors);
@@ -101,38 +127,33 @@ export default function Login() {
       }
 
       if (data.success) {
-        // Generate session ID
-        const sessionId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log('Login successful:', data);
         
-        // Use AuthManager to store authentication data
-        const dashboardUrl = AuthManager.login(data.user, data.token, sessionId);
+        // Store authentication data using AuthManager
+        AuthManager.setUser(data.user);
+        AuthManager.setToken(data.token);
+        AuthManager.setSession(data.session_id || `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
         
-        // Show success message briefly before redirect
-        const successMessage = document.createElement('div');
-        successMessage.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-xl shadow-lg z-50 flex items-center gap-2';
-        successMessage.innerHTML = `
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-          </svg>
-          <span>Login successful! Redirecting...</span>
-        `;
-        document.body.appendChild(successMessage);
+        // Also set token in cookie for browser refresh scenarios
+        document.cookie = `auth_token=${data.token}; path=/; max-age=${24 * 60 * 60}; SameSite=Lax`;
         
-        setTimeout(() => {
-          if (document.body.contains(successMessage)) {
-            document.body.removeChild(successMessage);
-          }
-          if (data.password_change_required) {
-            // Store authentication data before redirect
-            AuthManager.setUser(data.user);
-            AuthManager.setToken(data.token);
-            
-            // Redirect to change password page with proper URL
-            window.location.href = `/auth/change-password?userType=${data.user.role}`;
-          } else {
-            router.visit(dashboardUrl);
-          }
-        }, 1000);
+        // Update last activity immediately
+        AuthManager.updateLastActivity();
+        
+        // Show success notification
+        // await Swal.fire({
+        //   title: 'Login Successful!',
+        //   text: `Welcome back, ${data.user.name}!`,
+        //   icon: 'success',
+        //   timer: 1500,
+        //   showConfirmButton: false,
+        //   toast: true,
+        //   position: 'top-end'
+        // });
+
+        // Redirect to appropriate dashboard using current domain
+        const redirectUrl = data.redirect || AuthManager.getDashboardUrl();
+        window.location.href = `${baseUrl}${redirectUrl}`;
       } else {
         setErrors({ general: data.message || 'Login failed. Please check your credentials.' });
       }
@@ -393,7 +414,7 @@ export default function Login() {
 
             {/* Footer */}
             <div className="mt-8 text-center text-xs text-gray-500">
-              <p> 2025 ONSTS. Secure • Reliable • Innovative</p>
+              <p>2025 ONSTS. Secure • Reliable • Innovative</p>
             </div>
           </div>
         </div>

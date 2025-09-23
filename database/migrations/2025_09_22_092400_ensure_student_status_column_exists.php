@@ -17,9 +17,12 @@ return new class extends Migration
         }
 
         Schema::table('student_personal_info', function (Blueprint $table) {
-            // Remove special_needs column as requested
-            if (Schema::hasColumn('student_personal_info', 'special_needs')) {
-                $table->dropColumn('special_needs');
+            // Only add column if it doesn't already exist
+            if (!Schema::hasColumn('student_personal_info', 'student_status')) {
+                $table->enum('student_status', ['New Student', 'Continuing', 'Transferee'])
+                      ->default('New Student')
+                      ->after('user_id')
+                      ->comment('Student enrollment status: New Student, Continuing, or Transferee');
             }
         });
     }
@@ -35,9 +38,9 @@ return new class extends Migration
         }
 
         Schema::table('student_personal_info', function (Blueprint $table) {
-            // Add back special_needs column if needed
-            if (!Schema::hasColumn('student_personal_info', 'special_needs')) {
-                $table->string('special_needs', 100)->nullable()->after('four_ps');
+            // Only drop column if it exists
+            if (Schema::hasColumn('student_personal_info', 'student_status')) {
+                $table->dropColumn('student_status');
             }
         });
     }

@@ -21,6 +21,11 @@ import {
   FaInfoCircle,
   FaSpinner,
   FaUser,
+  FaChevronDown,
+  FaChevronUp,
+  FaChevronRight,
+  FaPalette,
+  FaCog
 } from "react-icons/fa";
 import Swal from "sweetalert2";
 
@@ -44,17 +49,48 @@ const Sidebar = ({ onToggle }) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // HCI Principle 6: Recognition rather than recall - User profile info
-  const [userProfile, setUserProfile] = useState(() => {
-    const savedUser = localStorage.getItem('auth_user');
-    if (savedUser) {
+  const [userProfile, setUserProfile] = useState(null);
+
+  // Fetch user profile data
+  useEffect(() => {
+    const fetchUserProfile = async () => {
       try {
-        return JSON.parse(savedUser);
-      } catch (e) {
-        return { name: 'Registrar', email: 'registrar@onsts.edu.ph', role: 'Registrar' };
+        const token = localStorage.getItem('auth_token') || localStorage.getItem('registrar_token');
+        if (token) {
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          const response = await axios.get('/user');
+          
+          if (response.data) {
+            // The /user endpoint returns the user object directly
+            setUserProfile(response.data);
+          }
+        } else {
+          // Fallback to localStorage
+          const savedUser = localStorage.getItem('auth_user');
+          if (savedUser) {
+            try {
+              setUserProfile(JSON.parse(savedUser));
+            } catch (e) {
+              console.error('Error parsing saved user:', e);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+        // Fallback to localStorage
+        const savedUser = localStorage.getItem('auth_user');
+        if (savedUser) {
+          try {
+            setUserProfile(JSON.parse(savedUser));
+          } catch (e) {
+            console.error('Error parsing saved user:', e);
+          }
+        }
       }
-    }
-    return { name: 'Registrar', email: 'registrar@onsts.edu.ph', role: 'Registrar' };
-  });
+    };
+
+    fetchUserProfile();
+  }, []);
 
   // Monitor connection status for better error handling
   useEffect(() => {
@@ -113,6 +149,7 @@ const Sidebar = ({ onToggle }) => {
   const isActive = (path) => currentPath.startsWith(path);
 
   // HCI Principle 5: Error prevention & Principle 9: Error recovery
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const handleLogout = async () => {
     // Prevent multiple logout attempts
     if (isLoggingOut) return;
@@ -219,209 +256,179 @@ const Sidebar = ({ onToggle }) => {
     }
   };
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showProfileDropdown && !event.target.closest('.profile-dropdown-container')) {
+        setShowProfileDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showProfileDropdown]);
+
   // HCI Principle 6: Recognition rather than recall - Menu items with descriptions
   const menuItems = [
     {
       path: "/registrar/dashboard",
       icon: FaTachometerAlt,
       label: "Dashboard",
-      description: "Overview",
+      description: "Overview & analytics",
       shortcut: "Alt+D"
     },
     {
       path: "/registrar/students",
       icon: FaUserGraduate,
       label: "Students",
-      description: "Manage records",
+      description: "Student management",
       shortcut: "Alt+S"
     },
     {
-      path: "/registrar/sections",
+      path: "/registrar/strands",
       icon: FaLayerGroup,
-      label: "Sections",
-      description: "Class sections",
-      shortcut: "Alt+E"
+      label: "Strands",
+      description: "Academic tracks",
+      shortcut: "Alt+T"
     },
     {
       path: "/registrar/faculty",
       icon: FaChalkboardTeacher,
       label: "Faculty",
-      description: "Teaching staff",
+      description: "Teacher management",
       shortcut: "Alt+F"
     },
     {
       path: "/registrar/subjects",
       icon: FaBookOpen,
       label: "Subjects",
-      description: "Curriculum",
-      shortcut: "Alt+U"
-    },
-    {
-      path: "/registrar/class",
-      icon: FaLayerGroup,
-      label: "Programs",
-      description: "Academic strands",
-      shortcut: "Alt+P"
+      description: "Course catalog",
+      shortcut: "Alt+C"
     },
     {
       path: "/registrar/schedules",
       icon: FaCalendarAlt,
       label: "Schedules",
-      description: "Timetables",
-      shortcut: "Alt+C"
+      description: "Class timetables",
+      shortcut: "Alt+H"
     },
     {
-      path: "/registrar/grades",
+      path: "/registrar/school-years",
       icon: FaGraduationCap,
-      label: "Grades",
-      description: "Assessments",
-      shortcut: "Alt+G"
-    },
-    {
-      path: "/registrar/semesters",
-      icon: FaSchool,
-      label: "Semesters",
+      label: "School Years",
       description: "Academic periods",
-      shortcut: "Alt+T"
+      shortcut: "Alt+Y"
     },
     {
-      path: "/registrar/profile",
-      icon: FaUser,
-      label: "Profile",
-      description: "Account settings",
-      shortcut: "Alt+R"
+      path: "/registrar/reports",
+      icon: FaChartBar,
+      label: "Reports",
+      description: "Analytics & insights",
+      shortcut: "Alt+A"
+    },
+    {
+      path: "/registrar/settings",
+      icon: FaUserCog,
+      label: "Settings",
+      description: "System configuration",
+      shortcut: "Alt+G"
     }
   ];
+
+  const [theme, setTheme] = useState('light');
 
   return (
     <>
       {/* Mobile Overlay */}
       {!isCollapsed && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={toggleSidebar}
-          role="button"
-          aria-label="Close sidebar"
+          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          onClick={() => setIsCollapsed(true)}
         />
       )}
-      
-      {/* Sidebar */}
-      <div 
-        className={`fixed top-0 left-0 h-screen bg-white text-gray-800 shadow-xl border-r border-gray-200 transition-all duration-300 z-50 flex flex-col ${
-          isCollapsed ? 'w-16' : 'w-64'
-        }`}
-        role="navigation"
-        aria-label="Main navigation"
-      >
-        {/* Toggle Button */}
-        <button
-          onClick={toggleSidebar}
-          className="absolute -right-3 top-4 w-6 h-6 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg transition-all duration-300 z-10 focus:outline-none focus:ring-2 focus:ring-blue-300"
-          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={`${isCollapsed ? "Expand" : "Collapse"} sidebar (Alt+M)`}
-        >
-          {isCollapsed ? <FaBars className="text-xs" /> : <FaTimes className="text-xs" />}
-        </button>
 
-        {/* Sidebar Header */}
-        <div className={`${isCollapsed ? 'p-2' : 'p-4'} border-b border-gray-200 transition-all duration-300 flex-shrink-0`}>
-          <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-            <div className="p-1.5 bg-blue-100 rounded-lg border border-blue-200">
-              <img src="/onsts.png" alt="ONSTS Logo" className="w-6 h-6 object-contain" />
-            </div>
-            {!isCollapsed && (
-              <div className="flex-1">
-                <h1 className="text-lg font-bold text-gray-800">
-                  ONSTS
-                </h1>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-600 font-medium">Registrar Portal</span>
-                  {/* HCI Principle 1: System status visibility */}
-                  <div className="flex items-center gap-1">
-                    {connectionStatus === 'connected' ? (
-                      <FaCheckCircle className="text-green-500 text-xs" title="Connected" />
-                    ) : connectionStatus === 'offline' ? (
-                      <FaExclamationTriangle className="text-orange-500 text-xs" title="Offline" />
-                    ) : (
-                      <FaSpinner className="text-blue-500 text-xs animate-spin" title="Connecting..." />
-                    )}
-                  </div>
-                </div>
+      {/* Sidebar */}
+      <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 ${
+        isCollapsed ? 'w-16' : 'w-64'
+      }`}>
+        {/* Header */}
+        <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-500 to-indigo-600`}>
+          {!isCollapsed && (
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+                <FaSchool className="text-blue-600 text-lg" />
               </div>
-            )}
-          </div>
-          
-          {/* Status indicators when collapsed */}
-          {isCollapsed && (
-            <div className="mt-1 flex justify-center">
-              {connectionStatus === 'connected' ? (
-                <FaCheckCircle className="text-green-500 text-xs" title="System Online" />
-              ) : connectionStatus === 'offline' ? (
-                <FaExclamationTriangle className="text-orange-500 text-xs" title="System Offline" />
-              ) : (
-                <FaSpinner className="text-blue-500 text-xs animate-spin" title="Connecting..." />
-              )}
+              <div>
+                <h1 className="text-white font-bold text-lg">ONSTS</h1>
+                <p className="text-blue-100 text-xs">Registrar Portal</p>
+              </div>
             </div>
           )}
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors duration-200"
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isCollapsed ? <FaBars className="text-sm" /> : <FaTimes className="text-sm" />}
+          </button>
         </div>
 
-        {/* Sidebar Navigation */}
-        <nav className={`flex-1 ${isCollapsed ? 'px-2' : 'px-3'} py-3 transition-all duration-300 min-h-0`}>
-          <ul className="space-y-1" role="menubar">
-            {menuItems.map((item) => {
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-2">
+          <ul className="px-3 space-y-0.5">
+            {menuItems.map((item, index) => {
+              const isCurrentActive = currentPath.startsWith(item.path);
               const Icon = item.icon;
-              const isCurrentActive = isActive(item.path);
               
               return (
-                <li key={item.path} role="none">
+                <li key={index}>
                   <Link
                     href={item.path}
-                    className={`flex items-center ${isCollapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'} rounded-xl transition-all duration-300 group relative border ${
+                    className={`group relative flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 ${
                       isCurrentActive
-                        ? "bg-blue-600 text-white shadow-lg border-blue-700 transform scale-[1.01]"
-                        : "text-gray-700 hover:bg-gray-50 hover:text-gray-900 border-transparent hover:border-gray-200 hover:shadow-sm"
-                    }`}
-                    title={isCollapsed ? `${item.label} - ${item.description} (${item.shortcut})` : item.shortcut}
-                    role="menuitem"
-                    aria-current={isCurrentActive ? "page" : undefined}
+                        ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    } ${isCollapsed ? 'justify-center' : ''}`}
+                    title={isCollapsed ? `${item.label} - ${item.description}` : ''}
                   >
-                    <div className={`flex items-center justify-center ${isCollapsed ? 'w-5 h-5' : 'w-6 h-6'} transition-all duration-300`}>
-                      <Icon className={`${isCollapsed ? 'text-sm' : 'text-base'} transition-all duration-300 ${
-                        isCurrentActive ? "scale-110 text-white" : "group-hover:scale-110 group-hover:text-blue-600"
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <Icon className={`text-lg flex-shrink-0 transition-transform duration-200 ${
+                        isCurrentActive ? 'text-white' : 'text-gray-500 group-hover:text-gray-700'
                       }`} />
-                    </div>
-                    
-                    {!isCollapsed && (
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium text-xs block leading-tight truncate">
+                      
+                      {!isCollapsed && (
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className={`font-medium text-sm truncate ${
+                              isCurrentActive ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'
+                            }`}>
                               {item.label}
                             </span>
-                            <span className={`text-xs block leading-tight truncate ${
-                              isCurrentActive ? 'text-blue-100' : 'text-gray-500 group-hover:text-gray-600'
-                            }`}>
-                              {item.description}
-                            </span>
                           </div>
-                          
-                          {isCurrentActive && (
-                            <div className="flex items-center ml-2">
-                              <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                            </div>
-                          )}
+                          <p className={`text-xs mt-0.5 truncate ${
+                            isCurrentActive ? 'text-blue-100' : 'text-gray-500 group-hover:text-gray-600'
+                          }`}>
+                            {item.description}
+                          </p>
                         </div>
-                      </div>
-                    )}
-                    
+                      )}
+                    </div>
+
                     {/* Active indicator for collapsed state */}
                     {isCollapsed && isCurrentActive && (
-                      <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-blue-400 rounded-full shadow-sm"></div>
+                      <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-blue-500 rounded-full shadow-sm"></div>
                     )}
                     
-                    {/* Hover tooltip for collapsed state */}
+                    {/* Hover arrow */}
+                    {!isCollapsed && !isCurrentActive && (
+                      <FaChevronRight className="ml-2 text-xs text-gray-400 transition-transform duration-200 group-hover:translate-x-1" />
+                    )}
+
+                    {/* Tooltip for collapsed state */}
                     {isCollapsed && (
-                      <div className="absolute left-full ml-2 px-2 py-1.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 shadow-lg">
+                      <div className="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 shadow-lg">
                         <div className="font-medium">{item.label}</div>
                         <div className="text-xs text-gray-300">{item.description}</div>
                         <div className="absolute top-1/2 -left-1 transform -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
@@ -434,31 +441,147 @@ const Sidebar = ({ onToggle }) => {
           </ul>
         </nav>
 
-        {/* Logout Button */}
-        <div className={`${isCollapsed ? 'p-1' : 'p-3'} border-t border-gray-200 transition-all duration-300 flex-shrink-0`}>
-          <button
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className={`w-full flex items-center ${isCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2 rounded-lg transition-all duration-300 group text-gray-600 hover:bg-red-50 hover:text-red-600 border border-transparent hover:border-red-200 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50 disabled:cursor-not-allowed`}
-            title={isCollapsed ? "Logout (Alt+L)" : "Logout (Alt+L)"}
-            aria-label="Logout from system"
-          >
-            {isLoggingOut ? (
-              <FaSpinner className="text-sm animate-spin" />
-            ) : (
-              <FaSignOutAlt className="text-sm transition-transform duration-300 group-hover:scale-110" />
-            )}
-            {!isCollapsed && (
-              <div className="flex-1 text-left min-w-0">
-                <span className="font-medium text-sm block truncate">
-                  {isLoggingOut ? 'Logging out...' : 'Logout'}
-                </span>
-                <span className="text-xs opacity-75 truncate">
-                  {isLoggingOut ? 'Please wait' : 'Secure sign out'}
-                </span>
-              </div>
-            )}
-          </button>
+        {/* Modern Profile Section */}
+        <div className={`relative ${isCollapsed ? 'p-2' : 'p-3'} border-t border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-100`}>
+          {!isCollapsed ? (
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                className="w-full flex items-center gap-3 p-2 rounded-xl bg-white border border-blue-200 hover:border-blue-300 transition-all duration-200 shadow-sm hover:shadow-md"
+              >
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                  {userProfile?.firstname ? userProfile.firstname.charAt(0).toUpperCase() : 'R'}
+                  {userProfile?.lastname ? userProfile.lastname.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div className="flex-1 text-left min-w-0">
+                  <div className="font-semibold text-gray-800 text-sm truncate">
+                    {userProfile?.firstname && userProfile?.lastname 
+                      ? `${userProfile.firstname} ${userProfile.lastname}` 
+                      : 'Registrar User'}
+                  </div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {userProfile?.email || 'Loading...'}
+                  </div>
+                </div>
+                {showProfileDropdown ? (
+                  <FaChevronUp className="text-gray-400 text-sm flex-shrink-0" />
+                ) : (
+                  <FaChevronDown className="text-gray-400 text-sm flex-shrink-0" />
+                )}
+              </button>
+
+              {/* Profile Dropdown */}
+              {showProfileDropdown && (
+                <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-[70] mx-2 profile-dropdown-container">
+                  {/* User Info Header */}
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold">
+                        {userProfile?.firstname ? userProfile.firstname.charAt(0).toUpperCase() : 'R'}
+                        {userProfile?.lastname ? userProfile.lastname.charAt(0).toUpperCase() : 'U'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-gray-800 text-sm truncate">
+                          {userProfile?.firstname && userProfile?.lastname 
+                            ? `${userProfile.firstname} ${userProfile.lastname}` 
+                            : 'Registrar User'}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {userProfile?.email || 'Loading...'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Profile Section */}
+                  <div className="px-4 py-2">
+                    <Link
+                      href="/registrar/profile"
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+                      onClick={() => setShowProfileDropdown(false)}
+                    >
+                      <FaUser className="text-gray-400 text-sm" />
+                      <span>Profile</span>
+                    </Link>
+                  </div>
+
+                  {/* Logout Button */}
+                  <div className="px-4 py-2 border-t border-gray-100 mt-2">
+                    <button
+                      onClick={handleLogout}
+                      disabled={isLoggingOut}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200 disabled:opacity-50"
+                    >
+                      <FaSignOutAlt className="text-sm" />
+                      <span>{isLoggingOut ? 'Logging out...' : 'Log out'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-sm hover:shadow-lg transition-all duration-200"
+                title={userProfile?.firstname && userProfile?.lastname 
+                  ? `${userProfile.firstname} ${userProfile.lastname}` 
+                  : 'Registrar User'}
+              >
+                {userProfile?.firstname ? userProfile.firstname.charAt(0).toUpperCase() : 'R'}
+                {userProfile?.lastname ? userProfile.lastname.charAt(0).toUpperCase() : 'U'}
+              </button>
+
+              {/* Collapsed Profile Dropdown */}
+              {showProfileDropdown && (
+                <div className="absolute bottom-full left-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-[70] w-64 profile-dropdown-container">
+                  {/* User Info Header */}
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold">
+                        {userProfile?.firstname ? userProfile.firstname.charAt(0).toUpperCase() : 'R'}
+                        {userProfile?.lastname ? userProfile.lastname.charAt(0).toUpperCase() : 'U'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-gray-800 text-sm truncate">
+                          {userProfile?.firstname && userProfile?.lastname 
+                            ? `${userProfile.firstname} ${userProfile.lastname}` 
+                            : 'Registrar User'}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {userProfile?.email || 'Loading...'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Profile Section */}
+                  <div className="px-4 py-2">
+                    <Link
+                      href="/registrar/profile"
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+                      onClick={() => setShowProfileDropdown(false)}
+                    >
+                      <FaUser className="text-gray-400 text-sm" />
+                      <span>Profile</span>
+                    </Link>
+                  </div>
+
+                  {/* Logout Button */}
+                  <div className="px-4 py-2 border-t border-gray-100 mt-2">
+                    <button
+                      onClick={handleLogout}
+                      disabled={isLoggingOut}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200 disabled:opacity-50"
+                    >
+                      <FaSignOutAlt className="text-sm" />
+                      <span>{isLoggingOut ? 'Logging out...' : 'Log out'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </>

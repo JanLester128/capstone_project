@@ -1098,7 +1098,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 flex-shrink-0">
           <div className="flex justify-between items-center">
@@ -1164,7 +1164,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         </div>
 
         {/* Form Content - Scrollable Area */}
-        <form onSubmit={handleSubmit} className="flex flex-col flex-1">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-y-auto">
           <div className="flex-1 overflow-y-auto p-6">
             {/* HCI Principle 6: Recognition rather than recall - Clear step content */}
             {renderStepContent()}

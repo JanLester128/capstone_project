@@ -100,7 +100,7 @@ export default function ChangePassword({ userType = "faculty", ...props }) {
         throw new Error('Authentication token not found. Please log in again.');
       }
 
-      const response = await axios.post(`http://127.0.0.1:8000${endpoint}`, {
+      const response = await axios.post(`${window.location.protocol}//${window.location.host}${endpoint}`, {
         new_password: form.new_password,
         confirm_password: form.confirm_password
       }, {
@@ -157,7 +157,7 @@ export default function ChangePassword({ userType = "faculty", ...props }) {
         localStorage.setItem('current_page', '/faculty/dashboard');
         
         // Force a complete page reload to ensure fresh authentication state
-        window.location.replace(`http://127.0.0.1:8000/faculty/dashboard`);
+        window.location.replace(`${window.location.protocol}//${window.location.host}/faculty/dashboard`);
       });
 
     } catch (err) {

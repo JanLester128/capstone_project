@@ -12,6 +12,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Check if table exists before trying to modify it
+        if (!Schema::hasTable('student_personal_info')) {
+            return;
+        }
+
         // First, drop foreign key constraints before dropping columns
         try {
             Schema::table('student_personal_info', function (Blueprint $table) {
@@ -74,6 +79,11 @@ return new class extends Migration
      */
     public function down(): void
     {
+        // Check if table exists before trying to modify it
+        if (!Schema::hasTable('student_personal_info')) {
+            return;
+        }
+
         Schema::table('student_personal_info', function (Blueprint $table) {
             // Remove the columns we added
             $columnsToRemove = ['guardian_name', 'guardian_contact', 'last_school'];

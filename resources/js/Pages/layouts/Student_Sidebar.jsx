@@ -19,7 +19,10 @@ import {
   FaQuestionCircle,
   FaGraduationCap,
   FaChevronRight,
-  FaCircle
+  FaCircle,
+  FaChevronDown,
+  FaChevronUp,
+  FaPalette
 } from "react-icons/fa";
 
 export default function StudentSidebar({ auth, notifications = [], onToggle }) {
@@ -30,6 +33,9 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
     return saved ? JSON.parse(saved) : false;
   });
   const [hoveredItem, setHoveredItem] = useState(null);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [theme, setTheme] = useState('Default');
+  const [userInfo, setUserInfo] = useState(null);
 
   // Notify parent component of initial state on mount
   useEffect(() => {
@@ -37,6 +43,32 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
       onToggle(isCollapsed);
     }
   }, []);
+
+  // Fetch user info on component mount
+  useEffect(() => {
+    const fetchUserInfo = async () => {
+      try {
+        const token = localStorage.getItem('auth_token') || localStorage.getItem('student_token');
+        if (token) {
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          const response = await axios.get('/user');
+          
+          if (response.data) {
+            // The /user endpoint returns the user object directly
+            setUserInfo(response.data);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user info:', error);
+        // Fallback to auth prop if available
+        if (auth?.user) {
+          setUserInfo(auth.user);
+        }
+      }
+    };
+
+    fetchUserInfo();
+  }, [auth]);
 
   const handleToggle = () => {
     const newState = !isCollapsed;
@@ -63,7 +95,7 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
 
     if (result.isConfirmed) {
       try {
-        await axios.post('/logout');
+        await axios.post('/auth/logout');
         // Clear local storage
         localStorage.clear();
         window.location.href = '/login';
@@ -89,8 +121,8 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
     },
     {
       path: '/student/schedule',
-      icon: FaCalendarAlt,
-      label: 'Schedule',
+      icon: FaGraduationCap,
+      label: 'Class',
       description: 'Class Timetable',
       badge: null
     },
@@ -102,25 +134,18 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
       badge: null
     },
     {
-      path: '/student/enroll',
-      icon: FaUserGraduate,
+      path: '/student/enrollment',
+      icon: FaCalendarAlt,
       label: 'Enrollment',
       description: 'Course Registration',
-      badge: 'New'
+      badge: notifications.filter(n => n.type === 'enrollment').length || null
     },
     {
       path: '/student/notifications',
       icon: FaBell,
       label: 'Notifications',
       description: 'Updates & Alerts',
-      badge: notifications.length > 0 ? notifications.length : null
-    },
-    {
-      path: '/student/profile',
-      icon: FaUser,
-      label: 'Profile',
-      description: 'Personal Info',
-      badge: null
+      badge: notifications.length || null
     }
   ];
 
@@ -129,87 +154,104 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
     return url === path || url.startsWith(path);
   };
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showProfileDropdown && !event.target.closest('.profile-dropdown-container')) {
+        setShowProfileDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showProfileDropdown]);
+
   return (
-    <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-50 ${
-      isCollapsed ? 'w-20' : 'w-64'
+    <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 ${
+      isCollapsed ? 'w-16' : 'w-64'
     }`}>
-      
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-purple-600">
+      <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-600 to-purple-600`}>
         {!isCollapsed && (
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <FaGraduationCap className="text-blue-600" />
+              <FaSchool className="text-blue-600 text-lg" />
             </div>
-            <div className="text-white">
-              <h1 className="font-bold text-lg">ONSTS</h1>
-              <p className="text-xs text-blue-100">Student Portal</p>
+            <div>
+              <h1 className="text-white font-bold text-lg">ONSTS</h1>
+              <p className="text-blue-100 text-xs">Student Portal</p>
             </div>
           </div>
         )}
-        
-        {/* Toggle Button - HCI Principle 3: User control and freedom */}
         <button
           onClick={handleToggle}
-          className={`p-2 rounded-lg text-white hover:bg-white/20 transition-colors duration-200 ${
-            isCollapsed ? 'mx-auto' : ''
-          }`}
-          title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors duration-200"
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {isCollapsed ? <FaBars /> : <FaTimes />}
+          {isCollapsed ? <FaBars className="text-sm" /> : <FaTimes className="text-sm" />}
         </button>
       </div>
 
-      {/* Navigation Menu */}
-      <nav className="flex-1 py-4">
-        <div className="space-y-1 px-3">
-          {menuItems.map((item) => {
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto py-4">
+        <div className="px-3 space-y-1">
+          {menuItems.map((item, index) => {
+            const isCurrentActive = url === item.path;
             const Icon = item.icon;
-            const active = isActive(item.path);
             
             return (
               <Link
-                key={item.path}
+                key={index}
                 href={item.path}
-                className={`group flex items-center px-3 py-3 rounded-lg text-sm font-medium transition-all duration-200 relative ${
-                  active
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-600'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`}
+                className={`group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 ${
+                  isCurrentActive
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
+                    : 'text-gray-600 hover:bg-gradient-to-r hover:from-blue-500 hover:to-purple-500 hover:text-white'
+                } ${isCollapsed ? 'justify-center' : ''}`}
                 onMouseEnter={() => setHoveredItem(item.path)}
                 onMouseLeave={() => setHoveredItem(null)}
               >
-                {/* Active Indicator */}
-                {active && (
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 rounded-r-full"></div>
-                )}
-                
-                {/* Icon */}
-                <Icon className={`flex-shrink-0 ${isCollapsed ? 'mx-auto' : 'mr-3'} text-lg ${
-                  active ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
-                }`} />
-                
-                {/* Label and Description */}
-                {!isCollapsed && (
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="truncate">{item.label}</span>
-                      {item.badge && (
-                        <span className={`ml-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none rounded-full ${
-                          typeof item.badge === 'number'
-                            ? 'text-white bg-red-500'
-                            : 'text-blue-700 bg-blue-100'
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <Icon className={`text-lg flex-shrink-0 transition-transform duration-200 ${
+                    isCurrentActive ? 'text-white' : 'text-gray-500 group-hover:text-gray-700'
+                  } ${hoveredItem === item.path ? 'scale-110' : ''}`} />
+                  
+                  {!isCollapsed && (
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`font-medium text-sm truncate ${
+                          isCurrentActive ? 'text-white' : 'text-gray-700 group-hover:text-white'
                         }`}>
-                          {item.badge}
+                          {item.label}
                         </span>
-                      )}
+                        {item.badge && (
+                          <span className={`ml-2 px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
+                            item.badge === 'New' || typeof item.badge === 'number'
+                              ? 'text-white bg-red-500'
+                              : 'text-blue-700 bg-blue-100'
+                          }`}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-xs mt-0.5 truncate ${
+                        isCurrentActive ? 'text-blue-100' : 'text-gray-500 group-hover:text-blue-100'
+                      }`}>
+                        {item.description}
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5 truncate">{item.description}</p>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {/* Hover Arrow */}
-                {!isCollapsed && !active && (
+                {/* Active indicator for collapsed state */}
+                {isCollapsed && isCurrentActive && (
+                  <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-green-500 rounded-full shadow-sm"></div>
+                )}
+                
+                {/* Hover arrow */}
+                {!isCollapsed && !isCurrentActive && (
                   <FaChevronRight className={`ml-2 text-xs text-gray-400 transition-transform duration-200 ${
                     hoveredItem === item.path ? 'translate-x-1' : ''
                   }`} />
@@ -217,11 +259,10 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
 
                 {/* Tooltip for collapsed state */}
                 {isCollapsed && (
-                  <div className="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+                  <div className="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50 shadow-lg">
                     <div className="font-medium">{item.label}</div>
                     <div className="text-xs text-gray-300">{item.description}</div>
-                    {/* Tooltip Arrow */}
-                    <div className="absolute top-1/2 left-0 transform -translate-y-1/2 -translate-x-1 border-4 border-transparent border-r-gray-900"></div>
+                    <div className="absolute top-1/2 -left-1 transform -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
                   </div>
                 )}
               </Link>
@@ -230,47 +271,143 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
         </div>
       </nav>
 
-      {/* Footer Section */}
-      <div className="border-t border-gray-200 p-4">
-        {/* Help & Settings - HCI Principle 10: Help and documentation */}
-        {!isCollapsed && (
-          <div className="space-y-2 mb-4">
-            <Link
-              href="/help"
-              className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+      {/* Modern Profile Section */}
+      <div className="relative p-4 border-t border-gray-200 bg-gray-50">
+        {!isCollapsed ? (
+          <div className="relative">
+            <button
+              onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+              className="profile-dropdown-container w-full flex items-center gap-3 px-4 py-3 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md hover:border-gray-300 transition-all duration-200"
             >
-              <FaQuestionCircle className="mr-3 text-gray-400" />
-              Help & Support
-            </Link>
-            <Link
-              href="/student/settings"
-              className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors duration-200"
-            >
-              <FaCog className="mr-3 text-gray-400" />
-              Settings
-            </Link>
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                {userInfo?.firstname ? userInfo.firstname.charAt(0).toUpperCase() : 'S'}
+                {userInfo?.lastname ? userInfo.lastname.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <div className="font-semibold text-gray-800 text-sm truncate">
+                  {userInfo?.firstname && userInfo?.lastname 
+                    ? `${userInfo.firstname} ${userInfo.lastname}` 
+                    : 'Student User'}
+                </div>
+                <div className="text-xs text-gray-500 truncate">
+                  {userInfo?.email || 'Loading...'}
+                </div>
+              </div>
+              {showProfileDropdown ? (
+                <FaChevronUp className="text-gray-400 text-sm flex-shrink-0" />
+              ) : (
+                <FaChevronDown className="text-gray-400 text-sm flex-shrink-0" />
+              )}
+            </button>
+
+            {/* Profile Dropdown */}
+            {showProfileDropdown && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-[70] mx-2 profile-dropdown-container">
+                {/* User Info Header */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold">
+                      {userInfo?.firstname ? userInfo.firstname.charAt(0).toUpperCase() : 'S'}
+                      {userInfo?.lastname ? userInfo.lastname.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-gray-800 text-sm truncate">
+                        {userInfo?.firstname && userInfo?.lastname 
+                          ? `${userInfo.firstname} ${userInfo.lastname}` 
+                          : 'Student User'}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {userInfo?.email || 'Loading...'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Profile Section */}
+                <div className="px-4 py-2">
+                  <Link
+                    href="/student/profile"
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+                    onClick={() => setShowProfileDropdown(false)}
+                  >
+                    <FaUser className="text-gray-400 text-sm" />
+                    <span>Profile</span>
+                  </Link>
+                </div>
+
+                {/* Logout Button */}
+                <div className="px-4 py-2 border-t border-gray-100 mt-2">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                  >
+                    <FaSignOutAlt className="text-sm" />
+                    <span>Log out</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        ) : (
+          <div className="flex justify-center">
+            <button
+              onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+              className="profile-dropdown-container w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm hover:shadow-lg transition-all duration-200"
+              title={userInfo?.firstname && userInfo?.lastname 
+                ? `${userInfo.firstname} ${userInfo.lastname}` 
+                : 'Student User'}
+            >
+              {userInfo?.firstname ? userInfo.firstname.charAt(0).toUpperCase() : 'S'}
+              {userInfo?.lastname ? userInfo.lastname.charAt(0).toUpperCase() : 'U'}
+            </button>
 
-        {/* Logout Button */}
-        <button
-          onClick={handleLogout}
-          className={`w-full flex items-center px-3 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 group ${
-            isCollapsed ? 'justify-center' : ''
-          }`}
-          title="Logout"
-        >
-          <FaSignOutAlt className={`${isCollapsed ? '' : 'mr-3'} group-hover:scale-110 transition-transform duration-200`} />
-          {!isCollapsed && <span>Logout</span>}
-        </button>
+            {/* Collapsed Profile Dropdown */}
+            {showProfileDropdown && (
+              <div className="absolute bottom-full left-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-[70] w-64 profile-dropdown-container">
+                {/* User Info Header */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold">
+                      {userInfo?.firstname ? userInfo.firstname.charAt(0).toUpperCase() : 'S'}
+                      {userInfo?.lastname ? userInfo.lastname.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-gray-800 text-sm truncate">
+                        {userInfo?.firstname && userInfo?.lastname 
+                          ? `${userInfo.firstname} ${userInfo.lastname}` 
+                          : 'Student User'}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {userInfo?.email || 'Loading...'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-        {/* Status Indicator */}
-        {!isCollapsed && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <div className="flex items-center text-xs text-gray-500">
-              <FaCircle className="mr-2 text-green-500 animate-pulse" />
-              <span>Online</span>
-            </div>
+                {/* Profile Section */}
+                <div className="px-4 py-2">
+                  <Link
+                    href="/student/profile"
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200"
+                    onClick={() => setShowProfileDropdown(false)}
+                  >
+                    <FaUser className="text-gray-400 text-sm" />
+                    <span>Profile</span>
+                  </Link>
+                </div>
+
+                {/* Logout Button */}
+                <div className="px-4 py-2 border-t border-gray-100 mt-2">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                  >
+                    <FaSignOutAlt className="text-sm" />
+                    <span>Log out</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

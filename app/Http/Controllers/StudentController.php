@@ -229,7 +229,6 @@ class StudentController extends Controller
                 $updateData = [
                     'school_year' => $validated['schoolYear'],
                     'lrn' => $validated['lrn'],
-                    'student_status' => $validated['studentStatus'],
                     'grade_level' => $validated['gradeLevel'],
                     'extension_name' => $validated['extensionName'] ?? null,
                     'birthdate' => $validated['birthdate'],
@@ -243,12 +242,27 @@ class StudentController extends Controller
                     'pwd_id' => $validated['pwdId'] ?? null,
                     'last_grade' => $validated['lastGrade'] ?? null,
                     'last_sy' => $validated['lastSY'] ?? null,
-                    'guardian_name' => $validated['guardianName'] ?? null,
-                    'guardian_contact' => $validated['guardianContact'] ?? null,
-                    'last_school' => $validated['lastSchool'] ?? null,
                     'report_card' => $filePaths['reportCard'] ?? null,
                     'image' => $filePaths['image'] ?? null,
                 ];
+
+                // Include student_status only if column exists
+                if (Schema::hasColumn('student_personal_info', 'student_status')) {
+                    $updateData['student_status'] = $validated['studentStatus'];
+                }
+
+                // Include guardian fields only if columns exist
+                if (Schema::hasColumn('student_personal_info', 'guardian_name')) {
+                    $updateData['guardian_name'] = $validated['guardianName'] ?? null;
+                }
+
+                if (Schema::hasColumn('student_personal_info', 'guardian_contact')) {
+                    $updateData['guardian_contact'] = $validated['guardianContact'] ?? null;
+                }
+
+                if (Schema::hasColumn('student_personal_info', 'last_school')) {
+                    $updateData['last_school'] = $validated['lastSchool'] ?? null;
+                }
 
                 // Include PSA only if column exists
                 if (Schema::hasColumn('student_personal_info', 'psa_birth_certificate')) {
@@ -262,12 +276,36 @@ class StudentController extends Controller
                 throw $e;
             }
 
-            // Create enrollment record first so we can reference its ID in preferences
+            // Store enrollment data
             $enrollmentId = null;
             try {
+                // Check for existing enrollment first to prevent duplicates
+                $existingEnrollment = DB::table('enrollments')
+                    ->where('student_id', $student->id) 
+                    ->where('school_year_id', $schoolYear->id)
+                    ->first();
+                
+                if ($existingEnrollment) {
+                    Log::info('Existing enrollment found', [
+                        'enrollment_id' => $existingEnrollment->id,
+                        'status' => $existingEnrollment->status
+                    ]);
+                    
+                    // If already enrolled, redirect back with success message
+                    if ($existingEnrollment->status === 'enrolled') {
+                        return redirect()->back()->with('success', 'You are already enrolled for this school year.');
+                    }
+                    
+                    // If pending, update the existing record instead of creating new one
+                    if ($existingEnrollment->status === 'pending') {
+                        Log::info('Updating existing pending enrollment');
+                        $enrollmentId = $existingEnrollment->id;
+                    }
+                }
+                
                 // Build a schema-aligned payload for enrollments
                 $enrollmentKey = [
-                    'student_id' => $student->id, // FK references student_personal_info.id
+                    'student_id' => $student->id, 
                     'school_year_id' => $schoolYear->id,
                 ];
                 $enrollmentData = [
@@ -345,9 +383,7 @@ class StudentController extends Controller
                     $second = (int) ($validated['secondChoice'] ?? request()->input('secondChoice') ?? request()->input('secondChoiceId') ?? request()->input('second_strand_choice_id') ?? 0);
                     $third  = (int) ($validated['thirdChoice']  ?? request()->input('thirdChoice')  ?? request()->input('thirdChoiceId')  ?? request()->input('third_strand_choice_id')  ?? 0);
 
-                    $choices = [ 1 => ($first ?: null), 2 => ($second ?: null), 3 => ($third ?: null) ];
-
-                    // Verify strand IDs exist to avoid FK errors
+                    $choices = [1 => $first, 2 => $second, 3 => $third];
                     $existingIds = DB::table('strands')->whereIn('id', array_filter([$first, $second, $third]))->pluck('id')->all();
 
                     Log::info('Preparing strand preference rows', [
@@ -356,15 +392,14 @@ class StudentController extends Controller
                         'existing_strand_ids' => $existingIds,
                         'has_school_year_col' => $hasSchoolYearCol,
                         'active_school_year_id' => $activeSchoolYearId,
-                        'has_enrollment_fk' => $hasEnrollmentFk,
-                        'enrollment_id' => $enrollmentId,
                     ]);
 
-                    $insertCount = 0;
+                    $rows = [];
                     foreach ($choices as $order => $strandId) {
                         if (!empty($strandId) && in_array($strandId, $existingIds, true)) {
                             $row = [
-                                'student_id' => $student->id,
+                                'student_id' => $student->id, 
+                                'enrollment_id' => $enrollmentId, // Add enrollment_id to link preferences to enrollment
                                 'strand_id' => $strandId,
                                 'preference_order' => $order,
                                 'created_at' => now(),
@@ -373,12 +408,14 @@ class StudentController extends Controller
                             if ($hasSchoolYearCol && $activeSchoolYearId) {
                                 $row['school_year_id'] = $activeSchoolYearId;
                             }
-                            if ($hasEnrollmentFk && $enrollmentId) {
-                                $row['enrollment_id'] = $enrollmentId;
-                            }
-                            DB::table('student_strand_preferences')->insert($row);
-                            $insertCount++;
+                            $rows[] = $row;
                         }
+                    }
+
+                    $insertCount = 0;
+                    if (!empty($rows)) {
+                        DB::table('student_strand_preferences')->insert($rows);
+                        $insertCount = count($rows);
                     }
 
                     Log::info('Strand preferences inserted', [
@@ -395,16 +432,12 @@ class StudentController extends Controller
                         ]);
                     }
                 }
-            } catch (\Exception $e) {
-                Log::error('Error creating strand preferences (pre): ' . $e->getMessage());
-                // Do not fail enrollment because of preferences
-            }
-
-            // Enrollment already created earlier; nothing to do here.
-            try {
-                // Enrollment already created earlier; nothing to do here.
-            } catch (\Exception $e) {
-                Log::error('Error creating enrollment record (non-fatal): ' . $e->getMessage());
+            } catch (\Throwable $t) {
+                Log::error('Strand preferences insert failed', [
+                    'error' => $t->getMessage(),
+                    'student_id' => $student->id,
+                    'existing_columns' => Schema::hasTable('student_strand_preferences') ? DB::getSchemaBuilder()->getColumnListing('student_strand_preferences') : []
+                ]);
             }
 
             Log::info('Enrollment completed successfully', [
@@ -449,18 +482,18 @@ class StudentController extends Controller
         $currentStatus = 'pending';
         if ($activeSy) {
             $latest = DB::table('enrollments')
-                ->where('student_id', $user->id)
+                ->where('student_id', $student->id) 
                 ->where('school_year_id', $activeSy->id)
                 ->orderByDesc('id')
                 ->first();
-            if ($latest && isset($latest->status)) {
-                $currentStatus = $latest->status;
+            if ($latest) {
+                $currentStatus = $latest->status ?? 'pending';
             }
         }
 
         // Get current class details for enrolled student (if already approved)
         $classDetails = ClassDetail::with(['strand', 'section', 'schoolYear'])
-            ->where('student_id', $user->id)
+            ->where('student_id', $student->id)
             ->when($currentStatus === 'approved', function($q){ return $q->where('enrollment_status', 'approved'); })
             ->first();
 
@@ -511,18 +544,18 @@ class StudentController extends Controller
         $currentStatus = 'pending';
         if ($activeSy) {
             $latest = DB::table('enrollments')
-                ->where('student_id', $user->id)
+                ->where('student_id', $student->id) 
                 ->where('school_year_id', $activeSy->id)
                 ->orderByDesc('id')
                 ->first();
-            if ($latest && isset($latest->status)) {
-                $currentStatus = $latest->status;
+            if ($latest) {
+                $currentStatus = $latest->status ?? 'pending';
             }
         }
 
         // Get current class details for enrolled student (if approved)
         $classDetails = ClassDetail::with(['strand', 'section', 'schoolYear'])
-            ->where('student_id', $user->id)
+            ->where('student_id', $student->id)
             ->when($currentStatus === 'approved', function($q){ return $q->where('enrollment_status', 'approved'); })
             ->first();
 
@@ -535,17 +568,27 @@ class StudentController extends Controller
     }
 
     /**
-     * Get student schedule data
+     * Get student schedule data - real data for enrolled students
      */
     public function getScheduleData(Request $request)
     {
         try {
             $user = Auth::user();
             
+            Log::info('getScheduleData called', ['user_id' => $user->id, 'role' => $user->role]);
+            
+            if (!$user || $user->role !== 'student') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized access'
+                ], 403);
+            }
+            
             // Find the student record
             $student = Student::where('user_id', $user->id)->first();
             
             if (!$student) {
+                Log::info('Student record not found', ['user_id' => $user->id]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Student record not found'
@@ -556,21 +599,156 @@ class StudentController extends Controller
             $currentSchoolYear = SchoolYear::where('is_active', true)->first();
                 
             if (!$currentSchoolYear) {
+                Log::info('No active school year found');
                 return response()->json([
                     'success' => false,
                     'message' => 'No active school year found'
                 ], 404);
             }
             
-            // Get student's enrolled classes using class_details table
+            Log::info('Active school year found', ['school_year_id' => $currentSchoolYear->id]);
+            
+            // First, check if the student has any enrollment record
+            $enrollment = DB::table('enrollments')
+                ->where('student_id', $student->id)
+                ->where('school_year_id', $currentSchoolYear->id)
+                ->first();
+            
+            Log::info('Enrollment check', [
+                'student_id' => $student->id,
+                'user_id' => $user->id,
+                'enrollment_found' => $enrollment ? true : false,
+                'enrollment_status' => $enrollment ? $enrollment->status : 'none'
+            ]);
+            
+            // If no enrollment or not approved, return empty schedule
+            if (!$enrollment || $enrollment->status !== 'enrolled') {
+                Log::info('Student not enrolled or not approved, returning empty schedule');
+                return response()->json([
+                    'success' => true,
+                    'schedules' => [],
+                    'student' => [
+                        'name' => $user->firstname . ' ' . $user->lastname,
+                        'lrn' => $student->lrn ?? 'N/A',
+                        'grade_level' => 'Grade ' . ($student->grade_level ?? '11'),
+                        'section' => 'Not Assigned'
+                    ],
+                    'school_year' => $currentSchoolYear->year_start . '-' . $currentSchoolYear->year_end,
+                    'enrollment_status' => $enrollment ? $enrollment->status : 'not_enrolled',
+                    'message' => 'Please complete enrollment process to view schedule'
+                ]);
+            }
+            
+            // Check if class_details table exists and has records for this student
+            $hasClassDetails = false;
+            try {
+                $classDetailsCount = DB::table('class_details')
+                    ->where('student_id', $user->id)
+                    ->where('is_enrolled', true)
+                    ->count();
+                $hasClassDetails = $classDetailsCount > 0;
+                
+                Log::info('Class details check', [
+                    'has_class_details' => $hasClassDetails,
+                    'count' => $classDetailsCount
+                ]);
+            } catch (\Exception $e) {
+                Log::info('class_details table not accessible: ' . $e->getMessage());
+            }
+            
+            // If student is enrolled but no class assignments yet, show all available classes as fallback
+            if (!$hasClassDetails) {
+                Log::info('Student enrolled but no class assignments, showing all available classes as fallback');
+                
+                // Fallback: Show all available classes for the school year
+                $schedules = DB::table('class')
+                    ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                    ->join('users', 'class.faculty_id', '=', 'users.id')
+                    ->where('class.school_year_id', $currentSchoolYear->id)
+                    ->where('class.is_active', true)
+                    ->select([
+                        'class.id',
+                        'subjects.name as subject_name',
+                        'subjects.code as subject_code',
+                        'class.day_of_week',
+                        'class.start_time',
+                        'class.duration',
+                        'class.room',
+                        'users.firstname as faculty_firstname',
+                        'users.lastname as faculty_lastname'
+                    ])
+                    ->orderBy('class.day_of_week')
+                    ->orderBy('class.start_time')
+                    ->get();
+                
+                Log::info('Fallback schedule query result', [
+                    'schedules_count' => $schedules->count()
+                ]);
+                
+                // If we have classes, format and return them
+                if ($schedules->count() > 0) {
+                    // Group schedules by day of week
+                    $groupedSchedules = $schedules->groupBy('day_of_week');
+                    
+                    // Format the response
+                    $formattedSchedules = [];
+                    foreach ($groupedSchedules as $day => $daySchedules) {
+                        $formattedSchedules[$day] = $daySchedules->map(function ($schedule) {
+                            // Calculate end time
+                            $startTime = \Carbon\Carbon::createFromFormat('H:i:s', $schedule->start_time);
+                            $endTime = $startTime->copy()->addMinutes($schedule->duration);
+                            
+                            return [
+                                'subject_name' => $schedule->subject_name,
+                                'subject_code' => $schedule->subject_code,
+                                'day' => $schedule->day_of_week,
+                                'time_range' => $startTime->format('g:i A') . ' - ' . $endTime->format('g:i A'),
+                                'faculty_name' => $schedule->faculty_firstname . ' ' . $schedule->faculty_lastname,
+                                'room' => $schedule->room ?? 'TBA'
+                            ];
+                        });
+                    }
+                    
+                    return response()->json([
+                        'success' => true,
+                        'schedules' => $formattedSchedules,
+                        'student' => [
+                            'name' => $user->firstname . ' ' . $user->lastname,
+                            'lrn' => $student->lrn ?? 'N/A',
+                            'grade_level' => 'Grade ' . ($student->grade_level ?? '11'),
+                            'section' => 'All Available Classes'
+                        ],
+                        'school_year' => $currentSchoolYear->year_start . '-' . $currentSchoolYear->year_end,
+                        'enrollment_status' => 'enrolled',
+                        'message' => 'Showing available classes. Specific assignments pending coordinator approval.'
+                    ]);
+                }
+                
+                // If no classes found at all
+                return response()->json([
+                    'success' => true,
+                    'schedules' => [],
+                    'student' => [
+                        'name' => $user->firstname . ' ' . $user->lastname,
+                        'lrn' => $student->lrn ?? 'N/A',
+                        'grade_level' => 'Grade ' . ($student->grade_level ?? '11'),
+                        'section' => 'Awaiting Assignment'
+                    ],
+                    'school_year' => $currentSchoolYear->year_start . '-' . $currentSchoolYear->year_end,
+                    'enrollment_status' => 'enrolled_pending_assignment',
+                    'message' => 'Enrollment approved. Awaiting class schedule assignment from coordinator.'
+                ]);
+            }
+            
+            // Fetch only the class schedules that this specific student is enrolled in
             $schedules = DB::table('class')
-                ->join('class_details', 'class.id', '=', 'class_details.class_id')
                 ->join('subjects', 'class.subject_id', '=', 'subjects.id')
                 ->join('users', 'class.faculty_id', '=', 'users.id')
-                ->join('sections', 'class_details.section_id', '=', 'sections.id')
-                ->where('class_details.student_id', $user->id)
-                ->where('class_details.school_year_id', $currentSchoolYear->id)
-                ->where('class_details.is_enrolled', true)
+                ->join('class_details', 'class.id', '=', 'class_details.class_id')
+                ->where('class.school_year_id', $currentSchoolYear->id)
+                ->where('class.is_active', true)
+                ->where('class_details.student_id', $user->id) // Filter by current student
+                ->where('class_details.is_enrolled', true) // Only enrolled classes
                 ->select([
                     'class.id',
                     'subjects.name as subject_name',
@@ -580,17 +758,21 @@ class StudentController extends Controller
                     'class.duration',
                     'class.room',
                     'users.firstname as faculty_firstname',
-                    'users.lastname as faculty_lastname',
-                    'sections.name as section_name'
+                    'users.lastname as faculty_lastname'
                 ])
                 ->orderBy('class.day_of_week')
                 ->orderBy('class.start_time')
                 ->get();
             
+            Log::info('Schedule query result', [
+                'schedules_count' => $schedules->count(),
+                'school_year_id' => $currentSchoolYear->id
+            ]);
+            
             // Group schedules by day of week
             $groupedSchedules = $schedules->groupBy('day_of_week');
             
-            // Format the response
+            // Format the response with only subjects, day, time, and teacher
             $formattedSchedules = [];
             foreach ($groupedSchedules as $day => $daySchedules) {
                 $formattedSchedules[$day] = $daySchedules->map(function ($schedule) {
@@ -599,26 +781,19 @@ class StudentController extends Controller
                     $endTime = $startTime->copy()->addMinutes($schedule->duration);
                     
                     return [
-                        'id' => $schedule->id,
                         'subject_name' => $schedule->subject_name,
                         'subject_code' => $schedule->subject_code,
-                        'start_time' => $startTime->format('g:i A'),
-                        'end_time' => $endTime->format('g:i A'),
+                        'day' => $schedule->day_of_week,
                         'time_range' => $startTime->format('g:i A') . ' - ' . $endTime->format('g:i A'),
-                        'room' => $schedule->room,
                         'faculty_name' => $schedule->faculty_firstname . ' ' . $schedule->faculty_lastname,
-                        'section_name' => $schedule->section_name
+                        'room' => $schedule->room ?? 'TBA'
                     ];
                 });
             }
             
-            // Get section name from class_details
-            $classDetail = ClassDetail::with('section')
-                ->where('student_id', $user->id)
-                ->where('enrollment_status', 'approved')
-                ->first();
-            
-            $sectionName = $classDetail?->section?->name ?? 'Not Assigned';
+            Log::info('Final response', [
+                'schedules_count' => count($formattedSchedules)
+            ]);
             
             return response()->json([
                 'success' => true,
@@ -627,10 +802,10 @@ class StudentController extends Controller
                     'name' => $user->firstname . ' ' . $user->lastname,
                     'lrn' => $student->lrn ?? 'N/A',
                     'grade_level' => 'Grade ' . ($student->grade_level ?? '11'),
-                    'section' => $sectionName
+                    'section' => 'All Sections'
                 ],
                 'school_year' => $currentSchoolYear->year_start . '-' . $currentSchoolYear->year_end,
-                // status now derived elsewhere if needed
+                'enrollment_status' => 'enrolled'
             ]);
             
         } catch (\Exception $e) {
@@ -643,5 +818,125 @@ class StudentController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Display student schedule page
+     */
+    public function getSchedule(Request $request)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'student') {
+            return redirect()->route('login')->with('error', 'Unauthorized access');
+        }
+
+        return Inertia::render('Student/Student_Schedule', [
+            'auth' => [
+                'user' => $user
+            ]
+        ]);
+    }
+
+    /**
+     * Temporarily assign student to section for testing
+     * This should normally be done by coordinator
+     */
+    public function assignToSection(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            
+            if (!$user || $user->role !== 'student') {
+                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            }
+
+            // For testing: assign student to HUMSS-A section (ID: 3)
+            $student = Student::where('user_id', $user->id)->first();
+            
+            if (!$student) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+
+            // Get current school year
+            $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$currentSchoolYear) {
+                return response()->json(['success' => false, 'message' => 'No active school year'], 404);
+            }
+
+            // Update student with section assignment
+            $updateData = [];
+            
+            if (Schema::hasColumn('student_personal_info', 'section_id')) {
+                $updateData['section_id'] = 3; // HUMSS-A section
+            }
+            
+            if (Schema::hasColumn('student_personal_info', 'strand_id')) {
+                $updateData['strand_id'] = 2; // HUMSS strand
+            }
+            
+            if (Schema::hasColumn('student_personal_info', 'school_year_id')) {
+                $updateData['school_year_id'] = $currentSchoolYear->id;
+            }
+
+            if (!empty($updateData)) {
+                Student::where('user_id', $user->id)->update($updateData);
+            }
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Student assigned to HUMSS-A section',
+                'section_id' => 3,
+                'strand_id' => 2
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error assigning student to section: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Assignment failed'], 500);
+        }
+    }
+
+    /**
+     * Display student enrollment page with required data
+     */
+    public function enrollmentPage(Request $request)
+    {
+        $user = $request->user();
+        $student = Student::where('user_id', $user->id)->first();
+        
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get available strands
+        $availableStrands = Strand::orderBy('name')->get();
+        
+        // Check if student already has enrollment status
+        $enrollmentStatus = $student ? $student->enrollment_status : null;
+
+        return Inertia::render('Student/Student_Enroll', [
+            'auth' => [
+                'user' => $user
+            ],
+            'user' => $user,
+            'student' => $student,
+            'activeSchoolYear' => $activeSchoolYear,
+            'availableStrands' => $availableStrands,
+            'enrollmentStatus' => $enrollmentStatus
+        ]);
+    }
+
+    /**
+     * Display student class page
+     */
+    public function classPage(Request $request)
+    {
+        $user = $request->user();
+        
+        return Inertia::render('Student/Student_Class', [
+            'auth' => [
+                'user' => $user
+            ]
+        ]);
     }
 }

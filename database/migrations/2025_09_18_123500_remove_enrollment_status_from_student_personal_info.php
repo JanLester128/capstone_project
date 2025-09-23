@@ -33,7 +33,8 @@ return new class extends Migration
 
         Schema::table('student_personal_info', function (Blueprint $table) {
             if (!Schema::hasColumn('student_personal_info', 'enrollment_status')) {
-                $table->string('enrollment_status', 20)->nullable()->default('pending')->after('hs_grade');
+                // Use 'last_sy' column as reference since 'hs_grade' was removed in earlier migration
+                $table->string('enrollment_status', 20)->nullable()->default('pending')->after('last_sy');
             }
         });
     }

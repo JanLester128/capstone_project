@@ -22,7 +22,7 @@ import {
   FaInfoCircle
 } from "react-icons/fa";
 
-export default function FacultyEnrollment({ pendingStudents: initialPendingStudents = [], approvedStudents: initialApprovedStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, auth }) {
+export default function FacultyEnrollment({ pendingStudents: initialPendingStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, auth }) {
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
@@ -30,7 +30,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   });
 
   const [pendingStudents, setPendingStudents] = useState(initialPendingStudents);
-  const [approvedStudents, setApprovedStudents] = useState(initialApprovedStudents);
   const [rejectedStudents, setRejectedStudents] = useState(initialRejectedStudents);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -64,9 +63,8 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   useEffect(() => {
     // Update state when props change
     setPendingStudents(initialPendingStudents);
-    setApprovedStudents(initialApprovedStudents);
     setRejectedStudents(initialRejectedStudents);
-  }, [initialPendingStudents, initialApprovedStudents, initialRejectedStudents]);
+  }, [initialPendingStudents, initialRejectedStudents]);
 
   // NEW: Auto-fetch subjects whenever the selected strand changes
   useEffect(() => {
@@ -225,25 +223,37 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     }
   };
 
-  const handleApproveStudent = async (studentId) => {
-    // Find the student and open COR modal for section/strand assignment
+  const handleApproveStudent = (studentId) => {
     const student = pendingStudents.find(s => s.id === studentId);
     if (student) {
       setSelectedStudentForCOR(student);
-      // Use first preference as default if available
-      const defaultStrand = student.strand_preferences && student.strand_preferences.length > 0
-        ? student.strand_preferences[0]
-        : "";
-      setSelectedStrand(defaultStrand);
       setShowCORModal(true);
+    }
+  };
 
-      // Fetch sections for the selected strand
-      // Fetch sections for the selected strand
-      if (defaultStrand) {
-        await fetchSectionsAndStrands(defaultStrand);
-        // Preload subjects for the default strand to reduce friction
-        await fetchSubjectsForStrand(defaultStrand);
-      }
+  const handleRejectStudent = async (studentId) => {
+    const result = await Swal.fire({
+      title: 'Reject Enrollment?',
+      text: 'Are you sure you want to reject this student\'s enrollment?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      confirmButtonText: 'Yes, reject it'
+    });
+
+    if (result.isConfirmed) {
+      router.post(`/coordinator/students/${studentId}/reject`, {}, {
+        onSuccess: () => {
+          Swal.fire('Rejected!', 'Student enrollment has been rejected.', 'success');
+          // Move student from pending to rejected
+          const student = pendingStudents.find(s => s.id === studentId);
+          if (student) {
+            setPendingStudents(prev => prev.filter(s => s.id !== studentId));
+            setRejectedStudents(prev => [...prev, student]);
+          }
+        },
+        onError: () => Swal.fire('Error', 'Failed to reject enrollment', 'error')
+      });
     }
   };
 
@@ -334,59 +344,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     }
   };
 
-  const handleRejectStudent = async (studentId) => {
-    try {
-      const { value: reason } = await Swal.fire({
-        title: 'Reject Student Enrollment',
-        input: 'textarea',
-        inputLabel: 'Reason for rejection',
-        inputPlaceholder: 'Please provide a reason for rejecting this enrollment...',
-        inputAttributes: {
-          'aria-label': 'Reason for rejection'
-        },
-        showCancelButton: true,
-        confirmButtonText: 'Reject',
-        confirmButtonColor: '#ef4444',
-        cancelButtonText: 'Cancel',
-        inputValidator: (value) => {
-          if (!value) {
-            return 'You need to provide a reason for rejection!'
-          }
-        }
-      });
-
-      if (reason) {
-        router.post(`/coordinator/students/${studentId}/reject`, {
-          reason: reason
-        }, {
-          onSuccess: () => {
-            Swal.fire({
-              icon: 'success',
-              title: 'Rejected!',
-              text: 'Student enrollment has been rejected.',
-              timer: 2000,
-              showConfirmButton: false
-            });
-          },
-          onError: () => {
-            Swal.fire({
-              icon: 'error',
-              title: 'Error',
-              text: 'Failed to reject student enrollment'
-            });
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Error rejecting student:', error);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: 'Failed to reject student enrollment'
-      });
-    }
-  };
-
   const handleFinalizeEnrollment = async () => {
     if (!selectedStudentForCOR || !selectedStrand || !selectedSection) {
       Swal.fire({
@@ -447,9 +404,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
       case 'pending':
         students = pendingStudents;
         break;
-      case 'approved':
-        students = approvedStudents;
-        break;
       case 'rejected':
         students = rejectedStudents;
         break;
@@ -471,8 +425,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     switch (tab) {
       case 'pending':
         return pendingStudents.length;
-      case 'approved':
-        return approvedStudents.length;
       case 'rejected':
         return rejectedStudents.length;
       default:
@@ -506,7 +458,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -515,18 +467,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
               </div>
               <div className="p-3 bg-orange-100 rounded-full">
                 <FaClipboardList className="text-orange-600 text-xl" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Approved</p>
-                <p className="text-2xl font-bold text-green-600">{approvedStudents.length}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <FaUserCheck className="text-green-600 text-xl" />
               </div>
             </div>
           </div>
@@ -580,7 +520,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
             <nav className="flex space-x-8 px-6">
               {[
                 { key: 'pending', label: 'Pending Review', color: 'orange' },
-                { key: 'approved', label: 'Approved', color: 'green' },
                 { key: 'rejected', label: 'Rejected', color: 'red' }
               ].map(tab => (
                 <button
@@ -1158,73 +1097,72 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                                           )}
                                         </td>
                                       );
-                                    })
-                                  )}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                                    }))}
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+  
+                        {/* No schedules message */}
+                        {!loadingSchedules && classSchedules.length === 0 && selectedSection && (
+                          <div className="text-center py-8 text-gray-500 border-t">
+                            <FaFileAlt className="mx-auto text-3xl mb-3" />
+                            <p className="font-medium">No class schedules available for this section yet.</p>
+                            <p className="text-sm mt-1">Schedules will be available after enrollment is finalized.</p>
+                          </div>
                         )}
                       </div>
-
-                      {/* No schedules message */}
-                      {!loadingSchedules && classSchedules.length === 0 && selectedSection && (
-                        <div className="text-center py-8 text-gray-500 border-t">
-                          <FaFileAlt className="mx-auto text-3xl mb-3" />
-                          <p className="font-medium">No class schedules available for this section yet.</p>
-                          <p className="text-sm mt-1">Schedules will be available after enrollment is finalized.</p>
-                        </div>
-                      )}
+                    </div>
+                  )}
+  
+                  {/* Signature Section */}
+                  <div className="p-6 border-b">
+                    <div className="grid grid-cols-2 gap-8">
+                      <div className="text-center">
+                        <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                        <p className="font-medium">Principal</p>
+                      </div>
+                      <div className="text-center">
+                        <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                        <p className="font-medium">Academic Supervisor</p>
+                      </div>
+                    </div>
+                    <div className="text-center mt-6">
+                      <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
                     </div>
                   </div>
-                )}
-              </div>
-
-              {/* Signature Section */}
-              <div className="p-6 border-b">
-                <div className="grid grid-cols-2 gap-8">
-                  <div className="text-center">
-                    <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                    <p className="font-medium">Principal</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                    <p className="font-medium">Academic Supervisor</p>
+  
+                  {/* Modal Actions */}
+                  <div className="p-6 bg-gray-50 rounded-b-lg flex justify-end space-x-4">
+                    <button
+                      onClick={() => {
+                        setShowCORModal(false);
+                        setSelectedStudentForCOR(null);
+                        setSelectedStrand("");
+                        setSelectedSection("");
+                        setSelectedSubjects([]);
+                      }}
+                      className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                      disabled={isSubmitting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleFinalizeEnrollment}
+                      disabled={isSubmitting || !selectedStrand || !selectedSection}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                    >
+                      {isSubmitting && <FaSpinner className="animate-spin" />}
+                      <span>{isSubmitting ? 'Finalizing...' : 'Finalize Enrollment'}</span>
+                    </button>
                   </div>
                 </div>
-                <div className="text-center mt-6">
-                  <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
-                </div>
-              </div>
-
-              {/* Modal Actions */}
-              <div className="p-6 bg-gray-50 rounded-b-lg flex justify-end space-x-4">
-                <button
-                  onClick={() => {
-                    setShowCORModal(false);
-                    setSelectedStudentForCOR(null);
-                    setSelectedStrand("");
-                    setSelectedSection("");
-                    setSelectedSubjects([]);
-                  }}
-                  className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleFinalizeEnrollment}
-                  disabled={isSubmitting || !selectedStrand || !selectedSection}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
-                >
-                  {isSubmitting && <FaSpinner className="animate-spin" />}
-                  <span>{isSubmitting ? 'Finalizing...' : 'Finalize Enrollment'}</span>
-                </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }

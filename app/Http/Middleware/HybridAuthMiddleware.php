@@ -17,8 +17,13 @@ class HybridAuthMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
-        // Prevent infinite redirects - if already on login page or any auth route, allow access
-        if ($request->is('login') || $request->is('auth/*') || $request->is('register/*')) {
+        // COMPLETELY BYPASS all authentication for login page - NO REDIRECTS
+        if ($request->is('login')) {
+            return $next($request);
+        }
+        
+        // Also bypass for auth routes to prevent conflicts
+        if ($request->is('auth/*') || $request->is('register/*')) {
             return $next($request);
         }
 
@@ -50,6 +55,11 @@ class HybridAuthMiddleware
             $token = $request->session()->get('auth_token');
         }
         
+        // Also check for token in cookies (for browser refresh scenarios)
+        if (!$token && $request->hasCookie('auth_token')) {
+            $token = $request->cookie('auth_token');
+        }
+        
         if ($token) {
             try {
                 $accessToken = PersonalAccessToken::findToken($token);
@@ -68,6 +78,27 @@ class HybridAuthMiddleware
             }
         }
 
+        // For dashboard routes, check if this is a browser request and allow through
+        if ($request->is('*/dashboard') || 
+            $request->is('registrar/*') || 
+            $request->is('faculty/*') || 
+            $request->is('student/*') ||
+            $request->is('dashboard')) {
+            
+            $userAgent = $request->header('User-Agent');
+            $acceptHeader = $request->header('Accept');
+            
+            // If this is a browser request (not API), allow through
+            // Frontend will handle authentication
+            if ($userAgent && !$request->expectsJson() && !$request->is('api/*')) {
+                if ($acceptHeader && str_contains($acceptHeader, 'text/html')) {
+                    return $next($request);
+                }
+                // Even without proper Accept header, allow browser requests
+                return $next($request);
+            }
+        }
+
         // If not authenticated and this is an AJAX request, return JSON
         if ($request->expectsJson() || $request->is('api/*')) {
             return response()->json([
@@ -76,11 +107,25 @@ class HybridAuthMiddleware
             ], 401);
         }
 
-        // Only redirect to login if not already there
-        if (!$request->is('login')) {
+        // VERY CONSERVATIVE redirect - only for specific non-dashboard routes
+        if (!$request->is('login') && 
+            !$request->is('*/dashboard') && 
+            !$request->is('registrar/*') && 
+            !$request->is('faculty/*') && 
+            !$request->is('student/*') &&
+            !$request->is('dashboard')) {
+            
+            // Check if this might be causing a redirect loop
+            $referer = $request->header('Referer');
+            if ($referer && str_contains($referer, '/login')) {
+                // Don't redirect if coming from login page - allow through
+                return $next($request);
+            }
+            
             return redirect('/login');
         }
 
+        // Default: allow through
         return $next($request);
     }
 }

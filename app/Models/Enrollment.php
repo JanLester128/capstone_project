@@ -44,6 +44,11 @@ class Enrollment extends Model
         return $this->belongsTo(User::class, 'coordinator_id');
     }
 
+    public function classDetails()
+    {
+        return $this->hasMany(ClassDetail::class, 'enrollment_id');
+    }
+
     // Scopes
     public function scopePending($query)
     {

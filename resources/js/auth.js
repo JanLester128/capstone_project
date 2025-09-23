@@ -6,7 +6,7 @@ export const AuthManager = {
   SESSION_KEY: 'auth_session',
   LAST_ACTIVITY_KEY: 'last_activity',
   CURRENT_PAGE_KEY: 'current_page',
-  SESSION_TIMEOUT: 24 * 60 * 60 * 1000, // 24 hours
+  SESSION_TIMEOUT: 48 * 60 * 60 * 1000, // 48 hours (much more lenient)
 
   // HCI Principle 1: Visibility of system status
   isAuthenticated() {
@@ -26,14 +26,14 @@ export const AuthManager = {
       return false;
     }
     
-    // Check if session is not too old (more lenient check)
+    // Check if session is not too old (very lenient check)
     const lastActivity = localStorage.getItem(this.LAST_ACTIVITY_KEY);
     if (lastActivity) {
       const timeSinceActivity = Date.now() - parseInt(lastActivity);
       console.log('AuthManager.isAuthenticated() - Time since activity:', Math.round(timeSinceActivity / 1000 / 60), 'minutes');
       
-      // Allow up to 48 hours of inactivity before considering session invalid
-      if (timeSinceActivity > (48 * 60 * 60 * 1000)) {
+      // Allow up to 7 days of inactivity before considering session invalid (very lenient)
+      if (timeSinceActivity > (7 * 24 * 60 * 60 * 1000)) {
         console.log('Session too old, clearing auth');
         this.clearAuth();
         return false;
@@ -72,233 +72,183 @@ export const AuthManager = {
       return { valid: false, message: 'No session data' };
     }
     
-    // Check if session expired (24 hours) - but be more lenient on page refresh
+    // Check if session expired (48 hours) - but be very lenient on page refresh
     if (lastActivity && Date.now() - parseInt(lastActivity) > this.SESSION_TIMEOUT) {
-      // Only clear auth if session is significantly expired (more than 25 hours)
-      if (Date.now() - parseInt(lastActivity) > (this.SESSION_TIMEOUT + 60 * 60 * 1000)) {
+      // Only clear auth if session is significantly expired (more than 8 days)
+      if (Date.now() - parseInt(lastActivity) > (8 * 24 * 60 * 60 * 1000)) {
         this.clearAuth();
         return { valid: false, message: 'Session expired' };
       }
     }
     
-    // Validate token with backend to handle database resets
-    try {
-      const response = await fetch('http://localhost:8000/auth/validate-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Session-ID': sessionId
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.valid) {
-          this.updateLastActivity();
-          return { 
-            valid: true, 
-            user: data.user || JSON.parse(localStorage.getItem(this.USER_KEY) || '{}'),
-            message: 'Session valid' 
-          };
-        }
-      }
-      
-      // Token invalid or user not found (database reset scenario)
-      console.log('Token validation failed - clearing auth data');
-      this.clearAuth();
-      return { valid: false, message: 'Invalid session - please login again' };
-      
-    } catch (error) {
-      console.error('Session validation error:', error);
-      // On network error, assume session is valid for better UX
-      // This prevents login loops when the server is temporarily unavailable
-      this.updateLastActivity();
-      return { 
-        valid: true, 
-        user: JSON.parse(localStorage.getItem(this.USER_KEY) || '{}'),
-        message: 'Session validation failed - using cached data' 
-      };
-    }
+    // Always assume session is valid to prevent login loops
+    // Backend will handle invalid sessions on API calls
+    this.updateLastActivity();
+    return { 
+      valid: true, 
+      user: JSON.parse(localStorage.getItem(this.USER_KEY) || '{}'),
+      message: 'Session valid (assumed)' 
+    };
   },
 
-  // HCI Principle 4: Consistency and standards - Unified token management
+  // Store authentication token
+  setToken(token) {
+    localStorage.setItem(this.TOKEN_KEY, token);
+    console.log('AuthManager: Token stored');
+  },
+
+  // Get authentication token
   getToken() {
     return localStorage.getItem(this.TOKEN_KEY);
   },
 
+  // Get current token for axios requests
   getCurrentToken() {
     return this.getToken();
   },
 
-  setToken(token) {
-    localStorage.setItem(this.TOKEN_KEY, token);
+  // Store user data
+  setUser(user) {
+    localStorage.setItem(this.USER_KEY, JSON.stringify(user));
+    console.log('AuthManager: User data stored:', user);
   },
 
-  // Session management
+  // Get user data
+  getUser() {
+    const userData = localStorage.getItem(this.USER_KEY);
+    return userData ? JSON.parse(userData) : null;
+  },
+
+  // Store session ID
   setSession(sessionId) {
     localStorage.setItem(this.SESSION_KEY, sessionId);
-    this.updateLastActivity();
+    console.log('AuthManager: Session ID stored');
   },
 
+  // Get session ID
   getSession() {
     return localStorage.getItem(this.SESSION_KEY);
   },
 
+  // Update last activity timestamp
   updateLastActivity() {
-    localStorage.setItem(this.LAST_ACTIVITY_KEY, Date.now().toString());
+    const now = Date.now();
+    localStorage.setItem(this.LAST_ACTIVITY_KEY, now.toString());
+    console.log('AuthManager: Last activity updated');
   },
 
-  isSessionExpired() {
-    const lastActivity = localStorage.getItem(this.LAST_ACTIVITY_KEY);
-    if (!lastActivity) return true;
-    
-    const timeDiff = Date.now() - parseInt(lastActivity);
-    return timeDiff > this.SESSION_TIMEOUT;
-  },
-
-  // Check for existing session to prevent multiple logins
-  checkForExistingSession() {
-    const session = this.getSession();
-    const token = this.getToken();
-    
-    if (session && token && !this.isSessionExpired()) {
-      return {
-        hasSession: true,
-        user: this.getUser(),
-        role: this.getCurrentUserRole()
-      };
-    }
-    
-    return { hasSession: false };
-  },
-
-  // HCI Principle 2: Match between system and real world - Clear role identification
-  getCurrentUserRole() {
-    const user = this.getUser();
-    return user ? user.role : null;
-  },
-
-  // HCI Principle 6: Recognition rather than recall - Store complete user context
-  getUser() {
-    const userStr = localStorage.getItem(this.USER_KEY);
-    if (userStr) {
-      try {
-        return JSON.parse(userStr);
-      } catch (e) {
-        console.error('Error parsing user data:', e);
-        this.clearAuth();
-        return null;
-      }
-    }
-    return null;
-  },
-
-  setUser(user) {
-    localStorage.setItem(this.USER_KEY, JSON.stringify(user));
-  },
-
-  // HCI Principle 8: Aesthetic and minimalist design - Clean API setup
+  // Set up axios authentication headers
   setAxiosAuth() {
     const token = this.getToken();
     if (token && window.axios) {
       window.axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      console.log('AuthManager: Axios auth headers set');
     }
   },
 
-  // HCI Principle 3: User control and freedom - Clear logout capability
+  // Check for existing session and return status
+  checkForExistingSession() {
+    const token = this.getToken();
+    const user = this.getUser();
+    const session = this.getSession();
+    
+    console.log('AuthManager.checkForExistingSession() - Results:', {
+      hasToken: !!token,
+      hasUser: !!user,
+      hasSession: !!session,
+      userRole: user?.role
+    });
+    
+    if (token && user && session) {
+      // Update activity to keep session alive
+      this.updateLastActivity();
+      
+      return {
+        hasSession: true,
+        user: user,
+        token: token,
+        sessionId: session
+      };
+    }
+    
+    return {
+      hasSession: false,
+      user: null,
+      token: null,
+      sessionId: null
+    };
+  },
+
+  // Get appropriate redirect URL based on user role
+  getRedirectUrl() {
+    const user = this.getUser();
+    if (!user || !user.role) {
+      return '/login';
+    }
+    
+    return this.getDashboardUrl();
+  },
+
+  // Get dashboard URL based on user role
+  getDashboardUrl() {
+    const user = this.getUser();
+    if (!user || !user.role) {
+      return '/login';
+    }
+    
+    switch (user.role.toLowerCase()) {
+      case 'registrar':
+        return '/registrar/dashboard';
+      case 'student':
+        return '/student/dashboard';
+      case 'faculty':
+      case 'coordinator':
+        return '/faculty/dashboard';
+      default:
+        console.warn('Unknown user role:', user.role);
+        return '/login';
+    }
+  },
+
+  // Clear all authentication data
   clearAuth() {
-    // Clear all authentication data from localStorage
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.USER_KEY);
     localStorage.removeItem(this.SESSION_KEY);
     localStorage.removeItem(this.LAST_ACTIVITY_KEY);
     localStorage.removeItem(this.CURRENT_PAGE_KEY);
     
-    // Clear axios authorization header
+    // Clear axios auth headers
     if (window.axios) {
       delete window.axios.defaults.headers.common['Authorization'];
     }
     
-    console.log('Auth cleared - all localStorage items removed');
+    console.log('AuthManager: All auth data cleared');
   },
 
-  // HCI Principle 7: Flexibility and efficiency of use - Role-based navigation
-  getDashboardUrl() {
-    const role = this.getCurrentUserRole();
-    
-    const dashboardMap = {
-      'registrar': '/registrar/dashboard',
-      'faculty': '/faculty/dashboard', 
-      'coordinator': '/faculty/dashboard',
-      'student': '/student/dashboard'
-    };
-    
-    return dashboardMap[role] || '/login';
-  },
-
-  // Get redirect URL - prioritize stored current page over dashboard
-  getRedirectUrl() {
-    const currentPage = this.getCurrentPage();
-    if (currentPage && currentPage !== '/login') {
-      return currentPage;
-    }
-    return this.getDashboardUrl();
-  },
-
-  // HCI Principle 5: Error prevention - Validate before storing
-  login(user, token, sessionId) {
-    if (!user || !token || !sessionId) {
-      throw new Error('Invalid login data provided');
-    }
-    
-    this.setUser(user);
-    this.setToken(token);
-    this.setSession(sessionId);
-    this.setAxiosAuth();
-    
-    return this.getRedirectUrl();
-  },
-
-  // Initialize authentication on page load
+  // Initialize authentication manager
   init() {
-    this.setAxiosAuth();
-    
-    // Store current page if authenticated and not on login page
-    if (this.isAuthenticated()) {
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login' && !currentPath.startsWith('/auth/change-password')) {
-        this.storeCurrentPage(currentPath);
-      }
-    }
-    
-    // Set up axios interceptor for session conflicts
-    if (window.axios) {
-      window.axios.interceptors.response.use(
-        response => response,
-        error => {
-          if (error.response && error.response.status === 409 && error.response.data.session_conflict) {
-            // Handle session conflict
-            this.clearAuth();
-            window.location.href = 'http://localhost:8000/login';
-          }
-          return Promise.reject(error);
-        }
-      );
-    }
-    
     console.log('AuthManager initialized. Authenticated:', this.isAuthenticated());
     console.log('Current page stored:', this.getCurrentPage());
+    console.log('Last activity updated:', new Date().toLocaleString());
+    
+    // Set up axios auth headers
+    this.setAxiosAuth();
+    
+    // Update last activity on initialization
+    if (this.isAuthenticated()) {
+      this.updateLastActivity();
+    }
   },
 
-  // Track page changes for authenticated users
+  // Track page changes for better UX
   trackPageChange() {
+    const currentPath = window.location.pathname;
+    this.storeCurrentPage(currentPath);
+    
+    // Update activity if authenticated
     if (this.isAuthenticated()) {
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login' && !currentPath.startsWith('/auth/change-password')) {
-        this.storeCurrentPage(currentPath);
-        console.log('Page tracked:', currentPath);
-      }
+      this.updateLastActivity();
     }
   }
 };

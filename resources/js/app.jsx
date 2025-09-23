@@ -1,10 +1,10 @@
 import './bootstrap';
 import '../css/app.css';
-import { AuthManager } from './auth';
 
 import { createRoot } from 'react-dom/client';
 import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
+import { AuthManager } from './auth';
 import { AuthCheck } from './middleware/AuthCheck';
 import axios from 'axios';
 import { router } from '@inertiajs/react';
@@ -33,11 +33,27 @@ axios.interceptors.request.use(
   }
 );
 
+// Set up axios response interceptor to handle auth errors
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      console.log('Axios: 401 Unauthorized - clearing auth and redirecting to login');
+      AuthManager.clearAuth();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Get CSRF cookie on app startup
 axios.get('/sanctum/csrf-cookie').then(() => {
     // CSRF cookie is now set
+    console.log('CSRF cookie set');
 }).catch(error => {
-    console.error('Failed to get CSRF cookie:', error);
+    console.error('Failed to set CSRF cookie:', error);
 });
 
 // Track page changes with Inertia router
@@ -70,8 +86,5 @@ createInertiaApp({
         <App {...props} />
       </AuthCheck>
     );
-  },
-  progress: {
-    color: '#4B5563',
   },
 });

@@ -17,6 +17,13 @@ const useAuth = () => {
       const user = AuthManager.getUser();
       const token = AuthManager.getToken();
       
+      console.log('useAuth: Initializing auth state:', {
+        isAuthenticated: isAuth,
+        hasUser: !!user,
+        hasToken: !!token,
+        userRole: user?.role
+      });
+      
       setAuthState({
         isAuthenticated: isAuth,
         user: user,
@@ -26,6 +33,8 @@ const useAuth = () => {
       // Set axios headers if authenticated
       if (isAuth && token) {
         AuthManager.setAxiosAuth();
+        // Update activity on auth initialization
+        AuthManager.updateLastActivity();
       }
       
       // Don't automatically redirect - let AuthCheck component handle authentication flow
@@ -37,8 +46,8 @@ const useAuth = () => {
         token: null
       });
     } finally {
-      // Reduce loading time for better UX
-      setTimeout(() => setIsLoading(false), 100);
+      // Faster loading for better UX - reduced from 100ms to 50ms
+      setTimeout(() => setIsLoading(false), 50);
     }
   }, []);
 
@@ -51,12 +60,17 @@ const useAuth = () => {
       // Use AuthManager to store auth data
       AuthManager.login(userData, token, sessionId);
       
+      // Set cookie for browser refresh scenarios
+      document.cookie = `auth_token=${token}; path=/; max-age=${24 * 60 * 60}; SameSite=Lax`;
+      
       // Update local state
       setAuthState({
         isAuthenticated: true,
         user: userData,
         token: token
       });
+      
+      console.log('useAuth: Authentication data set successfully');
     } catch (error) {
       console.error('Error setting auth:', error);
     }
@@ -65,11 +79,17 @@ const useAuth = () => {
   // Clear authentication data
   const clearAuth = useCallback(() => {
     AuthManager.clearAuth();
+    
+    // Clear auth cookie
+    document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    
     setAuthState({
       isAuthenticated: false,
       user: null,
       token: null
     });
+    
+    console.log('useAuth: Authentication data cleared');
   }, []);
 
   // Check if user has specific role
@@ -106,7 +126,7 @@ const useAuth = () => {
     }
   }, [authState.user]);
 
-  // Require authentication for protected routes
+  // Require authentication for protected routes (simplified)
   const requireAuth = useCallback((allowedRoles = null) => {
     // Don't redirect if still loading authentication state
     if (isLoading) {
@@ -165,6 +185,7 @@ const useAuth = () => {
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key === AuthManager.TOKEN_KEY || e.key === AuthManager.USER_KEY) {
+        console.log('useAuth: Storage change detected, reinitializing auth');
         initializeAuth();
       }
     };

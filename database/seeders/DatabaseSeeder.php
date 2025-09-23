@@ -19,7 +19,7 @@ class DatabaseSeeder extends Seeder
         User::updateOrCreate(
             ['email' => 'registrar@gmail.com'],
             [
-                'firstname' => 'System',
+                'firstname' => 'ONSTS',
                 'lastname' => 'Registrar',
                 'password' => Hash::make('admin123'),
                 'role' => 'registrar',

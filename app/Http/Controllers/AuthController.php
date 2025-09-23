@@ -252,7 +252,7 @@ class AuthController extends Controller
             
             // Check if request expects JSON (from frontend fetch)
             if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                return response()->json([
+                $response = response()->json([
                     'success' => true,
                     'message' => 'Login successful',
                     'user' => $user,
@@ -260,7 +260,9 @@ class AuthController extends Controller
                     'token_key' => 'auth_token',
                     'session_id' => $sessionId,
                     'redirect' => $this->getDashboardRoute($user->role)
-                ])->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
+                ]);
+                $response->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
+                return $response;
             }
             
             // For web/Inertia requests, redirect directly to dashboard
@@ -373,10 +375,12 @@ class AuthController extends Controller
             // Revoke all tokens for this user
             $user->tokens()->delete();
             
-            // Logout from session
-            Auth::logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
+            // For session-based auth, logout from session (only if using session guard)
+            if (auth()->guard('web')->check()) {
+                auth()->guard('web')->logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+            }
 
             // Return appropriate message based on role
             $message = match($user->role) {
@@ -581,7 +585,7 @@ class AuthController extends Controller
             
             // Check if request expects JSON (from frontend fetch)
             if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                return response()->json([
+                $response = response()->json([
                     'success' => true,
                     'message' => 'Student login successful',
                     'user' => $user,
@@ -590,7 +594,9 @@ class AuthController extends Controller
                     'token_key' => 'auth_token',
                     'session_id' => $sessionId,
                     'redirect' => '/student/dashboard'
-                ])->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
+                ]);
+                $response->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
+                return $response;
             }
             
             // For web/Inertia requests, redirect directly to dashboard

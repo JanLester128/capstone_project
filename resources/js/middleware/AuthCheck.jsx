@@ -19,10 +19,7 @@ export const AuthCheck = ({ children }) => {
         // Clear any stuck redirect flags
         localStorage.removeItem('login_redirect_in_progress');
         
-        // Add a small delay to ensure localStorage is fully accessible
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        // Check if we have basic auth data
+        // Check if we have basic auth data FIRST
         const hasBasicAuth = AuthManager.isAuthenticated();
         const user = AuthManager.getUser();
         const lastActivity = localStorage.getItem(AuthManager.LAST_ACTIVITY_KEY);
@@ -31,8 +28,15 @@ export const AuthCheck = ({ children }) => {
           hasBasicAuth,
           hasUser: !!user,
           userRole: user?.role,
-          currentPath: window.location.pathname
+          currentPath: window.location.pathname,
+          lastActivity: lastActivity ? new Date(parseInt(lastActivity)).toLocaleString() : 'none'
         });
+        
+        // If user is authenticated, extend loading to prevent login flash
+        const loadingDelay = hasBasicAuth && user ? 800 : 50;
+        
+        // Minimal delay - let Login component handle its own auth check
+        await new Promise(resolve => setTimeout(resolve, loadingDelay));
         
         if (!hasBasicAuth || !user) {
           console.log('AuthCheck: No auth data found');
@@ -48,58 +52,25 @@ export const AuthCheck = ({ children }) => {
 
         console.log('AuthCheck: Auth data found, user authenticated');
         
-        // Check if session is recently active (within last hour)
-        const isRecentlyActive = lastActivity && 
-          (Date.now() - parseInt(lastActivity)) < (60 * 60 * 1000); // 1 hour
-
-        if (isRecentlyActive) {
-          console.log('AuthCheck: Recently active session, allowing immediate access');
-          // Recently active, assume session is valid without backend validation
-          setAuthState({
-            isAuthenticated: true,
-            user: user,
-            sessionValid: true
-          });
-          AuthManager.updateLastActivity();
-          setIsLoading(false);
-          return;
-        }
-
-        console.log('AuthCheck: Session might be stale, but allowing access anyway');
-        // Session might be stale, but allow access anyway (graceful degradation)
+        // Update last activity immediately to prevent session timeout
+        AuthManager.updateLastActivity();
+        
+        // Always assume session is valid for better UX
         setAuthState({
           isAuthenticated: true,
           user: user,
-          sessionValid: true // Assume valid until proven otherwise
+          sessionValid: true
         });
+        
         setIsLoading(false);
-
-        // Validate session in background (don't block UI)
-        setTimeout(async () => {
-          try {
-            console.log('AuthCheck: Running background session validation...');
-            const sessionResult = await AuthManager.validateSession();
-            
-            if (!sessionResult.valid) {
-              console.log('AuthCheck: Background session validation failed:', sessionResult.message);
-              // Don't immediately redirect - let the user continue for now
-              // The backend will handle invalid sessions on API calls
-            } else {
-              console.log('AuthCheck: Background session validation successful');
-            }
-          } catch (error) {
-            console.log('AuthCheck: Background session validation error (ignored):', error);
-            // Ignore validation errors - assume session is valid
-          }
-        }, 1000);
 
       } catch (error) {
         console.error('AuthCheck: Initialization error:', error);
-        // On error, assume session is valid to prevent login loops
+        // On error, allow page to render
         setAuthState({
-          isAuthenticated: true,
-          user: AuthManager.getUser() || null,
-          sessionValid: true
+          isAuthenticated: false,
+          user: null,
+          sessionValid: false
         });
         setIsLoading(false);
       }
@@ -108,16 +79,16 @@ export const AuthCheck = ({ children }) => {
     initializeAuth();
   }, []);
 
-  // Show loading state during authentication check (keep it brief)
-  if (isLoading) {
-    return (
-      <LoadingScreen 
-        title="Loading Application"
-        message="Please wait..."
-        type="default"
-      />
-    );
-  }
+  // Render immediately without loading screen
+  // if (isLoading) {
+  //   return (
+  //     <LoadingScreen 
+  //       title="Please wait..."
+  //       message="Initializing application..."
+  //       type="default"
+  //     />
+  //   );
+  // }
 
   console.log('AuthCheck: Rendering children, auth state:', authState);
   

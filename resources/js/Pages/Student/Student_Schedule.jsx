@@ -19,7 +19,9 @@ import {
   FaCalendarWeek,
   FaPlay,
   FaPause,
-  FaStop
+  FaStop,
+  FaList,
+  FaTable
 } from "react-icons/fa";
 
 export default function Student_Schedule() {
@@ -30,10 +32,12 @@ export default function Student_Schedule() {
   });
 
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [viewMode, setViewMode] = useState('week');
+  const [viewMode, setViewMode] = useState('list'); 
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [enrollmentStatus, setEnrollmentStatus] = useState('enrolled');
+  const [loading, setLoading] = useState(true);
+  const [scheduleData, setScheduleData] = useState(null);
+  const [error, setError] = useState(null);
+  const [enrollmentStatus, setEnrollmentStatus] = useState('pending');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -42,43 +46,108 @@ export default function Student_Schedule() {
     return () => clearInterval(timer);
   }, []);
 
+  // Fetch schedule data from API
+  useEffect(() => {
+    fetchScheduleData();
+  }, []);
+
+  const fetchScheduleData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/student/schedule', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setScheduleData(data);
+        setEnrollmentStatus(data.enrollment_status || 'pending');
+      } else {
+        setError(data.message || 'Failed to fetch schedule data');
+        setEnrollmentStatus('pending');
+      }
+    } catch (err) {
+      console.error('Error fetching schedule data:', err);
+      setError('Failed to load schedule data. Please try again.');
+      setEnrollmentStatus('pending');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Temporary function for testing section assignment
+  const assignToSection = async () => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/student/assign-section', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        fetchScheduleData();
+      } else {
+        setError(data.message || 'Failed to assign section');
+      }
+    } catch (err) {
+      console.error('Error assigning section:', err);
+      setError('Failed to assign section. Please try again.');
+    }
+  };
+
   const handleSidebarToggle = (collapsed) => {
     setIsCollapsed(collapsed);
   };
 
-  const weeklySchedule = [
-    {
-      day: 'Monday',
-      classes: [
-        { id: 1, subject: 'Mathematics', time: '8:00 AM - 9:00 AM', room: 'Room 101', teacher: 'Ms. Johnson', type: 'Core', color: 'blue' },
-        { id: 2, subject: 'Science', time: '9:15 AM - 10:15 AM', room: 'Lab 201', teacher: 'Mr. Smith', type: 'Core', color: 'green' },
-        { id: 3, subject: 'English', time: '10:30 AM - 11:30 AM', room: 'Room 102', teacher: 'Mrs. Davis', type: 'Core', color: 'purple' }
-      ]
-    },
-    {
-      day: 'Tuesday',
-      classes: [
-        { id: 4, subject: 'Filipino', time: '8:00 AM - 9:00 AM', room: 'Room 103', teacher: 'Ms. Cruz', type: 'Core', color: 'orange' },
-        { id: 5, subject: 'Social Studies', time: '9:15 AM - 10:15 AM', room: 'Room 104', teacher: 'Mr. Garcia', type: 'Core', color: 'red' }
-      ]
-    },
-    {
-      day: 'Wednesday',
-      classes: [
-        { id: 6, subject: 'Mathematics', time: '8:00 AM - 9:00 AM', room: 'Room 101', teacher: 'Ms. Johnson', type: 'Core', color: 'blue' },
-        { id: 7, subject: 'Physical Education', time: '2:00 PM - 3:00 PM', room: 'Gymnasium', teacher: 'Coach Martinez', type: 'Elective', color: 'teal' }
-      ]
-    }
-  ];
-
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
   const getScheduleForDay = (day) => {
-    const daySchedule = weeklySchedule.find(d => d.day === day);
-    return daySchedule ? daySchedule.classes : [];
+    if (!scheduleData?.schedules) return [];
+    return scheduleData.schedules[day] || [];
   };
 
   const getStatusMessage = () => {
+    if (loading) {
+      return {
+        icon: <FaSpinner className="w-12 h-12 text-blue-500 animate-spin" />,
+        title: "Loading Schedule",
+        message: "Please wait while we fetch your class schedule...",
+        bgColor: "bg-gradient-to-br from-blue-50 to-indigo-50",
+        borderColor: "border-blue-300",
+        textColor: "text-blue-800"
+      };
+    }
+
+    if (error) {
+      return {
+        icon: <FaTimesCircle className="w-12 h-12 text-red-500" />,
+        title: "Error Loading Schedule",
+        message: error,
+        bgColor: "bg-gradient-to-br from-red-50 to-pink-50",
+        borderColor: "border-red-300",
+        textColor: "text-red-800"
+      };
+    }
+
     switch (enrollmentStatus) {
       case 'pending':
         return {
@@ -88,6 +157,30 @@ export default function Student_Schedule() {
           bgColor: "bg-gradient-to-br from-yellow-50 to-orange-50",
           borderColor: "border-yellow-300",
           textColor: "text-yellow-800"
+        };
+      case 'enrolled_no_section':
+        return {
+          icon: <FaInfoCircle className="w-12 h-12 text-blue-500" />,
+          title: "Awaiting Section Assignment",
+          message: "Your enrollment has been approved! Please wait while the coordinator assigns you to a section.",
+          bgColor: "bg-gradient-to-br from-blue-50 to-indigo-50",
+          borderColor: "border-blue-300",
+          textColor: "text-blue-800",
+          action: <button 
+            onClick={assignToSection}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+          >
+            Assign to Section
+          </button>
+        };
+      case 'enrolled_no_schedule':
+        return {
+          icon: <FaInfoCircle className="w-12 h-12 text-purple-500" />,
+          title: "Section Assigned - Schedule Pending",
+          message: "You have been assigned to a section. Class schedules are being prepared by the faculty.",
+          bgColor: "bg-gradient-to-br from-purple-50 to-indigo-50",
+          borderColor: "border-purple-300",
+          textColor: "text-purple-800"
         };
       case 'enrolled':
         return {
@@ -112,16 +205,57 @@ export default function Student_Schedule() {
 
   const statusInfo = getStatusMessage();
 
-  const getSubjectColor = (color) => {
-    const colors = {
-      blue: 'bg-blue-100 border-blue-300 text-blue-800',
-      green: 'bg-green-100 border-green-300 text-green-800',
-      purple: 'bg-purple-100 border-purple-300 text-purple-800',
-      orange: 'bg-orange-100 border-orange-300 text-orange-800',
-      red: 'bg-red-100 border-red-300 text-red-800',
-      teal: 'bg-teal-100 border-teal-300 text-teal-800'
-    };
-    return colors[color] || 'bg-gray-100 border-gray-300 text-gray-800';
+  const getSubjectColor = (index) => {
+    const colors = [
+      'bg-blue-100 border-blue-300 text-blue-800',
+      'bg-green-100 border-green-300 text-green-800',
+      'bg-purple-100 border-purple-300 text-purple-800',
+      'bg-orange-100 border-orange-300 text-orange-800',
+      'bg-red-100 border-red-300 text-red-800',
+      'bg-teal-100 border-teal-300 text-teal-800'
+    ];
+    return colors[index % colors.length];
+  };
+
+  const getTotalClasses = () => {
+    if (!scheduleData?.schedules) return 0;
+    return Object.values(scheduleData.schedules).reduce((total, dayClasses) => total + dayClasses.length, 0);
+  };
+
+  const getUniqueSubjects = () => {
+    if (!scheduleData?.schedules) return 0;
+    const subjects = new Set();
+    Object.values(scheduleData.schedules).forEach(dayClasses => {
+      dayClasses.forEach(classItem => subjects.add(classItem.subject_name));
+    });
+    return subjects.size;
+  };
+
+  // Get all classes in a flat array for list view
+  const getAllClasses = () => {
+    if (!scheduleData?.schedules) return [];
+    const allClasses = [];
+    Object.entries(scheduleData.schedules).forEach(([day, classes]) => {
+      classes.forEach(classItem => {
+        allClasses.push({
+          ...classItem,
+          day: day
+        });
+      });
+    });
+    return allClasses;
+  };
+
+  // Filter classes based on search term
+  const getFilteredClasses = () => {
+    const allClasses = getAllClasses();
+    if (!searchTerm) return allClasses;
+    
+    return allClasses.filter(cls => 
+      cls.subject_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cls.faculty_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cls.day.toLowerCase().includes(searchTerm.toLowerCase())
+    );
   };
 
   return (
@@ -158,13 +292,19 @@ export default function Student_Schedule() {
               </div>
               
               <div className="flex items-center space-x-3">
-                <button className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200">
-                  <FaDownload className="mr-2" />
-                  Export
-                </button>
-                <button className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200">
+                <button 
+                  onClick={() => window.print()}
+                  className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                >
                   <FaPrint className="mr-2" />
                   Print
+                </button>
+                <button 
+                  onClick={fetchScheduleData}
+                  className="flex items-center px-3 py-2 text-sm text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors duration-200"
+                >
+                  <FaSpinner className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
                 </button>
               </div>
             </div>
@@ -173,117 +313,332 @@ export default function Student_Schedule() {
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-7xl mx-auto space-y-6">
               
-              {enrollmentStatus !== 'enrolled' && (
+              {(enrollmentStatus !== 'enrolled' || loading || error || getTotalClasses() === 0) && (
                 <div className={`${statusInfo.bgColor} border-2 ${statusInfo.borderColor} rounded-xl p-8 shadow-lg`}>
                   <div className="text-center space-y-4">
                     <div className="flex justify-center">{statusInfo.icon}</div>
                     <div>
                       <h2 className={`text-2xl font-bold ${statusInfo.textColor}`}>{statusInfo.title}</h2>
                       <p className={`text-lg ${statusInfo.textColor} mt-2`}>{statusInfo.message}</p>
+                      {error && (
+                        <button 
+                          onClick={fetchScheduleData}
+                          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200"
+                        >
+                          Try Again
+                        </button>
+                      )}
+                      {statusInfo.action}
                     </div>
                   </div>
                 </div>
               )}
 
-              {enrollmentStatus === 'enrolled' && (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-                    <div className="flex items-center space-x-4">
-                      <div className="relative">
-                        <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                        <input
-                          type="text"
-                          placeholder="Search subjects or teachers..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-6 text-sm text-gray-600">
-                      <div className="flex items-center space-x-2">
-                        <FaBookOpen className="text-blue-500" />
-                        <span>{weeklySchedule.reduce((total, day) => total + day.classes.length, 0)} Classes</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <FaGraduationCap className="text-green-500" />
-                        <span>6 Subjects</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {enrollmentStatus === 'enrolled' && (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-6">
-                    <h2 className="text-2xl font-bold flex items-center">
-                      <FaCalendarWeek className="mr-3" />
-                      Weekly Schedule
+              {enrollmentStatus === 'enrolled' && !loading && !error && scheduleData && getTotalClasses() > 0 && (
+                <>
+                  {/* Semester Header */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
+                    <h2 className="text-2xl font-bold text-gray-800">
+                      {scheduleData.school_year ? `${scheduleData.school_year} First Semester` : '2025-2026 First Semester'}
                     </h2>
-                    <p className="text-blue-100 mt-2">Academic Year 2024-2025 • 1st Semester</p>
                   </div>
-                  
-                  <div className="p-6">
-                    <div className="space-y-6">
-                      {daysOfWeek.map((day, dayIndex) => {
-                        const dayClasses = getScheduleForDay(day);
-                        const filteredClasses = dayClasses.filter(cls => 
-                          cls.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          cls.teacher.toLowerCase().includes(searchTerm.toLowerCase())
-                        );
-                        
-                        return (
-                          <div key={dayIndex} className="border border-gray-200 rounded-xl overflow-hidden">
-                            <div className="bg-gray-50 px-6 py-4 border-b flex items-center justify-between">
-                              <h3 className="text-lg font-bold text-gray-800">{day}</h3>
-                              <span className="text-sm text-gray-600">
-                                {filteredClasses.length} class{filteredClasses.length !== 1 ? 'es' : ''}
-                              </span>
-                            </div>
-                            <div className="p-4">
-                              {filteredClasses.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                  {filteredClasses.map((classItem, classIndex) => (
-                                    <div key={classIndex} className={`p-4 rounded-lg border-2 hover:shadow-md transition-all duration-200 ${getSubjectColor(classItem.color)}`}>
-                                      <div className="flex items-start justify-between mb-3">
-                                        <h4 className="font-bold text-lg">{classItem.subject}</h4>
-                                        <span className="px-2 py-1 bg-white bg-opacity-50 text-xs rounded-full font-medium">
-                                          {classItem.type}
-                                        </span>
+
+                  {/* View Mode Tabs */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="flex border-b border-gray-200">
+                      <button
+                        onClick={() => setViewMode('list')}
+                        className={`flex-1 px-6 py-4 text-sm font-medium transition-colors duration-200 ${
+                          viewMode === 'list'
+                            ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <FaList className="inline mr-2" />
+                        List
+                      </button>
+                      <button
+                        onClick={() => setViewMode('timetable')}
+                        className={`flex-1 px-6 py-4 text-sm font-medium transition-colors duration-200 ${
+                          viewMode === 'timetable'
+                            ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <FaTable className="inline mr-2" />
+                        Timetable
+                      </button>
+                    </div>
+
+                    {/* List View */}
+                    {viewMode === 'list' && (
+                      <div className="p-6">
+                        <div className="mb-6">
+                          <h3 className="text-xl font-bold text-gray-800 mb-4">Class List</h3>
+                          
+                          {/* Search Bar */}
+                          <div className="relative mb-4">
+                            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Search subjects or teachers..."
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full"
+                            />
+                          </div>
+
+                          {/* Class Table */}
+                          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <table className="w-full">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Subject
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Day
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Time
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Room
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Instructor
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-gray-200">
+                                {getFilteredClasses().map((classItem, index) => (
+                                  <tr key={index} className="hover:bg-gray-50 transition-colors duration-150">
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {classItem.subject_name}
                                       </div>
-                                      
-                                      <div className="space-y-2 text-sm">
-                                        <div className="flex items-center">
-                                          <FaClock className="mr-2 w-4 h-4" />
-                                          <span className="font-medium">{classItem.time}</span>
+                                      {classItem.subject_code && (
+                                        <div className="text-sm text-gray-500 italic">
+                                          ({classItem.subject_code})
                                         </div>
-                                        <div className="flex items-center">
-                                          <FaMapMarkerAlt className="mr-2 w-4 h-4" />
-                                          <span>{classItem.room}</span>
-                                        </div>
-                                        <div className="flex items-center">
-                                          <FaUser className="mr-2 w-4 h-4" />
-                                          <span>{classItem.teacher}</span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="text-center py-8 text-gray-500">
-                                  <FaCalendarAlt className="mx-auto text-3xl mb-2" />
-                                  <p>No classes scheduled</p>
-                                </div>
-                              )}
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        {classItem.day}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                      {classItem.time_range}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                      {classItem.room || 'TBA'}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                      {classItem.faculty_name}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            
+                            {getFilteredClasses().length === 0 && (
+                              <div className="text-center py-8 text-gray-500">
+                                <FaBookOpen className="mx-auto text-3xl mb-2" />
+                                <p>No classes found matching your search.</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Timetable View */}
+                    {viewMode === 'timetable' && (
+                      <div className="p-6">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 mb-6">
+                          <div className="flex items-center space-x-4">
+                            <div className="relative">
+                              <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                              <input
+                                type="text"
+                                placeholder="Search subjects or teachers..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
+                              />
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          <div className="flex items-center space-x-6 text-sm text-gray-600">
+                            <div className="flex items-center space-x-2">
+                              <FaBookOpen className="text-blue-500" />
+                              <span>{getTotalClasses()} Classes</span>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <FaGraduationCap className="text-green-500" />
+                              <span>{getUniqueSubjects()} Subjects</span>
+                            </div>
+                            {scheduleData.student && (
+                              <div className="flex items-center space-x-2">
+                                <FaUser className="text-purple-500" />
+                                <span>{scheduleData.student.section}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Timetable Grid */}
+                        <div className="bg-white border border-gray-300 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full min-w-[900px]">
+                              <thead>
+                                <tr className="bg-gray-100">
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300 w-24">
+                                    Time
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Monday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Tuesday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Wednesday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Thursday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Friday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
+                                    Saturday
+                                  </th>
+                                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">
+                                    Sunday
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(() => {
+                                  const timeSlots = [
+                                    '7:30 - 8:00', '8:00 - 8:30', '8:30 - 9:00', '9:00 - 9:30', '9:30 - 10:00',
+                                    '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00', '12:00 - 12:30',
+                                    '12:30 - 1:00', '1:00 - 1:30', '1:30 - 2:00', '2:00 - 2:30', '2:30 - 3:00',
+                                    '3:00 - 3:30', '3:30 - 4:00', '4:00 - 4:30', '4:30 - 5:00', '5:00 - 5:30',
+                                    '5:30 - 6:00', '6:00 - 6:30', '6:30 - 7:00', '7:00 - 7:30', '7:30 - 8:00',
+                                    '8:00 - 8:30', '8:30 - 9:00'
+                                  ];
+                                  
+                                  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                                  
+                                  // Create a grid to track occupied cells
+                                  const grid = {};
+                                  days.forEach(day => {
+                                    grid[day] = {};
+                                  });
+                                  
+                                  // Function to convert time to slot index
+                                  const timeToSlotIndex = (timeStr) => {
+                                    const [time, period] = timeStr.split(' ');
+                                    let [hours, minutes] = time.split(':').map(Number);
+                                    
+                                    if (period === 'PM' && hours !== 12) hours += 12;
+                                    if (period === 'AM' && hours === 12) hours = 0;
+                                    
+                                    const totalMinutes = hours * 60 + minutes;
+                                    const startMinutes = 7 * 60 + 30; // 7:30 AM
+                                    const slotMinutes = (totalMinutes - startMinutes) / 30;
+                                    
+                                    return Math.floor(slotMinutes);
+                                  };
+                                  
+                                  // Parse schedule data and fill grid
+                                  if (scheduleData?.schedules) {
+                                    Object.entries(scheduleData.schedules).forEach(([day, classes]) => {
+                                      classes.forEach(classItem => {
+                                        if (classItem.time_range) {
+                                          const [startTime, endTime] = classItem.time_range.split(' - ');
+                                          const startSlot = timeToSlotIndex(startTime);
+                                          const endSlot = timeToSlotIndex(endTime);
+                                          
+                                          if (startSlot >= 0 && startSlot < timeSlots.length && endSlot > startSlot) {
+                                            const duration = endSlot - startSlot;
+                                            grid[day][startSlot] = {
+                                              ...classItem,
+                                              duration: duration
+                                            };
+                                            
+                                            // Mark occupied slots
+                                            for (let i = startSlot + 1; i < endSlot; i++) {
+                                              grid[day][i] = 'occupied';
+                                            }
+                                          }
+                                        }
+                                      });
+                                    });
+                                  }
+                                  
+                                  const getSubjectColor = (subject) => {
+                                    const colors = {
+                                      'IT Elective 6: Internet of Things': 'bg-green-400',
+                                      'Capstone Project and Research 2': 'bg-yellow-400',
+                                      'Systems Administration and Maintenance': 'bg-yellow-300',
+                                      'IT Elective 5: Cloud Computing': 'bg-green-300'
+                                    };
+                                    return colors[subject] || 'bg-blue-300';
+                                  };
+                                  
+                                  return timeSlots.map((timeSlot, index) => (
+                                    <tr key={index} className="border-b border-gray-200">
+                                      <td className="px-2 py-2 text-xs text-center font-medium text-gray-700 border-r border-gray-300 bg-gray-50">
+                                        {timeSlot}
+                                      </td>
+                                      {days.map(day => {
+                                        const cell = grid[day][index];
+                                        
+                                        if (cell === 'occupied') {
+                                          return null; // This cell is part of a multi-slot class
+                                        }
+                                        
+                                        if (cell && typeof cell === 'object') {
+                                          return (
+                                            <td 
+                                              key={day} 
+                                              className={`px-2 py-1 text-xs text-center border-r border-gray-300 ${getSubjectColor(cell.subject_name)} text-gray-800`}
+                                              rowSpan={cell.duration}
+                                            >
+                                              <div className="font-semibold leading-tight">
+                                                {cell.subject_name}
+                                              </div>
+                                              <div className="text-xs mt-1">
+                                                {cell.room || 'TBA'}
+                                              </div>
+                                              <div className="text-xs">
+                                                {cell.faculty_name}
+                                              </div>
+                                            </td>
+                                          );
+                                        }
+                                        
+                                        return (
+                                          <td key={day} className="px-2 py-2 border-r border-gray-300 bg-white">
+                                            {/* Empty cell */}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ));
+                                })()}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
+                </>
               )}
             </div>
           </main>

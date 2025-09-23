@@ -13,14 +13,16 @@ export default function AuthRedirect() {
         if (user) {
           const dashboardUrl = AuthManager.getDashboardUrl();
           if (dashboardUrl) {
-            window.location.href = `http://localhost:8000${dashboardUrl}`;
+            const baseUrl = `${window.location.protocol}//${window.location.host}`;
+            window.location.href = `${baseUrl}${dashboardUrl}`;
             return;
           }
         }
       }
       
       // If no valid session, redirect to login
-      window.location.href = 'http://localhost:8000/login';
+      const baseUrl = `${window.location.protocol}//${window.location.host}`;
+      window.location.href = `${baseUrl}/login`;
     };
 
     checkAuthAndRedirect();
