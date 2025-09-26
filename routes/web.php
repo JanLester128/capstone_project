@@ -118,12 +118,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     // Student routes (protected by auth middleware)
     Route::middleware(['auth:sanctum', 'role:student'])->group(function () {
-        Route::get('/student/enrollment', fn() => Inertia::render('Student/Student_Enrollment'))
+        Route::get('/student/enrollment', [StudentController::class, 'enrollmentPage'])
             ->name('student.enrollment.form');
         
        
         Route::get('/student/schedule', [StudentController::class, 'getSchedule'])
             ->name('student.schedule');
+        Route::get('/student/schedule-data', [StudentController::class, 'getScheduleData'])
+            ->name('student.schedule.data');
     });
 
     
@@ -143,6 +145,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::prefix('schedules')->group(function () {
             Route::get('/', [ScheduleController::class, 'index'])->name('registrar.schedules.index');
             Route::post('/', [ScheduleController::class, 'store'])->name('registrar.schedules.store');
+            Route::post('/bulk', [ScheduleController::class, 'bulkCreate'])->name('registrar.schedules.bulk');
             Route::put('/{schedule}', [ScheduleController::class, 'update'])->name('registrar.schedules.update');
             Route::delete('/{schedule}', [ScheduleController::class, 'destroy'])->name('registrar.schedules.destroy');
             Route::post('/bulk-assign', [ScheduleController::class, 'bulkAssign'])->name('registrar.schedules.bulk-assign');
@@ -174,7 +177,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/strands', [RegistrarController::class, 'strandsPage'])->name('registrar.strands');
         Route::get('/subjects', [RegistrarController::class, 'subjectsPage'])->name('registrar.subjects');
         Route::get('/subjects/cor/{strandId}', [RegistrarController::class, 'subjectsCOR'])->name('registrar.subjects.cor');
-        Route::get('/subjects/cor/{sectionId}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
+        Route::get('/subjects/cor/{sectionId}/{studentId?}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
         Route::post('/strands', [RegistrarController::class, 'createStrand'])->name('registrar.strands.create');
         Route::put('/strands/{id}', [RegistrarController::class, 'updateStrand'])->name('registrar.strands.update');
         Route::delete('/strands/{id}', [RegistrarController::class, 'deleteStrand'])->name('registrar.strands.delete');
@@ -198,6 +201,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // School Year Management Routes
         Route::get('/school-years', [RegistrarController::class, 'schoolYearsPage'])->name('registrar.school-years');
         Route::post('/school-years', [RegistrarController::class, 'createSchoolYear'])->name('registrar.school-years.create');
+        Route::post('/school-years/create-full-year', [RegistrarController::class, 'createFullAcademicYear'])->name('registrar.school-years.create-full-year');
         Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])->name('registrar.school-years.update');
         Route::delete('/school-years/{id}', [RegistrarController::class, 'deleteSchoolYear'])->name('registrar.school-years.delete');
         Route::put('/school-years/{id}/activate', [RegistrarController::class, 'activateSchoolYear'])->name('registrar.school-years.activate');
@@ -214,22 +218,19 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     });
 
-    // School Years route - accessible without registrar prefix
-    Route::get('/school-years', [RegistrarController::class, 'getSchoolYears'])
-        ->middleware(['hybrid.auth'])
-        ->name('school-years');
-    Route::post('/school-years', [RegistrarController::class, 'storeSchoolYear'])
-        ->middleware(['hybrid.auth'])
-        ->name('school-years.store');
-    Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])
-        ->middleware(['hybrid.auth'])
-        ->name('school-years.update');
-    Route::delete('/school-years/{id}', [RegistrarController::class, 'deleteSchoolYear'])
-        ->middleware(['hybrid.auth'])
-        ->name('school-years.delete');
-    Route::put('/school-years/{id}/toggle', [RegistrarController::class, 'toggleSchoolYear'])
-        ->middleware(['hybrid.auth'])
-        ->name('school-years.toggle');
+    // Philippine SHS System API Routes
+    Route::prefix('api')->middleware(['hybrid.auth'])->group(function () {
+        // School year progression status
+        Route::get('/school-years/progression-status', [RegistrarController::class, 'getProgressionStatus'])
+            ->name('api.school-years.progression-status');
+        
+        // Student grade progression
+        Route::post('/students/progress-grade', [FacultyController::class, 'progressStudentGrade'])
+            ->name('api.students.progress-grade');
+    });
+
+    // Note: School Years routes are now handled within the registrar prefix above
+    // These duplicate routes have been removed to prevent conflicts
 
     /*
     |--------------------------------------------------------------------------
@@ -252,15 +253,23 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     Route::prefix('student')->middleware(['hybrid.auth'])->group(function () {
 
-        // Enroll Page
+        // Enroll Page - Philippine SHS System
         Route::get('/enroll', function(Request $request) {
-            // Only show strands if there's an active school year/semester
-            $activeSchoolYear = \App\Models\SchoolYear::getActive();
-            $strands = $activeSchoolYear ? \App\Models\Strand::orderBy('code')->get() : collect();
+            // Philippine SHS: Check enrollment window instead of just active school year
+            $enrollmentSchoolYear = \App\Models\SchoolYear::getEnrollmentOpen();
+            $strands = $enrollmentSchoolYear && $enrollmentSchoolYear->isEnrollmentOpen() ? 
+                \App\Models\Strand::orderBy('code')->get() : collect();
             $user = $request->user();
+            
             return Inertia::render('Student/Student_Enroll', [
                 'availableStrands' => $strands,
-                'activeSchoolYear' => $activeSchoolYear,
+                'activeSchoolYear' => $enrollmentSchoolYear, // Keep same prop name for compatibility
+                'enrollmentOpen' => $enrollmentSchoolYear ? $enrollmentSchoolYear->isEnrollmentOpen() : false,
+                'enrollmentMessage' => $enrollmentSchoolYear ? 
+                    ($enrollmentSchoolYear->isEnrollmentOpen() ? 
+                        'Enrollment is currently open for ' . $enrollmentSchoolYear->academic_year_display : 
+                        'Enrollment is currently closed') : 
+                    'No enrollment period is currently active',
                 'user' => $user
             ]);
         })->name('student.enroll');
@@ -314,7 +323,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->name('coordinator.students.reject');
         Route::post('/students/{student}/finalize', [App\Http\Controllers\CoordinatorController::class, 'finalizeStudent'])
             ->name('coordinator.students.finalize');
+        
+        // Student schedule route for COR
+        Route::get('/student/{studentId}/schedule', [App\Http\Controllers\FacultyController::class, 'getStudentSchedule'])
+            ->name('faculty.student.schedule');
     });
+
 
     /*
     |--------------------------------------------------------------------------

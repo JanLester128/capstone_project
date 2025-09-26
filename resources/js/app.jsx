@@ -6,6 +6,7 @@ import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { AuthManager } from './auth';
 import { AuthCheck } from './middleware/AuthCheck';
+import { setupPagePersistence } from './utils/pageAuth';
 import axios from 'axios';
 import { router } from '@inertiajs/react';
 
@@ -16,8 +17,9 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 // Make axios available globally
 window.axios = axios;
 
-// Initialize authentication manager
+// Initialize authentication manager and page persistence
 AuthManager.init();
+setupPagePersistence();
 
 // Set up axios request interceptor to add auth headers
 axios.interceptors.request.use(

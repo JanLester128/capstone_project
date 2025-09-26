@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePage, router } from '@inertiajs/react';
 import Sidebar from '../layouts/Sidebar';
-import { FaPlus, FaEdit, FaTrash, FaClock, FaUser, FaBook, FaCalendarAlt, FaTimes, FaUsers, FaChalkboardTeacher, FaInfoCircle, FaEye, FaMapMarkerAlt } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaClock, FaUser, FaBook, FaCalendarAlt, FaTimes, FaUsers, FaChalkboardTeacher, FaInfoCircle, FaEye, FaMapMarkerAlt, FaSearch, FaFilter, FaSync, FaCheckCircle, FaExclamationTriangle, FaBell, FaQuestionCircle, FaKeyboard, FaArrowLeft, FaSpinner } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 
 export default function ScheduleManagement() {
@@ -10,53 +10,32 @@ export default function ScheduleManagement() {
     const [schedules, setSchedules] = useState(initialSchedules || []);
     const [subjects, setSubjects] = useState(initialSubjects || []);
     const [semesterInfo, setSemesterInfo] = useState(null);
-    const [isCollapsed, setIsCollapsed] = useState(() => {
-        const saved = localStorage.getItem('registrar-sidebar-collapsed');
-        return saved ? JSON.parse(saved) : false;
-    });
+    const [isCollapsed, setIsCollapsed] = useState(false);
     const [selectedStrand, setSelectedStrand] = useState(null);
     const [showStrandModal, setShowStrandModal] = useState(false);
+    const [semesterFilter, setSemesterFilter] = useState('all'); // Add semester filter
+    
+    // Bulk assignment states
+    const [showBulkModal, setShowBulkModal] = useState(false);
+    const [bulkAssignments, setBulkAssignments] = useState([]);
+    const [selectedFaculty, setSelectedFaculty] = useState('');
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const [assignmentErrors, setAssignmentErrors] = useState({});
+    
+    // HCI Enhancement States
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterStrand, setFilterStrand] = useState('all');
+    const [filterGradeLevel, setFilterGradeLevel] = useState('all'); // Add grade level filter
+    const [systemStatus, setSystemStatus] = useState({
+        isOnline: true,
+        lastSync: new Date().toLocaleTimeString(),
+        pendingActions: 0
+    });
+    const [showHelp, setShowHelp] = useState(false);
+    const [recentActions, setRecentActions] = useState([]);
+    const [notifications, setNotifications] = useState([]);
 
-    // Initialize subjects from props instead of making additional API call
-    useEffect(() => {
-        if (initialSubjects && initialSubjects.length > 0) {
-            setSubjects(initialSubjects);
-            console.log('Using initial subjects:', initialSubjects.length);
-        }
-        if (activeSchoolYear) {
-            setSemesterInfo(activeSchoolYear);
-            console.log('Using active school year:', activeSchoolYear.semester);
-        }
-    }, [initialSubjects, activeSchoolYear]);
-
-    // Handle SweetAlert from backend session data
-    useEffect(() => {
-        console.log('SweetAlert useEffect triggered, swal data:', swal);
-        if (swal) {
-            console.log('Showing SweetAlert with data:', swal);
-            Swal.fire({
-                icon: swal.icon || swal.type,
-                title: swal.title,
-                text: swal.text,
-                html: swal.html,
-                confirmButtonText: swal.confirmButtonText || 'OK',
-                timer: swal.timer,
-                showConfirmButton: swal.showConfirmButton !== false,
-                allowOutsideClick: swal.allowOutsideClick !== false,
-                allowEscapeKey: swal.allowEscapeKey !== false
-            });
-        } else {
-            console.log('No swal data found in props');
-        }
-    }, [swal]);
-
-    // Update schedules when props change (after reload)
-    useEffect(() => {
-        if (initialSchedules && initialSchedules.length > 0) {
-            setSchedules(initialSchedules || []);
-        }
-    }, [initialSchedules]);
-
+    // Modal and form states - moved here to avoid reference errors
     const [showModal, setShowModal] = useState(false);
     const [editingSchedule, setEditingSchedule] = useState(null);
     const [errors, setErrors] = useState({});
@@ -76,13 +55,77 @@ export default function ScheduleManagement() {
         school_year: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025'
     });
 
-    // Get filtered subjects based on selected grade level and section
+    // Initialize subjects from props instead of making additional API call
+    useEffect(() => {
+        if (initialSubjects && initialSubjects.length > 0) {
+            setSubjects(initialSubjects);
+            console.log('Using initial subjects:', initialSubjects.length);
+        }
+        if (activeSchoolYear) {
+            setSemesterInfo(activeSchoolYear);
+            console.log('Using active school year:', activeSchoolYear.semester);
+        }
+    }, [initialSubjects, activeSchoolYear]);
+
+    // Auto-save search preferences - HCI Principle 6: Recognition Rather Than Recall
+    useEffect(() => {
+        localStorage.setItem('schedule-search-term', searchTerm);
+        localStorage.setItem('schedule-filter-strand', filterStrand);
+        localStorage.setItem('schedule-filter-grade-level', filterGradeLevel);
+        localStorage.setItem('schedule-semester-filter', semesterFilter);
+    }, [searchTerm, filterStrand, filterGradeLevel, semesterFilter]);
+
+    // Load saved preferences on mount
+    useEffect(() => {
+        const savedSearchTerm = localStorage.getItem('schedule-search-term');
+        const savedFilterStrand = localStorage.getItem('schedule-filter-strand');
+        const savedFilterGradeLevel = localStorage.getItem('schedule-filter-grade-level');
+        const savedSemesterFilter = localStorage.getItem('schedule-semester-filter');
+        
+        if (savedSearchTerm) setSearchTerm(savedSearchTerm);
+        if (savedFilterStrand) setFilterStrand(savedFilterStrand);
+        if (savedFilterGradeLevel) setFilterGradeLevel(savedFilterGradeLevel);
+        if (savedSemesterFilter) setSemesterFilter(savedSemesterFilter);
+    }, []);
+
+    // Handle SweetAlert from backend session data
+    useEffect(() => {
+        console.log('SweetAlert useEffect triggered, swal data:', swal);
+        // Don't show individual success alerts during bulk operations
+        if (swal && !bulkLoading) {
+            console.log('Showing SweetAlert with data:', swal);
+            Swal.fire({
+                icon: swal.icon || swal.type,
+                title: swal.title,
+                text: swal.text,
+                html: swal.html,
+                confirmButtonText: swal.confirmButtonText || 'OK',
+                timer: swal.timer,
+                showConfirmButton: swal.showConfirmButton !== false,
+                allowOutsideClick: swal.allowOutsideClick !== false,
+                allowEscapeKey: swal.allowEscapeKey !== false
+            });
+        } else if (bulkLoading) {
+            console.log('Bulk operation in progress, suppressing individual SweetAlert');
+        } else {
+            console.log('No swal data found in props');
+        }
+    }, [swal, bulkLoading]);
+
+    // Update schedules when props change (after reload)
+    useEffect(() => {
+        if (initialSchedules && initialSchedules.length > 0) {
+            setSchedules(initialSchedules || []);
+        }
+    }, [initialSchedules]);
+
+    // Get filtered subjects based on selected grade level and section with semester identification
     const getFilteredSubjects = () => {
         if (!formData.grade_level) return [];
 
         const selectedSection = sections?.find(s => s.id == formData.section_id);
 
-        // Filter subjects by grade level
+        // Filter subjects by grade level, strand, and semester
         let filteredSubjects = subjects?.filter(subject => {
             // Check if subject matches the selected grade level
             const matchesGradeLevel = subject.year_level === formData.grade_level ||
@@ -91,8 +134,19 @@ export default function ScheduleManagement() {
             // Check if subject matches section's strand
             const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
 
-            return matchesGradeLevel && matchesStrand;
+            // Check if subject matches semester filter
+            const matchesSemester = semesterFilter === 'all' || 
+                subject.semester?.toString() === semesterFilter;
+
+            return matchesGradeLevel && matchesStrand && matchesSemester;
         }) || [];
+
+        // Sort subjects by semester for better organization
+        filteredSubjects.sort((a, b) => {
+            const semesterA = a.semester || 1;
+            const semesterB = b.semester || 1;
+            return semesterA - semesterB;
+        });
 
         // Get subjects already assigned to this section to disable them
         const assignedSubjects = schedules
@@ -109,6 +163,56 @@ export default function ScheduleManagement() {
 
     // Get available subjects for display
     const availableSubjects = getFilteredSubjects();
+
+    // Get filtered subjects for bulk assignment
+    const getBulkFilteredSubjects = (sectionId, gradeLevel) => {
+        console.log('getBulkFilteredSubjects called with:', { sectionId, gradeLevel });
+        
+        if (!sectionId || !gradeLevel) {
+            console.log('Missing sectionId or gradeLevel, returning empty array');
+            return [];
+        }
+        
+        const selectedSection = sections?.find(s => s.id == sectionId);
+        console.log('Selected section:', selectedSection);
+        
+        const filteredSubjects = subjects?.filter(subject => {
+            const matchesGradeLevel = subject.year_level == gradeLevel || subject.grade_level == gradeLevel;
+            const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
+            
+            // Check if subject is already assigned to this section
+            const isAlreadyAssigned = schedules.some(schedule => 
+                schedule.section_id == sectionId && 
+                schedule.subject_id == subject.id
+            );
+            
+            console.log(`Subject ${subject.name}: gradeMatch=${matchesGradeLevel}, strandMatch=${matchesStrand}, alreadyAssigned=${isAlreadyAssigned}`);
+            
+            return matchesGradeLevel && matchesStrand && !isAlreadyAssigned;
+        }) || [];
+        
+        console.log('Filtered subjects:', filteredSubjects.length);
+        return filteredSubjects;
+    };
+
+    // Get teacher's current subject count
+    const getTeacherSubjectCount = (facultyId) => {
+        if (!facultyId) return 0;
+        return schedules?.filter(schedule => schedule.faculty_id == facultyId).length || 0;
+    };
+
+    // Check if teacher has reached the 4-subject limit
+    const isTeacherAtLimit = (facultyId) => {
+        const currentCount = getTeacherSubjectCount(facultyId);
+        const pendingCount = bulkAssignments.length;
+        return (currentCount + pendingCount) >= 4;
+    };
+
+    // Get remaining slots for teacher
+    const getRemainingSlots = (facultyId) => {
+        const currentCount = getTeacherSubjectCount(facultyId);
+        return Math.max(0, 4 - currentCount);
+    };
 
     // Calculate duration from start and end time - must be 60, 90, or 120 minutes
     const calculateDuration = (startTime, endTime) => {
@@ -587,27 +691,119 @@ export default function ScheduleManagement() {
         return abbreviated;
     };
 
-    // Group schedules by strand, then by section for better organization
-    const schedulesByStrand = schedules.reduce((acc, schedule) => {
+    // Helper function to determine grade level from schedule data
+    const getScheduleGradeLevel = (schedule) => {
+        // Try multiple sources for grade level
+        if (schedule.section?.grade_level) {
+            return schedule.section.grade_level.toString();
+        } else if (schedule.subject?.year_level) {
+            return schedule.subject.year_level.toString();
+        } else if (schedule.subject?.grade_level) {
+            return schedule.subject.grade_level.toString();
+        } else if (schedule.section?.section_name) {
+            // Try to extract grade from section name (e.g., "ABM-11A" -> "11")
+            const gradeMatch = schedule.section.section_name.match(/(\d{2})/);
+            if (gradeMatch && ['11', '12'].includes(gradeMatch[1])) {
+                return gradeMatch[1];
+            }
+        }
+        
+        // Check if subject name contains grade info (common patterns)
+        if (schedule.subject?.name) {
+            const subjectName = schedule.subject.name.toLowerCase();
+            
+            // Check for explicit grade patterns
+            if (subjectName.includes('grade 11') || subjectName.includes('g11') || subjectName.includes('11th')) {
+                return '11';
+            }
+            if (subjectName.includes('grade 12') || subjectName.includes('g12') || subjectName.includes('12th')) {
+                return '12';
+            }
+            
+            // Check for subject patterns that typically indicate grade levels
+            // Grade 11 subjects
+            if (subjectName.includes('general physics 1') || 
+                subjectName.includes('general chemistry 1') ||
+                subjectName.includes('general biology 1') ||
+                subjectName.includes('basic calculus') ||
+                subjectName.includes('pre-calculus')) {
+                return '11';
+            }
+            
+            // Grade 12 subjects  
+            if (subjectName.includes('general physics 2') || 
+                subjectName.includes('general chemistry 2') ||
+                subjectName.includes('general biology 2') ||
+                subjectName.includes('calculus') ||
+                subjectName.includes('statistics and probability')) {
+                return '12';
+            }
+            
+            // Generic number pattern
+            const subjectGradeMatch = schedule.subject.name.match(/(\d{1,2})/);
+            if (subjectGradeMatch && ['11', '12'].includes(subjectGradeMatch[1])) {
+                return subjectGradeMatch[1];
+            }
+        }
+        
+        // Default to 11 for senior high school if we can't determine
+        return '11';
+    };
+
+    // Filter schedules based on search term, strand, grade level, and semester
+    const filteredSchedules = schedules.filter(schedule => {
+        // Search filter
+        const searchMatch = !searchTerm || 
+            schedule.subject?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            schedule.faculty?.firstname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            schedule.faculty?.lastname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            schedule.section?.section_name?.toLowerCase().includes(searchTerm.toLowerCase());
+
+        // Strand filter
+        const strandMatch = filterStrand === 'all' || 
+            schedule.section?.strand?.code === filterStrand;
+
+        // Grade level filter using helper function
+        const scheduleGradeLevel = getScheduleGradeLevel(schedule);
+        const gradeLevelMatch = filterGradeLevel === 'all' || scheduleGradeLevel === filterGradeLevel;
+
+        // Semester filter
+        const semesterMatch = semesterFilter === 'all' || 
+            schedule.semester === semesterFilter ||
+            schedule.subject?.semester === semesterFilter;
+
+        return searchMatch && strandMatch && gradeLevelMatch && semesterMatch;
+    });
+
+    // Group schedules by strand, then by grade level, then by section for better organization
+    const schedulesByStrand = filteredSchedules.reduce((acc, schedule) => {
         const strandKey = schedule.section?.strand?.name || 'Unknown Strand';
         const strandCode = schedule.section?.strand?.code || 'UNK';
+        const gradeLevel = getScheduleGradeLevel(schedule);
         const sectionKey = schedule.section ?
             `${schedule.section.section_name}` :
             'Unassigned Section';
+
 
         if (!acc[strandKey]) {
             acc[strandKey] = {
                 code: strandCode,
                 name: strandKey,
+                grades: {}
+            };
+        }
+
+        if (!acc[strandKey].grades[gradeLevel]) {
+            acc[strandKey].grades[gradeLevel] = {
                 sections: {}
             };
         }
 
-        if (!acc[strandKey].sections[sectionKey]) {
-            acc[strandKey].sections[sectionKey] = [];
+        if (!acc[strandKey].grades[gradeLevel].sections[sectionKey]) {
+            acc[strandKey].grades[gradeLevel].sections[sectionKey] = [];
         }
 
-        acc[strandKey].sections[sectionKey].push(schedule);
+        acc[strandKey].grades[gradeLevel].sections[sectionKey].push(schedule);
         return acc;
     }, {});
 
@@ -733,139 +929,680 @@ export default function ScheduleManagement() {
         setSelectedStrand(null);
     };
 
+    // Bulk assignment functions
+    const openBulkModal = () => {
+        console.log('Opening bulk modal with data:', {
+            sections: sections?.length || 0,
+            subjects: subjects?.length || 0,
+            faculties: faculties?.length || 0,
+            schedules: schedules?.length || 0
+        });
+        setBulkAssignments([]);
+        setSelectedFaculty('');
+        setShowBulkModal(true);
+        // Add first assignment automatically
+        setTimeout(() => {
+            addBulkAssignment();
+        }, 100);
+    };
+
+    const closeBulkModal = () => {
+        setShowBulkModal(false);
+        setBulkAssignments([]);
+        setSelectedFaculty('');
+        setAssignmentErrors({});
+    };
+
+    const addBulkAssignment = () => {
+        // Check if teacher is selected
+        if (!selectedFaculty) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Select Teacher First',
+                text: 'Please select a faculty member before adding subjects.',
+                confirmButtonColor: '#f59e0b'
+            });
+            return;
+        }
+
+        // Check if teacher has reached the limit
+        const remainingSlots = getRemainingSlots(selectedFaculty);
+        if (remainingSlots <= bulkAssignments.length) {
+            const currentCount = getTeacherSubjectCount(selectedFaculty);
+            Swal.fire({
+                icon: 'warning',
+                title: 'Teacher Schedule Limit Reached',
+                text: `This teacher is already assigned to ${currentCount} subjects and has ${bulkAssignments.length} pending assignments, which is the maximum limit. Please choose a different teacher or remove existing assignments.`,
+                confirmButtonColor: '#f59e0b'
+            });
+            return;
+        }
+
+        setBulkAssignments(prev => [...prev, {
+            id: Date.now(),
+            section_id: '',
+            subject_id: '',
+            grade_level: '',
+            day_of_week: '',
+            start_time: '',
+            end_time: '',
+            duration: 60,
+            semester: '1st Semester',
+            school_year: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '2024-2025'
+        }]);
+    };
+
+    const removeBulkAssignment = (id) => {
+        setBulkAssignments(prev => prev.filter(assignment => assignment.id !== id));
+    };
+
+    const updateBulkAssignment = (id, field, value) => {
+        setBulkAssignments(prev => prev.map(assignment => 
+            assignment.id === id ? { ...assignment, [field]: value } : assignment
+        ));
+    };
+
+    const handleBulkSubmit = async () => {
+        if (!selectedFaculty) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Faculty Required',
+                text: 'Please select a faculty member for bulk assignment.',
+                confirmButtonColor: '#f59e0b'
+            });
+            return;
+        }
+
+        if (bulkAssignments.length === 0) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'No Assignments',
+                text: 'Please add at least one subject assignment.',
+                confirmButtonColor: '#f59e0b'
+            });
+            return;
+        }
+
+        // Validate all assignments
+        const incompleteAssignments = bulkAssignments.filter(assignment => 
+            !assignment.section_id || !assignment.grade_level || !assignment.subject_id || 
+            !assignment.day_of_week || !assignment.start_time || !assignment.end_time
+        );
+
+        if (incompleteAssignments.length > 0) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Incomplete Assignments',
+                text: `Please complete all fields for ${incompleteAssignments.length} assignment(s). Check that each assignment has: Section, Grade Level, Subject, Day, Start Time, and End Time selected.`,
+                confirmButtonColor: '#f59e0b'
+            });
+            setBulkLoading(false);
+            return;
+        }
+
+        setBulkLoading(true);
+
+        try {
+            const assignmentsToSubmit = bulkAssignments.map(assignment => ({
+                ...assignment,
+                faculty_id: selectedFaculty,
+                duration: calculateDuration(assignment.start_time, assignment.end_time)
+            }));
+
+            // Submit all assignments in a single bulk request
+            await new Promise((resolve, reject) => {
+                router.post('/registrar/schedules/bulk', {
+                    schedules: assignmentsToSubmit,
+                    suppress_individual_notifications: true // Flag to prevent individual notifications
+                }, {
+                    onSuccess: (response) => {
+                        console.log('Bulk creation successful:', response);
+                        resolve(response);
+                    },
+                    onError: (errors) => {
+                        console.error('Bulk assignment error:', errors);
+                        reject(errors);
+                    },
+                    preserveState: true,
+                    preserveScroll: true
+                });
+            });
+
+            // If we reach here, all assignments were successful
+            const successCount = assignmentsToSubmit.length;
+            const errorCount = 0;
+            
+            // Clear any previous assignment errors
+            setAssignmentErrors({});
+
+            // Show consolidated success message
+            Swal.fire({
+                icon: 'success',
+                title: 'Schedules Created Successfully!',
+                text: `Successfully created ${successCount} schedule${successCount !== 1 ? 's' : ''} for the selected teacher.`,
+                confirmButtonColor: '#10b981',
+                timer: 3000,
+                timerProgressBar: true
+            });
+            
+            // Close modal and reload data
+            closeBulkModal();
+            router.reload();
+
+        } catch (error) {
+            console.error('Bulk assignment error:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Assignment Failed',
+                text: 'Some assignments could not be created. Please check for conflicts and try again. The modal will stay open so you can adjust your selections.',
+                confirmButtonColor: '#dc2626'
+            });
+            // Keep modal open with all data intact
+        } finally {
+            setBulkLoading(false);
+        }
+    };
+
+    // HCI Enhancement: Keyboard Shortcuts - Principle 7: Flexibility and Efficiency
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            // Ctrl+N - New schedule
+            if (event.ctrlKey && event.key === 'n') {
+                event.preventDefault();
+                openBulkModal();
+            }
+            // Ctrl+F - Focus search
+            else if (event.ctrlKey && event.key === 'f') {
+                event.preventDefault();
+                document.querySelector('input[placeholder*="Search"]')?.focus();
+            }
+            // ? - Toggle help
+            else if (event.key === '?') {
+                event.preventDefault();
+                setShowHelp(!showHelp);
+            }
+            // Escape - Close modals
+            else if (event.key === 'Escape') {
+                if (showModal) {
+                    setShowModal(false);
+                    resetForm();
+                }
+                if (showBulkModal) {
+                    closeBulkModal();
+                }
+                if (showStrandModal) {
+                    setShowStrandModal(false);
+                }
+                if (showHelp) {
+                    setShowHelp(false);
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [showModal, showBulkModal, showStrandModal, showHelp]);
+
     return (
         <div className="flex min-h-screen bg-gray-50">
             <Sidebar onToggle={setIsCollapsed} />
 
-            <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
+            <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden`}>
                 <div className="max-w-7xl mx-auto">
-                    {/* Header */}
+                    {/* Enhanced Header with System Status - HCI Principle 1: Visibility of System Status */}
                     <div className="mb-8">
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
-                                    Schedule Management
-                                </h1>
-                                <p className="text-gray-600 mt-2">Manage class schedules for {currentSchoolYear}</p>
+                        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+                            <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
+                                        <FaCalendarAlt className="text-purple-600" />
+                                        Schedule Management
+                                    </h1>
+                                    {/* System Status Indicator - HCI Principle 1 */}
+                                    <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
+                                        <div className={`w-2 h-2 rounded-full ${systemStatus.isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                                        <span className="text-sm font-medium text-green-800">
+                                            {systemStatus.isOnline ? 'System Online' : 'System Offline'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <p className="text-gray-600">Manage class schedules for {currentSchoolYear}</p>
+                                <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                                    <span>Last sync: {systemStatus.lastSync}</span>
+                                    {systemStatus.pendingActions > 0 && (
+                                        <span className="flex items-center gap-1 text-orange-600">
+                                            <FaBell className="w-3 h-3" />
+                                            {systemStatus.pendingActions} pending actions
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                            <button
-                                onClick={() => setShowModal(true)}
-                                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg flex items-center gap-2"
-                            >
-                                <FaPlus />
-                                Create Schedule
-                            </button>
+                            
+                            {/* Action Buttons with Better Accessibility - HCI Principle 3: User Control */}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowHelp(!showHelp)}
+                                    className="p-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200 focus:ring-2 focus:ring-purple-300 focus:outline-none"
+                                    title="Show help and keyboard shortcuts (Press ? key)"
+                                    aria-label="Toggle help panel"
+                                >
+                                    <FaQuestionCircle className="w-5 h-5" />
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setSystemStatus(prev => ({...prev, lastSync: new Date().toLocaleTimeString()}));
+                                        router.reload();
+                                    }}
+                                    className="p-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200 focus:ring-2 focus:ring-purple-300 focus:outline-none"
+                                    title="Refresh data (Ctrl+R)"
+                                    aria-label="Refresh schedule data"
+                                >
+                                    <FaSync className="w-5 h-5" />
+                                </button>
+                                <button
+                                    onClick={openBulkModal}
+                                    className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 transform hover:scale-105 transition-all duration-200 focus:ring-4 focus:ring-purple-300 focus:outline-none"
+                                    aria-label="Create new class schedule"
+                                >
+                                    <FaCalendarAlt className="w-4 h-4" />
+                                    Create Schedule
+                                </button>
+                            </div>
                         </div>
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2">
-                                <FaInfoCircle className="w-5 h-5 text-blue-600" />
-                                <span className="text-blue-800 font-medium">Quick Tip:</span>
+                        
+                        {/* Enhanced Search and Filter Controls - HCI Principle 6: Recognition Rather Than Recall */}
+                        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
+                            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+                                <div className="flex flex-col sm:flex-row gap-4 flex-1">
+                                    <div className="relative flex-1 max-w-md">
+                                        <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search schedules, subjects, or faculty..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+                                            aria-label="Search schedules by subject, faculty, or section"
+                                        />
+                                    </div>
+                                    <div className="flex gap-3 flex-wrap">
+                                        <select
+                                            value={filterStrand}
+                                            onChange={(e) => setFilterStrand(e.target.value)}
+                                            className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                                            aria-label="Filter by strand"
+                                        >
+                                            <option value="all">All Strands</option>
+                                            <option value="STEM">STEM</option>
+                                            <option value="ABM">ABM</option>
+                                            <option value="HUMSS">HUMSS</option>
+                                            <option value="TVL">TVL</option>
+                                        </select>
+                                        <select
+                                            value={filterGradeLevel}
+                                            onChange={(e) => setFilterGradeLevel(e.target.value)}
+                                            className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                                            aria-label="Filter by grade level"
+                                        >
+                                            <option value="all">All Grades</option>
+                                            <option value="11">Grade 11</option>
+                                            <option value="12">Grade 12</option>
+                                        </select>
+                                        <select
+                                            value={semesterFilter}
+                                            onChange={(e) => setSemesterFilter(e.target.value)}
+                                            className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                                            aria-label="Filter by semester"
+                                        >
+                                            <option value="all">All Semesters</option>
+                                            <option value="1st Semester">1st Semester</option>
+                                            <option value="2nd Semester">2nd Semester</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                {/* Quick Stats - HCI Principle 1: Visibility of System Status */}
+                                <div className="flex items-center gap-6 text-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                        <span className="text-gray-600">Filtered: <span className="font-semibold">{filteredSchedules?.length || 0}</span></span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                                        <span className="text-gray-600">Total: <span className="font-semibold">{schedules?.length || 0}</span></span>
+                                    </div>
+                                    {(filterGradeLevel !== 'all' || filterStrand !== 'all' || semesterFilter !== 'all' || searchTerm) && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                                            <span className="text-gray-600">
+                                                {filterGradeLevel !== 'all' && `Grade ${filterGradeLevel}`}
+                                                {filterStrand !== 'all' && ` ${filterStrand}`}
+                                                {semesterFilter !== 'all' && ` ${semesterFilter}`}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <p className="text-blue-700 mt-1">When creating a schedule, select the section first to filter available subjects and faculty members for that strand.</p>
+                        </div>
+                        
+                        {/* Contextual Help Panel - HCI Principle 10: Help and Documentation */}
+                        {showHelp && (
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 mb-6">
+                                <div className="flex items-start gap-3">
+                                    <FaInfoCircle className="w-5 h-5 text-blue-600 mt-1 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <h3 className="text-blue-900 font-semibold mb-3 flex items-center gap-2">
+                                            Quick Help Guide
+                                            <button
+                                                onClick={() => setShowHelp(false)}
+                                                className="ml-auto text-blue-600 hover:text-blue-800 p-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                                aria-label="Close help panel"
+                                            >
+                                                <FaTimes className="w-4 h-4" />
+                                            </button>
+                                        </h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                            <div>
+                                                <h4 className="font-medium text-blue-800 mb-2">Creating Schedules:</h4>
+                                                <ul className="text-blue-700 space-y-1">
+                                                    <li>• Select section first to filter options</li>
+                                                    <li>• Choose subject and faculty from filtered lists</li>
+                                                    <li>• Set day and time (system checks conflicts)</li>
+                                                    <li>• Review before saving</li>
+                                                </ul>
+                                            </div>
+                                            <div>
+                                                <h4 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
+                                                    <FaKeyboard className="w-4 h-4" />
+                                                    Keyboard Shortcuts:
+                                                </h4>
+                                                <ul className="text-blue-700 space-y-1">
+                                                    <li>• <kbd className="px-2 py-1 bg-blue-100 rounded text-xs">Ctrl+N</kbd> New schedule</li>
+                                                    <li>• <kbd className="px-2 py-1 bg-blue-100 rounded text-xs">Ctrl+F</kbd> Search</li>
+                                                    <li>• <kbd className="px-2 py-1 bg-blue-100 rounded text-xs">?</kbd> Toggle help</li>
+                                                    <li>• <kbd className="px-2 py-1 bg-blue-100 rounded text-xs">Esc</kbd> Close modals</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Status Messages - HCI Principle 9: Help Users Recognize, Diagnose, and Recover from Errors */}
+                        {notifications.length > 0 && (
+                            <div className="space-y-2 mb-6">
+                                {notifications.map((notification, index) => (
+                                    <div key={index} className={`flex items-center gap-3 p-4 rounded-lg border ${
+                                        notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+                                        notification.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :
+                                        notification.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+                                        'bg-blue-50 border-blue-200 text-blue-800'
+                                    }`}>
+                                        {notification.type === 'success' && <FaCheckCircle className="w-5 h-5 text-green-600" />}
+                                        {notification.type === 'warning' && <FaExclamationTriangle className="w-5 h-5 text-yellow-600" />}
+                                        {notification.type === 'error' && <FaTimes className="w-5 h-5 text-red-600" />}
+                                        {notification.type === 'info' && <FaInfoCircle className="w-5 h-5 text-blue-600" />}
+                                        <span className="flex-1">{notification.message}</span>
+                                        <button
+                                            onClick={() => setNotifications(prev => prev.filter((_, i) => i !== index))}
+                                            className="text-current hover:opacity-70 focus:outline-none focus:ring-2 focus:ring-current focus:ring-opacity-50 rounded p-1"
+                                            aria-label="Dismiss notification"
+                                        >
+                                            <FaTimes className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Enhanced Statistics Cards - HCI Principle 1: Visibility of System Status */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-blue-100 rounded-lg">
+                                        <FaUsers className="w-6 h-6 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 text-sm font-medium">Total Sections</p>
+                                        <p className="text-2xl font-bold text-gray-800">{sections?.length || 0}</p>
+                                        <p className="text-xs text-gray-500 mt-1">Across all strands</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-green-100 rounded-lg">
+                                        <FaChalkboardTeacher className="w-6 h-6 text-green-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 text-sm font-medium">Total Faculty</p>
+                                        <p className="text-2xl font-bold text-gray-800">{faculties?.length || 0}</p>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            {faculties?.filter(f => f.role === 'coordinator').length || 0} coordinators
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-purple-100 rounded-lg">
+                                        <FaCalendarAlt className="w-6 h-6 text-purple-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 text-sm font-medium">Active Schedules</p>
+                                        <p className="text-2xl font-bold text-gray-800">{filteredSchedules?.length || 0}</p>
+                                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                            <span>Grade 11: {filteredSchedules?.filter(s => s.section?.grade_level === '11' || s.subject?.year_level === '11').length || 0}</span>
+                                            <span>•</span>
+                                            <span>Grade 12: {filteredSchedules?.filter(s => s.section?.grade_level === '12' || s.subject?.year_level === '12').length || 0}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-orange-100 rounded-lg">
+                                        <FaClock className="w-6 h-6 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 text-sm font-medium">Weekly Hours</p>
+                                        <p className="text-2xl font-bold text-gray-800">
+                                            {Math.round(filteredSchedules?.reduce((total, schedule) => total + (schedule.duration || 60), 0) / 60) || 0}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            {filterGradeLevel !== 'all' ? `Grade ${filterGradeLevel} hours` : 'Total teaching hours'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Sections Overview */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-blue-100 rounded-lg">
-                                    <FaUsers className="w-6 h-6 text-blue-600" />
-                                </div>
-                                <div>
-                                    <p className="text-gray-600 text-sm">Total Sections</p>
-                                    <p className="text-2xl font-bold text-gray-800">{sections?.length || 0}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-green-100 rounded-lg">
-                                    <FaChalkboardTeacher className="w-6 h-6 text-green-600" />
-                                </div>
-                                <div>
-                                    <p className="text-gray-600 text-sm">Total Faculty</p>
-                                    <p className="text-2xl font-bold text-gray-800">{faculties?.length || 0}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-purple-100 rounded-lg">
-                                    <FaCalendarAlt className="w-6 h-6 text-purple-600" />
-                                </div>
-                                <div>
-                                    <p className="text-gray-600 text-sm">Active Schedules</p>
-                                    <p className="text-2xl font-bold text-gray-800">{schedules?.length || 0}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Strand Cards Display */}
+                    {/* Enhanced Strand Cards Display - HCI Principle 8: Aesthetic and Minimalist Design */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {Object.keys(schedulesByStrand).length > 0 ? (
-                            Object.entries(schedulesByStrand).map(([strandName, strandData]) => (
-                                <div key={strandName} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow duration-300">
-                                    {/* Strand Header */}
-                                    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-t-3xl">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <FaUsers className="w-6 h-6" />
-                                            <h3 className="text-xl font-bold">{strandData.code}</h3>
-                                        </div>
-                                        <p className="text-purple-100 font-medium">{strandData.name}</p>
-                                    </div>
-
-                                    {/* Strand Statistics */}
-                                    <div className="p-6">
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-gray-600 flex items-center gap-2">
-                                                    <FaUsers className="w-4 h-4" />
-                                                    Sections
-                                                </span>
-                                                <span className="font-semibold text-gray-800">
-                                                    {Object.keys(strandData.sections).length}
-                                                </span>
-                                            </div>
-
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-gray-600 flex items-center gap-2">
-                                                    <FaCalendarAlt className="w-4 h-4" />
-                                                    Total Classes
-                                                </span>
-                                                <span className="font-semibold text-gray-800">
-                                                    {Object.values(strandData.sections).flat().length}
-                                                </span>
-                                            </div>
-
-                                            <div className="pt-4 border-t border-gray-200">
-                                                <button
-                                                    onClick={() => openStrandModal({ data: strandData, name: strandName })}
-                                                    className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center gap-2 font-medium"
-                                                >
-                                                    <FaEye className="w-4 h-4" />
-                                                    View Schedules
-                                                </button>
+                            Object.entries(schedulesByStrand).map(([strandName, strandData]) => {
+                                // Calculate totals across all grades
+                                const totalClasses = Object.values(strandData.grades)
+                                    .flatMap(grade => Object.values(grade.sections))
+                                    .flat().length;
+                                const sectionsCount = Object.values(strandData.grades)
+                                    .reduce((count, grade) => count + Object.keys(grade.sections).length, 0);
+                                
+                                // Get grade-level breakdown
+                                const gradeBreakdown = Object.entries(strandData.grades).map(([gradeLevel, gradeData]) => ({
+                                    grade: gradeLevel,
+                                    sections: Object.keys(gradeData.sections).length,
+                                    classes: Object.values(gradeData.sections).flat().length
+                                }));
+                                
+                                return (
+                                    <div key={strandName} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl hover:scale-[1.02] transition-all duration-300 group">
+                                        {/* Enhanced Strand Header with Progress Indicator */}
+                                        <div className="bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 text-white p-6 relative overflow-hidden">
+                                            <div className="absolute inset-0 bg-white/10 transform -skew-y-1 translate-y-8"></div>
+                                            <div className="relative z-10">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                                                            <FaUsers className="w-5 h-5" />
+                                                        </div>
+                                                        <h3 className="text-xl font-bold">{strandData.code}</h3>
+                                                    </div>
+                                                    {/* Status Indicator - HCI Principle 1 */}
+                                                    <div className="flex items-center gap-1">
+                                                        <div className={`w-2 h-2 rounded-full ${
+                                                            totalClasses > 0 ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'
+                                                        }`}></div>
+                                                        <span className="text-xs text-white/80">
+                                                            {totalClasses > 0 ? 'Active' : 'Pending'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <p className="text-purple-100 font-medium text-sm leading-relaxed">{strandData.name}</p>
                                             </div>
                                         </div>
+
+                                        {/* Enhanced Statistics with Grade-Level Breakdown */}
+                                        <div className="p-6">
+                                            <div className="space-y-4">
+                                                {/* Grade Level Breakdown */}
+                                                <div className="space-y-3">
+                                                    <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                                        <FaUsers className="w-4 h-4 text-indigo-500" />
+                                                        Grade Level Breakdown
+                                                    </h4>
+                                                    {gradeBreakdown.map(({ grade, sections, classes }) => (
+                                                        <div key={grade} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <span className="text-sm font-medium text-gray-700">
+                                                                    Grade {grade}
+                                                                </span>
+                                                                <div className="flex items-center gap-3 text-xs text-gray-600">
+                                                                    <span>{sections} sections</span>
+                                                                    <span>•</span>
+                                                                    <span>{classes} classes</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                                                <div 
+                                                                    className={`h-1.5 rounded-full transition-all duration-500 ${
+                                                                        grade === '11' ? 'bg-blue-500' : 'bg-green-500'
+                                                                    }`}
+                                                                    style={{ width: `${Math.min((classes / Math.max(totalClasses, 1)) * 100, 100)}%` }}
+                                                                ></div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                {/* Total Summary */}
+                                                <div className="border-t border-gray-200 pt-3 space-y-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-gray-600 flex items-center gap-2 text-sm font-medium">
+                                                            <FaCalendarAlt className="w-4 h-4 text-purple-500" />
+                                                            Total Classes
+                                                        </span>
+                                                        <span className="font-bold text-gray-800 text-lg">{totalClasses}</span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-gray-600 flex items-center gap-2 text-sm font-medium">
+                                                            <FaClock className="w-4 h-4 text-green-500" />
+                                                            Weekly Hours
+                                                        </span>
+                                                        <span className="font-bold text-gray-800">
+                                                            {Object.values(strandData.grades)
+                                                                .flatMap(grade => Object.values(grade.sections))
+                                                                .flat()
+                                                                .reduce((total, schedule) => total + (schedule.duration || 60), 0) / 60}h
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Enhanced Action Button - HCI Principle 7: Flexibility and Efficiency */}
+                                                <div className="pt-4">
+                                                    <button
+                                                        onClick={() => openStrandModal({ data: strandData, name: strandName })}
+                                                        className="w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 flex items-center justify-center gap-2 font-medium shadow-lg hover:shadow-xl transform hover:scale-[1.02] focus:ring-4 focus:ring-blue-300 focus:outline-none group-hover:animate-pulse"
+                                                        aria-label={`View detailed schedules for ${strandName} strand`}
+                                                    >
+                                                        <FaEye className="w-4 h-4" />
+                                                        View Detailed Schedule
+                                                        <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                            →
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))
+                                );
+                            })
                         ) : (
-                            <div className="col-span-full bg-white rounded-xl shadow-lg p-12 text-center border border-gray-200">
-                                <FaCalendarAlt className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                                <h3 className="text-xl font-semibold text-gray-600 mb-2">No Schedules Found</h3>
-                                <p className="text-gray-500 mb-6">Start by creating your first class schedule using the "Create Schedule" button above.</p>
-                                <button
-                                    onClick={() => setShowModal(true)}
-                                    className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 flex items-center gap-2 mx-auto"
-                                >
-                                    <FaPlus className="w-4 h-4" />
-                                    Create First Schedule
-                                </button>
+                            /* Enhanced Empty State - HCI Principle 10: Help and Documentation */
+                            <div className="col-span-full bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                                <div className="p-12 text-center">
+                                    <div className="relative mb-6">
+                                        <div className="p-6 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full w-24 h-24 mx-auto flex items-center justify-center">
+                                            <FaCalendarAlt className="w-12 h-12 text-purple-600" />
+                                        </div>
+                                        <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center">
+                                            <FaPlus className="w-4 h-4 text-yellow-800" />
+                                        </div>
+                                    </div>
+                                    <h3 className="text-2xl font-bold text-gray-800 mb-3">No Schedules Created Yet</h3>
+                                    <p className="text-gray-600 mb-6 max-w-md mx-auto leading-relaxed">
+                                        Get started by creating your first class schedule. The system will guide you through the process step by step.
+                                    </p>
+                                    
+                                    {/* Getting Started Guide - HCI Principle 10 */}
+                                    <div className="bg-blue-50 rounded-lg p-6 text-left max-w-lg mx-auto mb-6">
+                                        <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                                            <FaInfoCircle className="w-4 h-4" />
+                                            Quick Start Guide
+                                        </h4>
+                                        <ol className="text-sm text-blue-800 space-y-2">
+                                            <li className="flex items-start gap-2">
+                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">1</span>
+                                                <span>Click "Create Schedule" to open the schedule builder</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">2</span>
+                                                <span>Select a section first (this filters available subjects)</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">3</span>
+                                                <span>Choose subject, faculty, day, and time</span>
+                                            </li>
+                                            <li className="flex items-start gap-2">
+                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold mt-0.5">4</span>
+                                                <span>System automatically checks for conflicts</span>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                    
+                                    <button
+                                        onClick={() => setShowModal(true)}
+                                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 flex items-center gap-3 mx-auto font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-4 focus:ring-purple-300 focus:outline-none"
+                                        aria-label="Create your first class schedule"
+                                    >
+                                        <FaPlus className="w-5 h-5" />
+                                        Create Your First Schedule
+                                        <span className="text-purple-200">→</span>
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -894,67 +1631,163 @@ export default function ScheduleManagement() {
                                 </div>
 
                                 <form onSubmit={handleSubmit} className="p-6 space-y-6 bg-white/90 backdrop-blur-sm">
-                                    {/* Display errors if any */}
+                                    {/* Enhanced Error Display - HCI Principle 9: Help Users Recognize, Diagnose, and Recover from Errors */}
                                     {Object.keys(errors).length > 0 && (
-                                        <div className="bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-lg p-4">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                                                    <span className="text-white text-xs">!</span>
+                                        <div className="bg-red-50/90 backdrop-blur-sm border-l-4 border-red-500 rounded-lg p-4 shadow-sm">
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex-shrink-0">
+                                                    <FaExclamationTriangle className="w-5 h-5 text-red-500 mt-0.5" />
                                                 </div>
-                                                <span className="text-red-800 font-medium text-sm">Please fix the following errors:</span>
+                                                <div className="flex-1">
+                                                    <h4 className="text-red-800 font-semibold mb-2 flex items-center gap-2">
+                                                        Validation Errors Found
+                                                        <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">
+                                                            {Object.keys(errors).length} error{Object.keys(errors).length !== 1 ? 's' : ''}
+                                                        </span>
+                                                    </h4>
+                                                    <div className="space-y-2">
+                                                        {Object.entries(errors).map(([field, message]) => (
+                                                            <div key={field} className="flex items-start gap-2 text-sm">
+                                                                <span className="text-red-500 mt-1">•</span>
+                                                                <div>
+                                                                    <span className="font-medium text-red-800 capitalize">{field.replace('_', ' ')}:</span>
+                                                                    <span className="text-red-700 ml-1">{Array.isArray(message) ? message[0] : message}</span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <ul className="text-red-700 text-sm space-y-1">
-                                                {Object.entries(errors).map(([field, message]) => (
-                                                    <li key={field}>• {Array.isArray(message) ? message[0] : message}</li>
-                                                ))}
-                                            </ul>
                                         </div>
                                     )}
 
-                                    {/* Step indicator */}
-                                    <div className="bg-purple-50/80 backdrop-blur-sm border border-purple-200/50 rounded-lg p-4 mb-6">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <FaInfoCircle className="w-4 h-4 text-purple-600" />
-                                            <span className="text-purple-800 font-medium text-sm">Step-by-Step Guide:</span>
+                                    {/* Enhanced Progress Indicator - HCI Principle 1: Visibility of System Status */}
+                                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200/50 rounded-xl p-6">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <FaInfoCircle className="w-5 h-5 text-purple-600" />
+                                            <h3 className="text-purple-900 font-semibold">Schedule Creation Wizard</h3>
                                         </div>
-                                        <div className="text-purple-700 text-sm space-y-1">
-                                            <p><span className="font-medium">1.</span> Select a section first (this determines available subjects and faculty)</p>
-                                            <p><span className="font-medium">2.</span> Choose subject and faculty from the filtered options</p>
-                                            <p><span className="font-medium">3.</span> Set the day and time for the class</p>
+                                        
+                                        {/* Progress Steps */}
+                                        <div className="flex items-center justify-between mb-4">
+                                            {[
+                                                { step: 1, label: 'Section', completed: !!formData.section_id },
+                                                { step: 2, label: 'Subject', completed: !!formData.subject_id },
+                                                { step: 3, label: 'Faculty', completed: !!formData.faculty_id },
+                                                { step: 4, label: 'Schedule', completed: !!formData.day_of_week && !!formData.start_time }
+                                            ].map((item, index) => (
+                                                <div key={item.step} className="flex items-center">
+                                                    <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold transition-all duration-200 ${
+                                                        item.completed 
+                                                            ? 'bg-green-500 text-white' 
+                                                            : formData.section_id || item.step === 1
+                                                                ? 'bg-purple-600 text-white'
+                                                                : 'bg-gray-300 text-gray-600'
+                                                    }`}>
+                                                        {item.completed ? (
+                                                            <FaCheckCircle className="w-4 h-4" />
+                                                        ) : (
+                                                            item.step
+                                                        )}
+                                                    </div>
+                                                    <span className={`ml-2 text-sm font-medium ${
+                                                        item.completed ? 'text-green-700' : 'text-gray-700'
+                                                    }`}>
+                                                        {item.label}
+                                                    </span>
+                                                    {index < 3 && (
+                                                        <div className={`w-8 h-0.5 mx-3 transition-colors duration-200 ${
+                                                            item.completed ? 'bg-green-300' : 'bg-gray-300'
+                                                        }`}></div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        
+                                        <div className="text-sm text-purple-700 bg-purple-100/50 rounded-lg p-3">
+                                            <p className="font-medium mb-1">💡 Pro Tip:</p>
+                                            <p>Select each step in order for the best experience. The system will automatically filter options based on your previous selections.</p>
                                         </div>
                                     </div>
 
                                     <div className="space-y-6">
-                                        {/* Section Selection - Step 1 */}
-                                        <div className="bg-blue-50/80 backdrop-blur-sm border-2 border-blue-200/50 rounded-lg p-4">
-                                            <label className="block text-sm font-semibold text-blue-800 mb-2 flex items-center gap-2">
-                                                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
-                                                Section (Select First)
+                                        {/* Enhanced Section Selection - Step 1 */}
+                                        <div className={`border-2 rounded-xl p-6 transition-all duration-200 ${
+                                            formData.section_id 
+                                                ? 'bg-green-50/80 border-green-300/50' 
+                                                : 'bg-blue-50/80 border-blue-300/50'
+                                        }`}>
+                                            <label className="block text-sm font-bold mb-3 flex items-center gap-3">
+                                                <span className={`rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold transition-colors duration-200 ${
+                                                    formData.section_id ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+                                                }`}>
+                                                    {formData.section_id ? <FaCheckCircle className="w-4 h-4" /> : '1'}
+                                                </span>
+                                                <span className={formData.section_id ? 'text-green-800' : 'text-blue-800'}>
+                                                    Section Selection {formData.section_id && '✓'}
+                                                </span>
                                             </label>
-                                            <select
-                                                value={formData.section_id}
-                                                onChange={(e) => {
-                                                    setFormData({
-                                                        ...formData,
-                                                        section_id: e.target.value,
-                                                        subject_id: '', // Reset dependent fields
-                                                        faculty_id: ''
-                                                    })
-                                                }}
-                                                className="w-full px-4 py-3 border-2 border-blue-300/50 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white/90 backdrop-blur-sm"
-                                                required
-                                            >
-                                                <option value="">Choose a section to start...</option>
-                                                {sections?.map((section) => (
-                                                    <option key={section.id} value={section.id}>
-                                                        {section.section_name} ({section.strand?.name || 'No Strand'})
-                                                    </option>
-                                                ))}
-                                            </select>
+                                            
+                                            <div className="relative">
+                                                <select
+                                                    value={formData.section_id}
+                                                    onChange={(e) => {
+                                                        setFormData({
+                                                            ...formData,
+                                                            section_id: e.target.value,
+                                                            subject_id: '', // Reset dependent fields
+                                                            faculty_id: ''
+                                                        });
+                                                        // Clear errors for this field
+                                                        if (errors.section_id) {
+                                                            setErrors(prev => ({ ...prev, section_id: null }));
+                                                        }
+                                                    }}
+                                                    className={`w-full px-4 py-4 border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white/90 backdrop-blur-sm text-gray-800 font-medium transition-all duration-200 ${
+                                                        errors.section_id 
+                                                            ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
+                                                            : formData.section_id 
+                                                                ? 'border-green-300' 
+                                                                : 'border-blue-300/50'
+                                                    }`}
+                                                    required
+                                                    aria-describedby="section-help"
+                                                >
+                                                    <option value="">🎯 Choose a section to begin...</option>
+                                                    {sections?.map((section) => (
+                                                        <option key={section.id} value={section.id}>
+                                                            📚 {section.section_name} ({section.strand?.name || 'No Strand'}) - Grade {section.grade_level || 'N/A'}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {formData.section_id && (
+                                                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                                        <FaCheckCircle className="w-5 h-5 text-green-500" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            
+                                            <p id="section-help" className="text-sm text-gray-600 mt-2 flex items-center gap-2">
+                                                <FaInfoCircle className="w-4 h-4 text-blue-500" />
+                                                Selecting a section will filter available subjects and faculty for that strand.
+                                            </p>
                                             {!formData.section_id && (
                                                 <p className="text-blue-600 text-xs mt-1">⚠️ Select a section to enable other fields</p>
                                             )}
                                         </div>
+
+                                        {/* Loading State for Dependent Fields */}
+                                        {formData.section_id && (
+                                            <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4">
+                                                <div className="flex items-center gap-2 text-green-800">
+                                                    <FaCheckCircle className="w-4 h-4" />
+                                                    <span className="font-medium">Section selected successfully!</span>
+                                                </div>
+                                                <p className="text-sm text-green-700 mt-1">
+                                                    Now you can select from filtered subjects and faculty members.
+                                                </p>
+                                            </div>
+                                        )}
 
                                         {/* Grade Level Selection - Step 1 */}
                                         <div className="bg-blue-50/80 backdrop-blur-sm border-2 border-blue-200/50 rounded-lg p-4">
@@ -984,6 +1817,24 @@ export default function ScheduleManagement() {
                                             )}
                                         </div>
 
+                                        {/* Semester Filter */}
+                                        <div className="bg-purple-50/80 backdrop-blur-sm border-2 border-purple-200/50 rounded-lg p-4">
+                                            <label className="block text-sm font-semibold text-purple-800 mb-2 flex items-center gap-2">
+                                                <span className="bg-purple-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">📅</span>
+                                                Semester Filter (Optional)
+                                            </label>
+                                            <select
+                                                value={semesterFilter}
+                                                onChange={(e) => setSemesterFilter(e.target.value)}
+                                                className="w-full px-4 py-3 border-2 border-purple-300/50 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white/90 backdrop-blur-sm"
+                                            >
+                                                <option value="all">All Semesters</option>
+                                                <option value="1">1st Semester Only</option>
+                                                <option value="2">2nd Semester Only</option>
+                                            </select>
+                                            <p className="text-purple-600 text-xs mt-1">💡 Filter subjects by semester to easily identify which subjects belong to which semester</p>
+                                        </div>
+
                                         {/* Subject Selection - Step 2 */}
                                         <div className={`${formData.section_id && formData.grade_level ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
                                             <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level ? 'text-green-800' : 'text-gray-500'}`}>
@@ -1000,7 +1851,7 @@ export default function ScheduleManagement() {
                                                 <option value="">Select Subject</option>
                                                 {availableSubjects.map((subject) => (
                                                     <option key={subject.id} value={subject.id} disabled={subject.isDisabled}>
-                                                        {subject.code} - {subject.name} {subject.disabledReason ? `(${subject.disabledReason})` : ''}
+                                                        [{subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}] {subject.code} - {subject.name} {subject.disabledReason ? `(${subject.disabledReason})` : ''}
                                                     </option>
                                                 ))}
                                             </select>
@@ -1185,6 +2036,331 @@ export default function ScheduleManagement() {
                         </div>
                     )}
 
+                    {/* Bulk Assignment Modal */}
+                    {showBulkModal && (
+                        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-[60] p-4 transition-all duration-300">
+                            <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto border border-white/20">
+                                <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-t-3xl">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                                                <FaCalendarAlt className="w-6 h-6" />
+                                                Create Class Schedule
+                                            </h2>
+                                            <p className="text-purple-100 mt-2">Assign one or multiple subjects to a teacher</p>
+                                        </div>
+                                        <button
+                                            onClick={closeBulkModal}
+                                            className="text-white hover:bg-white/20 p-2 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-white/30"
+                                            aria-label="Close modal"
+                                        >
+                                            <FaTimes className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 space-y-6 bg-white/90 backdrop-blur-sm">
+                                    {/* Faculty Selection */}
+                                    <div className="bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50 rounded-lg p-4">
+                                        <label className="block text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                                            <FaChalkboardTeacher className="w-4 h-4" />
+                                            Select Faculty Member
+                                        </label>
+                                        <select
+                                            value={selectedFaculty}
+                                            onChange={(e) => setSelectedFaculty(e.target.value)}
+                                            className="w-full px-4 py-3 border-2 border-green-300/50 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white/90 backdrop-blur-sm"
+                                            required
+                                        >
+                                            <option value="">Choose a faculty member...</option>
+                                            {faculties?.map((faculty) => (
+                                                <option key={faculty.id} value={faculty.id}>
+                                                    {faculty.firstname} {faculty.lastname}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <div className="mt-2 space-y-1">
+                                            <p className="text-green-600 text-xs">💡 This teacher will be assigned to all subjects below</p>
+                                            <p className="text-amber-600 text-xs font-medium">⚠️ Each teacher can only be assigned to a maximum of 4 subjects</p>
+                                            {selectedFaculty && (
+                                                <div className="bg-blue-50 border border-blue-200 rounded p-2 mt-2">
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-blue-800 font-medium">Current Status:</span>
+                                                        <span className="text-blue-600">
+                                                            {getTeacherSubjectCount(selectedFaculty)} assigned + {bulkAssignments.length} pending = {getTeacherSubjectCount(selectedFaculty) + bulkAssignments.length}/4 subjects
+                                                        </span>
+                                                    </div>
+                                                    {getRemainingSlots(selectedFaculty) - bulkAssignments.length > 0 ? (
+                                                        <p className="text-green-600 text-xs mt-1">
+                                                            ✓ {getRemainingSlots(selectedFaculty) - bulkAssignments.length} more subject{getRemainingSlots(selectedFaculty) - bulkAssignments.length !== 1 ? 's' : ''} can be added
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-red-600 text-xs mt-1 font-medium">
+                                                            ⚠️ Teacher has reached the maximum limit
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Subject Assignments */}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="text-lg font-semibold text-gray-800">Subject Assignments</h3>
+                                            <button
+                                                onClick={addBulkAssignment}
+                                                disabled={!selectedFaculty || isTeacherAtLimit(selectedFaculty)}
+                                                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                                                    !selectedFaculty || isTeacherAtLimit(selectedFaculty)
+                                                        ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                                                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                                                }`}
+                                                title={
+                                                    !selectedFaculty 
+                                                        ? 'Select a teacher first' 
+                                                        : isTeacherAtLimit(selectedFaculty) 
+                                                            ? 'Teacher has reached the 4-subject limit' 
+                                                            : 'Add another subject'
+                                                }
+                                            >
+                                                <FaPlus className="w-4 h-4" />
+                                                {!selectedFaculty 
+                                                    ? 'Select Teacher First' 
+                                                    : isTeacherAtLimit(selectedFaculty) 
+                                                        ? 'Limit Reached (4/4)' 
+                                                        : `Add Subject (${getTeacherSubjectCount(selectedFaculty) + bulkAssignments.length}/4)`
+                                                }
+                                            </button>
+                                        </div>
+
+                                        {bulkAssignments.length === 0 ? (
+                                            <div className="text-center py-8 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg border-2 border-dashed border-blue-300">
+                                                <FaCalendarAlt className="w-12 h-12 text-blue-400 mx-auto mb-3" />
+                                                <h4 className="text-lg font-semibold text-gray-800 mb-2">Ready to Create Schedules</h4>
+                                                <p className="text-gray-600 mb-4">Add one or more subjects to assign to the selected teacher</p>
+                                                <div className="bg-white/70 rounded-lg p-3 mb-4 text-sm text-gray-700">
+                                                    <p className="font-medium mb-1">📋 Quick Guide:</p>
+                                                    <ul className="text-left space-y-1 text-xs">
+                                                        <li>• Select a teacher first (required)</li>
+                                                        <li>• Add subjects one by one</li>
+                                                        <li>• Each teacher: maximum 4 subjects</li>
+                                                        <li>• Choose different days/times to avoid conflicts</li>
+                                                    </ul>
+                                                </div>
+                                                <button
+                                                    onClick={addBulkAssignment}
+                                                    disabled={!selectedFaculty}
+                                                    className={`px-6 py-2 rounded-lg transition-all duration-200 flex items-center gap-2 mx-auto shadow-lg ${
+                                                        !selectedFaculty
+                                                            ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                                                            : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white hover:shadow-xl'
+                                                    }`}
+                                                >
+                                                    <FaPlus className="w-4 h-4" />
+                                                    {!selectedFaculty ? 'Select Teacher First' : 'Add First Subject'}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4 max-h-96 overflow-y-auto">
+                                                {bulkAssignments.map((assignment, index) => {
+                                                    const hasError = assignmentErrors[assignment.id];
+                                                    return (
+                                                        <div key={assignment.id} className={`bg-white border rounded-lg p-4 shadow-sm ${
+                                                            hasError ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                                                        }`}>
+                                                            <div className="flex items-center justify-between mb-4">
+                                                                <div className="flex items-center gap-2">
+                                                                    <h4 className="font-medium text-gray-800">Subject Assignment #{index + 1}</h4>
+                                                                    {hasError && (
+                                                                        <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                                                                            <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                                                                            Error
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => removeBulkAssignment(assignment.id)}
+                                                                    className="text-red-600 hover:text-red-800 p-1"
+                                                                    title="Remove Assignment"
+                                                                >
+                                                                    <FaTrash className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
+
+                                                            {/* Error Messages */}
+                                                            {hasError && (
+                                                                <div className="mb-4 p-3 bg-red-100 border border-red-200 rounded-lg">
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                                                                            <span className="text-white text-xs">!</span>
+                                                                        </div>
+                                                                        <span className="text-red-800 font-medium text-sm">Assignment Error:</span>
+                                                                    </div>
+                                                                    <ul className="text-red-700 text-sm space-y-1 ml-6">
+                                                                        {Object.entries(hasError).map(([field, message]) => (
+                                                                            <li key={field}>• {Array.isArray(message) ? message[0] : message}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            )}
+
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                            {/* Section */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Section</label>
+                                                                <select
+                                                                    value={assignment.section_id}
+                                                                    onChange={(e) => {
+                                                                        updateBulkAssignment(assignment.id, 'section_id', e.target.value);
+                                                                        updateBulkAssignment(assignment.id, 'subject_id', ''); // Reset subject
+                                                                    }}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Section</option>
+                                                                    {sections?.map((section) => (
+                                                                        <option key={section.id} value={section.id}>
+                                                                            {section.section_name} ({section.strand?.name || 'No Strand'})
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+
+                                                            {/* Grade Level */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Grade Level</label>
+                                                                <select
+                                                                    value={assignment.grade_level}
+                                                                    onChange={(e) => {
+                                                                        updateBulkAssignment(assignment.id, 'grade_level', e.target.value);
+                                                                        updateBulkAssignment(assignment.id, 'subject_id', ''); // Reset subject
+                                                                    }}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Grade</option>
+                                                                    <option value="11">Grade 11</option>
+                                                                    <option value="12">Grade 12</option>
+                                                                </select>
+                                                            </div>
+
+                                                            {/* Subject */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                                                                <select
+                                                                    value={assignment.subject_id}
+                                                                    onChange={(e) => updateBulkAssignment(assignment.id, 'subject_id', e.target.value)}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    disabled={!assignment.section_id || !assignment.grade_level}
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Subject</option>
+                                                                    {getBulkFilteredSubjects(assignment.section_id, assignment.grade_level).map((subject) => (
+                                                                        <option key={subject.id} value={subject.id}>
+                                                                            [{subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}] {subject.code} - {subject.name}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+
+                                                            {/* Day */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Day</label>
+                                                                <select
+                                                                    value={assignment.day_of_week}
+                                                                    onChange={(e) => updateBulkAssignment(assignment.id, 'day_of_week', e.target.value)}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Day</option>
+                                                                    <option value="Monday">Monday</option>
+                                                                    <option value="Tuesday">Tuesday</option>
+                                                                    <option value="Wednesday">Wednesday</option>
+                                                                    <option value="Thursday">Thursday</option>
+                                                                    <option value="Friday">Friday</option>
+                                                                </select>
+                                                            </div>
+
+                                                            {/* Start Time */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Start Time</label>
+                                                                <select
+                                                                    value={assignment.start_time}
+                                                                    onChange={(e) => {
+                                                                        const selectedTime = e.target.value;
+                                                                        const validTimeSlots = {
+                                                                            '08:00': '10:00',
+                                                                            '10:30': '12:30',
+                                                                            '13:30': '15:30',
+                                                                            '15:30': '16:30'
+                                                                        };
+                                                                        updateBulkAssignment(assignment.id, 'start_time', selectedTime);
+                                                                        if (validTimeSlots[selectedTime]) {
+                                                                            updateBulkAssignment(assignment.id, 'end_time', validTimeSlots[selectedTime]);
+                                                                        }
+                                                                    }}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Time</option>
+                                                                    <option value="08:00">8:00 AM</option>
+                                                                    <option value="10:30">10:30 AM</option>
+                                                                    <option value="13:30">1:30 PM</option>
+                                                                    <option value="15:30">3:30 PM</option>
+                                                                </select>
+                                                            </div>
+
+                                                            {/* End Time */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">End Time</label>
+                                                                <select
+                                                                    value={assignment.end_time}
+                                                                    onChange={(e) => updateBulkAssignment(assignment.id, 'end_time', e.target.value)}
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                    required
+                                                                >
+                                                                    <option value="">Select End Time</option>
+                                                                    <option value="10:00">10:00 AM</option>
+                                                                    <option value="12:30">12:30 PM</option>
+                                                                    <option value="15:30">3:30 PM</option>
+                                                                    <option value="16:30">4:30 PM</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                                        <button
+                                            type="button"
+                                            onClick={closeBulkModal}
+                                            className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleBulkSubmit}
+                                            disabled={bulkLoading || !selectedFaculty || bulkAssignments.length === 0}
+                                            className={`px-6 py-2 rounded-lg text-white font-semibold transition-all duration-200 ${
+                                                bulkLoading || !selectedFaculty || bulkAssignments.length === 0
+                                                    ? 'bg-gray-400 cursor-not-allowed'
+                                                    : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg hover:shadow-xl'
+                                            }`}
+                                        >
+                                            {bulkLoading ? 'Creating Schedules...' : `Create ${bulkAssignments.length} Schedule${bulkAssignments.length !== 1 ? 's' : ''}`}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Strand Schedule Modal */}
                     {showStrandModal && selectedStrand && (
                         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all duration-300">
@@ -1197,7 +2373,11 @@ export default function ScheduleManagement() {
                                             {selectedStrand.data.name} ({selectedStrand.data.code})
                                         </h2>
                                         <p className="text-purple-100 mt-1">
-                                            {Object.keys(selectedStrand.data.sections).length} sections • {Object.values(selectedStrand.data.sections).flat().length} scheduled classes
+                                            {selectedStrand.data.grades ? 
+                                                Object.values(selectedStrand.data.grades).reduce((count, grade) => count + Object.keys(grade.sections).length, 0) : 0
+                                            } sections • {selectedStrand.data.grades ? 
+                                                Object.values(selectedStrand.data.grades).flatMap(grade => Object.values(grade.sections)).flat().length : 0
+                                            } scheduled classes
                                         </p>
                                     </div>
                                     <button
@@ -1212,7 +2392,21 @@ export default function ScheduleManagement() {
                                 {/* Modal Body - Scrollable */}
                                 <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto bg-white/90 backdrop-blur-sm">
                                     <div className="space-y-8">
-                                        {Object.entries(selectedStrand.data.sections).map(([sectionName, sectionSchedules]) => {
+                                        {selectedStrand.data.grades && Object.entries(selectedStrand.data.grades).map(([gradeLevel, gradeData]) => (
+                                            <div key={gradeLevel} className="space-y-6">
+                                                {/* Grade Level Header */}
+                                                <div className="bg-gradient-to-r from-purple-100 to-indigo-100 border border-purple-200 rounded-lg p-4">
+                                                    <h3 className="text-lg font-bold text-purple-800 flex items-center gap-2">
+                                                        <FaUsers className="w-5 h-5" />
+                                                        Grade {gradeLevel}
+                                                    </h3>
+                                                    <p className="text-purple-600 text-sm mt-1">
+                                                        {Object.keys(gradeData.sections).length} sections • {Object.values(gradeData.sections).flat().length} classes
+                                                    </p>
+                                                </div>
+                                                
+                                                {/* Sections within this grade */}
+                                                {Object.entries(gradeData.sections).map(([sectionName, sectionSchedules]) => {
                                             const timetableGrid = createTimetableGrid(sectionSchedules);
 
                                             return (
@@ -1378,6 +2572,8 @@ export default function ScheduleManagement() {
                                                 </div>
                                             );
                                         })}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>

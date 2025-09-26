@@ -3,14 +3,15 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use App\Models\User;
@@ -27,10 +28,11 @@ use App\Models\Notification;
 use App\Models\Registrar;
 use App\Models\Coordinator;
 use App\Models\Semester;
+use App\Models\Student;
 
 class RegistrarController extends Controller
 {
-    public function sectionCOR($sectionId)
+    public function sectionCOR($sectionId, $studentId = null)
     {
         $section = Section::with(['strand'])->findOrFail($sectionId);
         $activeSchoolYear = SchoolYear::getActive();
@@ -172,46 +174,155 @@ class RegistrarController extends Controller
         $validated = $request->validate([
             'year_start' => 'required|integer|min:2020|max:2050',
             'year_end' => 'required|integer|min:2020|max:2050',
-            'semester' => 'required|in:1st Semester,2nd Semester',
+            'semester' => 'required|in:Full Academic Year,Summer',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after:start_date',
         ]);
 
-        // Ensure year_end is year_start + 1
-        if ($validated['year_end'] !== $validated['year_start'] + 1) {
-            return redirect()->back()->withErrors(['year_end' => 'End year must be one year after start year']);
+        // Weekend Validation (Saturday = 6, Sunday = 0)
+        $startDate = \Carbon\Carbon::parse($validated['start_date']);
+        $endDate = \Carbon\Carbon::parse($validated['end_date']);
+        
+        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'start_date' => 'Start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
+        }
+        
+        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'end_date' => 'End date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
         }
 
-        // Debug database schema
-        Log::info('Schema check', [
-            'year_col' => Schema::hasColumn('school_years', 'year'),
-            'start_date_col' => Schema::hasColumn('school_years', 'start_date')
-        ]);
+        // Validate enrollment window (1 week minimum, 2 weeks maximum)
+        $diffDays = $startDate->diffInDays($endDate);
 
-        // Create year string for compatibility with current schema
-        $yearString = $validated['year_start'] . '-' . $validated['year_end'];
-
-        // Check if this school year and semester combination already exists
-        $exists = SchoolYear::where('year', $yearString)
-            ->where('semester', $validated['semester'])
-            ->exists();
-
-        if ($exists) {
-            return redirect()->back()->withErrors(['general' => 'This school year and semester combination already exists']);
+        if ($diffDays < 7) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
+            ]);
         }
 
-        // Deactivate all existing school years if this is being set as active
-        SchoolYear::where('is_active', true)->update(['is_active' => false]);
+        if ($diffDays > 14) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
+            ]);
+        }
 
-        // Create the school year - basic columns only (emergency fallback)
-        $schoolYear = SchoolYear::create([
-            'year' => $validated['year_start'] . '-' . $validated['year_end'],
-            'semester' => $validated['semester'],
-            'is_active' => true,
-            'current_semester' => 1
+        // Handle Full Academic Year creation
+        if ($validated['semester'] === 'Full Academic Year') {
+            return $this->createFullAcademicYear($request);
+        }
+
+        // Handle Summer semester creation
+        if ($validated['semester'] === 'Summer') {
+            return $this->createSummerSemester($request);
+        }
+
+        return redirect()->back()->withErrors(['semester' => 'Invalid semester type selected.']);
+    }
+
+    /**
+     * Create Summer semester for students with failed subjects
+     */
+    public function createSummerSemester(Request $request)
+    {
+        $validated = $request->validate([
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
         ]);
 
-        return redirect()->back()->with('success', 'School year ' . $validated['year_start'] . '-' . $validated['year_end'] . ' created successfully and set as active.');
+        // Weekend Validation (Saturday = 6, Sunday = 0)
+        $startDate = \Carbon\Carbon::parse($validated['start_date']);
+        $endDate = \Carbon\Carbon::parse($validated['end_date']);
+        
+        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'start_date' => 'Summer start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
+        }
+        
+        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'end_date' => 'Summer end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
+        }
+
+        // Validate enrollment window (1 week minimum, 2 weeks maximum)
+        $diffDays = $startDate->diffInDays($endDate);
+
+        if ($diffDays < 7) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Summer enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
+            ]);
+        }
+
+        if ($diffDays > 14) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Summer enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
+            ]);
+        }
+
+        try {
+            // Check if summer semester already exists for this year
+            $existingSummer = SchoolYear::where('year_start', $validated['year_start'])
+                ->where('year_end', $validated['year_end'])
+                ->where('semester', 'Summer')
+                ->first();
+
+            if ($existingSummer) {
+                return redirect()->back()->withErrors(['general' => 'Summer semester already exists for this academic year.']);
+            }
+
+            // Prepare data for summer semester creation
+            $schoolYearData = [
+                'year_start' => $validated['year_start'],
+                'year_end' => $validated['year_end'],
+                'semester' => 'Summer',
+                'start_date' => $validated['start_date'],
+                'end_date' => $validated['end_date'],
+                'is_active' => false,
+                'enrollment_open' => false, // Summer enrollment is managed separately
+                'enrollment_start' => $validated['start_date'],
+                'enrollment_end' => $validated['end_date'],
+                'is_current_academic_year' => false, // Summer is not part of regular academic year
+                'allow_grade_progression' => false, // No grade progression in summer
+            ];
+
+            // Only include 'year' column if it exists in the database schema
+            if (Schema::hasColumn('school_years', 'year')) {
+                $schoolYearData['year'] = $validated['year_start'] . '-' . $validated['year_end'] . ' Summer';
+            }
+
+            $schoolYear = SchoolYear::create($schoolYearData);
+
+            Log::info('Summer semester created successfully', [
+                'school_year_id' => $schoolYear->id,
+                'semester' => $schoolYear->semester,
+                'year_range' => $schoolYear->year_start . '-' . $schoolYear->year_end,
+                'purpose' => 'Failed subjects remedial'
+            ]);
+
+            return redirect()->back()->with('success', 
+                "Summer semester {$validated['year_start']}-{$validated['year_end']} created successfully! " .
+                "This semester is specifically designed for students who need to retake failed subjects."
+            );
+
+        } catch (\Exception $e) {
+            Log::error('Failed to create summer semester', [
+                'error' => $e->getMessage(),
+                'year_start' => $validated['year_start'],
+                'year_end' => $validated['year_end'],
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return redirect()->back()->withErrors([
+                'error' => 'Failed to create summer semester: ' . $e->getMessage()
+            ]);
+        }
     }
 
     public function activateSchoolYear($id)
@@ -321,6 +432,100 @@ class RegistrarController extends Controller
             'faculties' => $faculties,
             'classSchedules' => $classSchedules,
             'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    // Students Management Method
+    public function studentsPage()
+    {
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return Inertia::render('Registrar/RegistrarStudents', [
+                'students' => collect([]),
+                'auth' => [
+                    'user' => Auth::user()
+                ]
+            ]);
+        }
+
+        // Get all students with their enrollment data
+        $students = DB::table('enrollments')
+            ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.user_id')
+            ->join('users', 'student_personal_info.user_id', '=', 'users.id')
+            ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
+            ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->select([
+                'student_personal_info.id',
+                'student_personal_info.user_id',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'student_personal_info.lrn',
+                'student_personal_info.birthdate',
+                'student_personal_info.grade_level',
+                'sections.section_name',
+                'strands.name as strand_name',
+                'strands.code as strand_code',
+                'sections.id as section_id',
+                'strands.id as strand_id',
+                'enrollments.status as enrollment_status'
+            ])
+            ->get();
+
+        // Separate students by enrollment status
+        $approvedStudents = $students->where('enrollment_status', 'approved');
+        $enrolledStudents = $students->where('enrollment_status', 'enrolled');
+        $allStudents = $students;
+
+        return Inertia::render('Registrar/RegistrarStudents', [
+            'approvedStudents' => $approvedStudents->map(function($student) {
+                return [
+                    'id' => $student->id,
+                    'user_id' => $student->user_id,
+                    'name' => ($student->firstname ?? '') . ' ' . ($student->lastname ?? ''),
+                    'firstname' => $student->firstname ?? '',
+                    'lastname' => $student->lastname ?? '',
+                    'email' => $student->email ?? '',
+                    'student_id' => $student->lrn ?? 'N/A',
+                    'lrn' => $student->lrn ?? 'N/A',
+                    'birthdate' => $student->birthdate ?? 'N/A',
+                    'grade_level' => $student->grade_level ?? 11,
+                    'section' => $student->section_name ?? 'Unassigned',
+                    'section_name' => $student->section_name ?? 'Unassigned',
+                    'strand' => $student->strand_code ?? 'N/A',
+                    'strand_name' => $student->strand_code ?? 'N/A',
+                    'strand_code' => $student->strand_code ?? 'N/A',
+                    'enrollment_status' => $student->enrollment_status ?? 'unknown',
+                ];
+            })->values(),
+            'enrolledStudents' => $enrolledStudents->map(function($student) {
+                return [
+                    'id' => $student->id,
+                    'user_id' => $student->user_id,
+                    'name' => ($student->firstname ?? '') . ' ' . ($student->lastname ?? ''),
+                    'firstname' => $student->firstname ?? '',
+                    'lastname' => $student->lastname ?? '',
+                    'email' => $student->email ?? '',
+                    'student_id' => $student->lrn ?? 'N/A',
+                    'lrn' => $student->lrn ?? 'N/A',
+                    'birthdate' => $student->birthdate ?? 'N/A',
+                    'grade_level' => $student->grade_level ?? 11,
+                    'section' => $student->section_name ?? 'Unassigned',
+                    'section_name' => $student->section_name ?? 'Unassigned',
+                    'strand' => $student->strand_code ?? 'N/A',
+                    'strand_name' => $student->strand_code ?? 'N/A',
+                    'strand_code' => $student->strand_code ?? 'N/A',
+                    'enrollment_status' => $student->enrollment_status ?? 'unknown',
+                ];
+            })->values(),
+            'strands' => Strand::orderBy('name')->get(),
+            'sections' => Section::with('strand')->orderBy('section_name')->get(),
+            'auth' => [
+                'user' => Auth::user()
+            ]
         ]);
     }
 
@@ -583,15 +788,22 @@ class RegistrarController extends Controller
                 return redirect()->back()->with('error', 'A semester with this name and year already exists.');
             }
 
-            $schoolYear = SchoolYear::create([
+            // Prepare data for school year creation
+            $schoolYearData = [
                 'year_start' => $validatedData['year_start'],
                 'year_end' => $validatedData['year_end'],
-                'year' => $validatedData['year_start'] . '-' . $validatedData['year_end'], // For backward compatibility
                 'semester' => $validatedData['semester'],
                 'start_date' => $validatedData['start_date'],
                 'end_date' => $validatedData['end_date'],
                 'is_active' => false,
-            ]);
+            ];
+
+            // Only include 'year' column if it exists in the database schema
+            if (Schema::hasColumn('school_years', 'year')) {
+                $schoolYearData['year'] = $validatedData['year_start'] . '-' . $validatedData['year_end'];
+            }
+
+            $schoolYear = SchoolYear::create($schoolYearData);
 
             Log::info('School year created successfully', [
                 'school_year_id' => $schoolYear->id,
@@ -875,47 +1087,29 @@ class RegistrarController extends Controller
         }
     }
 
-    // Student Management Methods
-    public function studentsPage()
+    /**
+     * Philippine SHS System: Get progression status
+     */
+    public function getProgressionStatus()
     {
-        $students = User::where('role', 'student')
-            ->with(['studentPersonalInfo'])
-            ->orderBy('lastname')
-            ->get();
-
-        return Inertia::render('Registrar/RegistrarStudents', [
-            'students' => $students
-        ]);
-    }
-
-    public function createStudent(Request $request)
-    {
-        $request->validate([
-            'firstname' => 'required|string|max:255',
-            'lastname' => 'required|string|max:255',
-            'middlename' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:users,email',
-        ]);
-
         try {
-            $generatedPassword = Str::random(12);
-
-            $student = User::create([
-                'firstname' => $request->firstname,
-                'lastname' => $request->lastname,
-                'middlename' => $request->middlename,
-                'email' => $request->email,
-                'password' => Hash::make($generatedPassword),
-                'role' => 'student',
-                'status' => 'active',
-                'password_changed' => false,
-                'password_change_required' => true,
-                'generated_password' => $generatedPassword,
+            $progressionSchoolYear = SchoolYear::getProgressionAllowed();
+            
+            return response()->json([
+                'progression_enabled' => $progressionSchoolYear ? true : false,
+                'school_year' => $progressionSchoolYear ? [
+                    'id' => $progressionSchoolYear->id,
+                    'year' => $progressionSchoolYear->year,
+                    'semester' => $progressionSchoolYear->semester
+                ] : null,
+                'success' => true
             ]);
-
-            return redirect()->back()->with('success', 'Student created successfully');
         } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create student: ' . $e->getMessage()]);
+            return response()->json([
+                'progression_enabled' => false,
+                'error' => $e->getMessage(),
+                'success' => false
+            ], 500);
         }
     }
 
@@ -1075,13 +1269,23 @@ class RegistrarController extends Controller
     // Faculty Management Method
     public function facultyPage()
     {
-        // Get all faculty and coordinators
+        // Get all faculty and coordinators with session information
         $teachers = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id')
+            ->select('id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id', 'is_disabled', 'updated_at')
             ->with('assignedStrand:id,name,code')
             ->orderBy('lastname')
             ->get()
             ->map(function ($user) {
+                // Check if user has active session (within last 5 minutes)
+                $isOnline = false;
+                if ($user->updated_at) {
+                    $lastActivity = \Carbon\Carbon::parse($user->updated_at);
+                    $isOnline = $lastActivity->diffInMinutes(now()) <= 5;
+                }
+                
+                // Use updated_at as fallback for last activity
+                $lastLoginAt = $user->updated_at;
+                
                 return [
                     'id' => $user->id,
                     'name' => trim($user->firstname . ' ' . $user->lastname),
@@ -1091,12 +1295,15 @@ class RegistrarController extends Controller
                     'role' => $user->role,
                     'status' => $user->is_coordinator ? 'coordinator' : 'faculty',
                     'is_coordinator' => $user->is_coordinator,
+                    'is_disabled' => $user->is_disabled,
                     'assigned_strand_id' => $user->assigned_strand_id,
                     'assigned_strand' => $user->assignedStrand ? [
                         'id' => $user->assignedStrand->id,
                         'name' => $user->assignedStrand->name,
                         'code' => $user->assignedStrand->code
-                    ] : null
+                    ] : null,
+                    'last_login_at' => $lastLoginAt,
+                    'is_online' => $isOnline && !$user->is_disabled
                 ];
             });
 
@@ -1471,6 +1678,81 @@ class RegistrarController extends Controller
         } catch (\Exception $e) {
             Log::error('Error fixing subjects school year: ' . $e->getMessage());
             return redirect()->back()->with('error', 'Failed to fix subjects: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Philippine SHS System: Create full academic year (both semesters)
+     */
+    public function createFullAcademicYear(Request $request)
+    {
+        $request->validate([
+            'year_start' => 'required|integer|min:2020|max:2050',
+            'year_end' => 'required|integer|min:2020|max:2050',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date'
+        ]);
+
+        // Weekend Validation (Saturday = 6, Sunday = 0)
+        $startDate = \Carbon\Carbon::parse($request->start_date);
+        $endDate = \Carbon\Carbon::parse($request->end_date);
+        
+        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'start_date' => 'Full Academic Year start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
+        }
+        
+        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+            return redirect()->back()->withErrors([
+                'end_date' => 'Full Academic Year end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+            ]);
+        }
+
+        // Validate enrollment window (1 week minimum, 2 weeks maximum)
+        $diffDays = $startDate->diffInDays($endDate);
+
+        if ($diffDays < 7) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Full Academic Year enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
+            ]);
+        }
+
+        if ($diffDays > 14) {
+            return redirect()->back()->withErrors([
+                'end_date' => "Full Academic Year enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
+            ]);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Create single Full Academic Year entry
+            $academicYear = SchoolYear::create([
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => 'Full Academic Year',
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'is_active' => true,
+                'enrollment_open' => true,
+                'enrollment_start' => $request->start_date,
+                'enrollment_end' => $request->end_date,
+                'is_current_academic_year' => true,
+                'allow_grade_progression' => true
+            ]);
+
+            DB::commit();
+
+            return redirect()->back()->with('success', 
+                "Full Academic Year {$request->year_start}-{$request->year_end} created successfully!"
+            );
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors([
+                'error' => 'Failed to create full academic year: ' . $e->getMessage()
+            ]);
         }
     }
 }

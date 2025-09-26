@@ -57,7 +57,7 @@ export default function Student_Schedule() {
       setError(null);
       
       const token = localStorage.getItem('auth_token');
-      const response = await fetch('/student/schedule', {
+      const response = await fetch('http://127.0.0.1:8000/student/schedule-data', {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

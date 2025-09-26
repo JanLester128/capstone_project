@@ -57,20 +57,13 @@ class User extends Authenticatable
         'password_change_required' => 'boolean',
     ];
 
-    // Optional relationships if needed
-    public function registrar()
-    {
-        return $this->hasOne(Registrar::class);
-    }
-
-    // Removed faculty relationship - using unified authentication
-
-    public function coordinator()
-    {
-        return $this->hasOne(Coordinator::class);
-    }
-
+    // Relationships for role-based authentication system
     public function student()
+    {
+        return $this->hasOne(Student::class);
+    }
+
+    public function studentPersonalInfo()
     {
         return $this->hasOne(Student::class);
     }

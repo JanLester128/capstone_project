@@ -16,10 +16,7 @@ import Swal from 'sweetalert2';
 
 const RegistrarClass = () => {
   const { strands = [], flash } = usePage().props;
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // State management - only strand related
   const [strandModalOpen, setStrandModalOpen] = useState(false);
@@ -48,7 +45,6 @@ const RegistrarClass = () => {
 
   const handleSidebarToggle = (collapsed) => {
     setSidebarCollapsed(collapsed);
-    localStorage.setItem('registrar-sidebar-collapsed', JSON.stringify(collapsed));
   };
 
   const toggleStrandExpansion = (strandId) => {
@@ -275,7 +271,7 @@ const RegistrarClass = () => {
       <Head title="Academic Strands - ONSTS" />
       <Sidebar onToggle={handleSidebarToggle} />
       
-      <main className={`flex-1 ${sidebarCollapsed ? 'ml-16' : 'ml-72'} px-8 py-6 overflow-y-auto transition-all duration-300`}>
+      <main className={`flex-1 ${sidebarCollapsed ? 'ml-16' : 'ml-64'} px-8 py-6 overflow-y-auto transition-all duration-300`}>
         <div className="max-w-7xl mx-auto space-y-8">
           {/* Header */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">

@@ -49,6 +49,29 @@ class Enrollment extends Model
         return $this->hasMany(ClassDetail::class, 'enrollment_id');
     }
 
+    // Strand choice relationships
+    public function firstStrandChoice()
+    {
+        return $this->belongsTo(Strand::class, 'first_strand_choice_id');
+    }
+
+    public function secondStrandChoice()
+    {
+        return $this->belongsTo(Strand::class, 'second_strand_choice_id');
+    }
+
+    public function thirdStrandChoice()
+    {
+        return $this->belongsTo(Strand::class, 'third_strand_choice_id');
+    }
+
+    // Helper method to get the assigned/approved strand
+    public function getAssignedStrand()
+    {
+        // Return the first strand choice as the assigned strand for enrolled students
+        return $this->firstStrandChoice;
+    }
+
     // Scopes
     public function scopePending($query)
     {

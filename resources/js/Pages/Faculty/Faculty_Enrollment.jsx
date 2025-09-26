@@ -19,7 +19,8 @@ import {
   FaUserCheck,
   FaSpinner,
   FaFileAlt,
-  FaInfoCircle
+  FaInfoCircle,
+  FaPrint
 } from "react-icons/fa";
 
 export default function FacultyEnrollment({ pendingStudents: initialPendingStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, auth }) {
@@ -52,6 +53,52 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
   const [classSchedules, setClassSchedules] = useState([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [subjects, setSubjects] = useState([]);
+  const [isStudentEnrolled, setIsStudentEnrolled] = useState(false);
+  
+  // Image viewing state
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  // Handle image viewing
+  const handleImageClick = (imageUrl, title) => {
+    setSelectedImage({ url: imageUrl, title });
+    setShowImageModal(true);
+  };
+
+  const closeImageModal = () => {
+    setShowImageModal(false);
+    setSelectedImage(null);
+  };
+
+
+  // Print handler - removes student from pending list after successful print
+  const handlePrintCOR = () => {
+    // Just trigger print - CSS handles everything
+    window.print();
+    
+    // After printing, remove student from pending list and close modal
+    setTimeout(() => {
+      // Move student from pending to enrolled (remove from current list)
+      setPendingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      
+      // Close modal and reset states
+      setShowCORModal(false);
+      setSelectedStudentForCOR(null);
+      setSelectedStrand("");
+      setSelectedSection("");
+      setSelectedSubjects([]);
+      setIsStudentEnrolled(false); // Reset enrollment status
+      
+      // Show completion message
+      Swal.fire({
+        icon: 'success',
+        title: 'Process Complete!',
+        text: 'Student has been moved to Enrolled Students.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }, 1000);
+  };
 
   // existing: fetch sections/strands on mount
   useEffect(() => {
@@ -227,6 +274,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
     const student = pendingStudents.find(s => s.id === studentId);
     if (student) {
       setSelectedStudentForCOR(student);
+      setIsStudentEnrolled(false); // Reset enrollment status
       setShowCORModal(true);
     }
   };
@@ -365,17 +413,17 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
         onSuccess: () => {
           Swal.fire({
             icon: 'success',
-            title: 'Enrollment Finalized!',
-            text: 'Student has been successfully enrolled.',
-            timer: 2000,
+            title: 'Student Enrolled Successfully!',
+            text: 'Student has been enrolled. You can now print the COR.',
+            timer: 3000,
             showConfirmButton: false
           });
 
-          setShowCORModal(false);
-          setSelectedStudentForCOR(null);
-          setSelectedStrand("");
-          setSelectedSection("");
-          setSelectedSubjects([]);
+          // Enable printing after successful enrollment
+          // DON'T remove student from pending list yet - wait until COR is printed/saved
+          setIsStudentEnrolled(true);
+
+          // Keep modal open for printing COR
           setIsSubmitting(false);
         },
         onError: () => {
@@ -608,7 +656,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
 
       {/* Student Details Modal */}
       {showModal && selectedStudent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             {/* Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-6 rounded-t-3xl">
@@ -662,12 +710,11 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Student Status</label>
                     <div className="mt-1">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
                         selectedStudent.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
-                        selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
+                          selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
+                            'bg-gray-100 text-gray-800'
+                        }`}>
                         {selectedStudent.student_status || 'New Student'}
                       </span>
                     </div>
@@ -754,9 +801,8 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">IP Community Member</label>
                     <p className="text-gray-800 font-medium mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedStudent.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedStudent.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
                         {selectedStudent.ip_community || 'Not specified'}
                       </span>
                     </p>
@@ -764,9 +810,8 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   <div>
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">4Ps Beneficiary</label>
                     <p className="text-gray-800 font-medium mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedStudent.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedStudent.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
                         {selectedStudent.four_ps || 'Not specified'}
                       </span>
                     </p>
@@ -776,8 +821,16 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                     <p className="text-gray-800 font-medium mt-1">{selectedStudent.pwd_id || 'N/A'}</p>
                   </div>
                   <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Special Needs</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.special_needs || 'None specified'}</p>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Guardian Name</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.guardian_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Guardian Contact</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.guardian_contact || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Last School Attended</label>
+                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.last_school || 'N/A'}</p>
                   </div>
                 </div>
               </div>
@@ -793,11 +846,12 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   {selectedStudent.image && (
                     <div className="space-y-2">
                       <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Student Photo</label>
-                      <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4 text-center">
                         <img
                           src={`/storage/enrollment_documents/${selectedStudent.image}`}
                           alt="Student Photo"
-                          className="w-32 h-32 object-cover rounded-lg mx-auto shadow-lg"
+                          className="w-32 h-32 object-cover rounded-lg mx-auto shadow-lg cursor-pointer hover:scale-105 transition-transform duration-200 border-2 border-white"
+                          onClick={() => handleImageClick(`/storage/enrollment_documents/${selectedStudent.image}`, 'Student Photo')}
                           onError={(e) => {
                             e.target.style.display = 'none';
                             e.target.nextSibling.style.display = 'block';
@@ -807,6 +861,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                           <FaUser className="text-4xl mx-auto mb-2" />
                           <p>Image not available</p>
                         </div>
+                        <p className="text-xs text-blue-600 mt-2 font-medium">Click to view full size</p>
                       </div>
                     </div>
                   )}
@@ -814,13 +869,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   {/* PSA Birth Certificate */}
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">PSA Birth Certificate</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
+                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4 text-center">
                       {selectedStudent.psa_birth_certificate ? (
                         <div>
                           <img
                             src={`/storage/enrollment_documents/${selectedStudent.psa_birth_certificate}`}
                             alt="PSA Birth Certificate"
-                            className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                            className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:scale-105 transition-transform duration-200 border-2 border-white"
+                            onClick={() => handleImageClick(`/storage/enrollment_documents/${selectedStudent.psa_birth_certificate}`, 'PSA Birth Certificate')}
                             onError={(e) => {
                               e.target.style.display = 'none';
                               e.target.nextSibling.style.display = 'block';
@@ -830,6 +886,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                             <FaFileAlt className="text-4xl mx-auto mb-2" />
                             <p>Document not available</p>
                           </div>
+                          <p className="text-xs text-green-600 mt-2 font-medium">Click to view full size</p>
                         </div>
                       ) : (
                         <div className="text-gray-500">
@@ -843,13 +900,14 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   {/* Report Card */}
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Report Card</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center">
+                    <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       {selectedStudent.report_card ? (
                         <div>
                           <img
                             src={`/storage/enrollment_documents/${selectedStudent.report_card}`}
                             alt="Report Card"
-                            className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                            className="w-full h-32 object-cover rounded-lg shadow-lg cursor-pointer hover:scale-105 transition-transform duration-200 border-2 border-white"
+                            onClick={() => handleImageClick(`/storage/enrollment_documents/${selectedStudent.report_card}`, 'Report Card')}
                             onError={(e) => {
                               e.target.style.display = 'none';
                               e.target.nextSibling.style.display = 'block';
@@ -859,6 +917,7 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                             <FaFileAlt className="text-4xl mx-auto mb-2" />
                             <p>Document not available</p>
                           </div>
+                          <p className="text-xs text-orange-600 mt-2 font-medium">Click to view full size</p>
                         </div>
                       ) : (
                         <div className="text-gray-500">
@@ -870,34 +929,6 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   </div>
                 </div>
               </div>
-
-              {/* Additional Information */}
-              <div className="bg-purple-50 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                  <FaClipboardList className="mr-3 text-purple-600" />
-                  Additional Information
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">IP Community</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.ip_community || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">4Ps Beneficiary</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.four_ps || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">PWD ID</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.pwd_id || 'N/A'}</p>
-                  </div>
-                  {selectedStudent.coordinator_notes && (
-                    <div className="md:col-span-2">
-                      <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Coordinator Notes</label>
-                      <p className="text-gray-800 font-medium mt-1 bg-white p-3 rounded-lg border">{selectedStudent.coordinator_notes}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -905,67 +936,42 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
 
       {/* COR Modal */}
       {showCORModal && selectedStudentForCOR && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-2">
+          <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[85vh] flex flex-col cor-printable">
             {/* COR Header */}
-            <div className="bg-white border rounded-lg overflow-hidden">
-              <div className="text-center py-4 border-b bg-gray-50">
-                <h3 className="text-lg font-bold text-gray-800">OPOL NATIONAL SECONDARY TECHNICAL SCHOOL - SENIOR HIGH SCHOOL</h3>
-                <p className="text-sm text-gray-600 mt-1">Opol, Misamis Oriental</p>
-                <div className="mt-3">
-                  <p className="font-semibold">CLASS PROGRAM</p>
-                  <p className="text-sm">School Year: [{activeSchoolYear?.year_start} - {activeSchoolYear?.year_end}]</p>
-                  <p className="text-sm">Semester: {activeSchoolYear?.semester || '1st Semester'}</p>
-                  <p className="text-sm font-medium">GRADE 11 - "{selectedSection ? availableSections.find(s => s.id == selectedSection)?.name || selectedSection : 'SECTION'}" ({selectedStrand} NAME)</p>
+            <div className="bg-white border-b flex-shrink-0">
+              <div className="text-center py-1 bg-gray-50">
+                <h3 className="text-sm font-bold text-gray-800">OPOL NATIONAL SECONDARY TECHNICAL SCHOOL - SENIOR HIGH SCHOOL</h3>
+                <p className="text-xs text-gray-600">Opol, Misamis Oriental</p>
+                <div className="mt-1">
+                  <p className="text-xs font-semibold">CLASS PROGRAM</p>
+                  <p className="text-xs">School Year: [{activeSchoolYear?.year_start} - {activeSchoolYear?.year_end}] • Semester: {activeSchoolYear?.semester || '1st Semester'}</p>
+                  <p className="text-xs font-medium">GRADE 11 - "{selectedSection ? availableSections.find(s => s.id == selectedSection)?.name || selectedSection : 'SECTION'}" ({selectedStrand})</p>
                 </div>
               </div>
+            </div>
 
+            {/* Main Content - Scrollable */}
+            <div className="flex-1 overflow-y-auto min-h-0">
               {/* Student Information */}
-              <div className="p-6 border-b">
-                <div className="grid grid-cols-2 gap-8">
+              <div className="p-1 border-b">
+                <div className="grid grid-cols-2 gap-4 text-xs">
                   <div>
                     <p><strong>Student Name:</strong> {selectedStudentForCOR.user?.firstname} {selectedStudentForCOR.user?.lastname} {selectedStudentForCOR.extension_name || ''}</p>
                     <p><strong>Email:</strong> {selectedStudentForCOR.user?.email}</p>
                     <p><strong>Grade Level:</strong> {selectedStudentForCOR.grade_level || 'Grade 11'}</p>
-                    <p><strong>Student Status:</strong> 
-                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedStudentForCOR.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
-                        selectedStudentForCOR.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
-                        selectedStudentForCOR.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {selectedStudentForCOR.student_status || 'New Student'}
-                      </span>
-                    </p>
-                    <p><strong>Religion:</strong> {selectedStudentForCOR.religion || 'N/A'}</p>
                   </div>
                   <div>
-                    <p><strong>Birthdate:</strong> {selectedStudentForCOR.birthdate ? new Date(selectedStudentForCOR.birthdate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A'}</p>
+                    <p><strong>Student Status:</strong> <span className="ml-1 px-1 py-0.5 rounded text-xs bg-green-100 text-green-800">{selectedStudentForCOR.student_status || 'New Student'}</span></p>
                     <p><strong>LRN:</strong> {selectedStudentForCOR.lrn || 'N/A'}</p>
-                    <p><strong>IP Community:</strong> 
-                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedStudentForCOR.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {selectedStudentForCOR.ip_community || 'N/A'}
-                      </span>
-                    </p>
-                    <p><strong>4Ps Beneficiary:</strong> 
-                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedStudentForCOR.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {selectedStudentForCOR.four_ps || 'N/A'}
-                      </span>
-                    </p>
-                    {selectedStudentForCOR.pwd_id && (
-                      <p><strong>PWD ID:</strong> {selectedStudentForCOR.pwd_id}</p>
-                    )}
+                    <p><strong>Birthdate:</strong> {selectedStudentForCOR.birthdate ? new Date(selectedStudentForCOR.birthdate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A'}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Assignment Section */}
-              <div className="p-6 border-b bg-blue-50 rounded-lg">
-                <h4 className="text-lg font-semibold mb-4">Enrollment Assignment</h4>
+              {/* Assignment Section - Hidden during printing */}
+              <div className="p-1 border-b bg-blue-50 print:hidden">
+                <h4 className="text-xs font-semibold mb-1">Enrollment Assignment</h4>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1029,11 +1035,16 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                   </div>
                 </div>
 
-                {/* Class Schedules Section */}
-                {selectedStrand && (
-                  <div className="mt-6">
-                    <h4 className="text-lg font-semibold mb-4 text-gray-800">Class Schedule</h4>
-
+                {/* Class Schedules Section - Always show for printing */}
+                <div className="mt-2">
+                  <h4 className="text-xs font-semibold mb-1 text-gray-800">Class Schedule</h4>
+                  {!selectedStrand && (
+                    <div className="text-center py-4 text-gray-500 border border-gray-300 rounded-lg print:hidden">
+                      <p className="text-sm">Please select a strand to view class schedules</p>
+                    </div>
+                  )}
+                  {selectedStrand && (
+                    <>
                     {/* Schedule Table */}
                     <div className="bg-white border rounded-lg overflow-hidden">
                       <div className="overflow-x-auto">
@@ -1046,32 +1057,32 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                           <table className="w-full border-collapse">
                             <thead>
                               <tr className="bg-gray-100">
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Time</th>
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Monday</th>
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Tuesday</th>
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Wednesday</th>
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Thursday</th>
-                                <th className="border border-gray-400 px-3 py-2 text-sm font-semibold">Friday</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Time</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Monday</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Tuesday</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Wednesday</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Thursday</th>
+                                <th className="border border-gray-400 px-1 py-0.5 text-xs font-semibold">Friday</th>
                               </tr>
                             </thead>
                             <tbody>
                               {/* Time slots */}
                               {[
-                                { time: '7:30am to 8:00am', label: 'Flag Ceremony (Monday Only)', colspan: true },
-                                { time: '8:00am to 10:00am', start: '08:00:00', end: '10:00:00' },
-                                { time: '10:00am to 10:30am', label: 'Break Time (Recess)', colspan: true },
-                                { time: '10:30am to 12:30pm', start: '10:30:00', end: '12:30:00' },
-                                { time: '12:30pm to 1:30pm', label: 'Break Time (Lunch)', colspan: true },
-                                { time: '1:30pm to 3:30pm', start: '13:30:00', end: '15:30:00' },
-                                { time: '3:30pm to 4:30pm', start: '15:30:00', end: '16:30:00' },
-                                { time: '4:30pm to 4:45pm', label: 'Flag Lowering (Friday Only)', colspan: true }
+                                { time: '7:30-8:00am', label: 'Flag Ceremony (Monday Only)', colspan: true },
+                                { time: '8:00-10:00am', start: '08:00:00', end: '10:00:00' },
+                                { time: '10:00-10:30am', label: 'Break Time (Recess)', colspan: true },
+                                { time: '10:30am-12:30pm', start: '10:30:00', end: '12:30:00' },
+                                { time: '12:30-1:30pm', label: 'Break Time (Lunch)', colspan: true },
+                                { time: '1:30-3:30pm', start: '13:30:00', end: '15:30:00' },
+                                { time: '3:30-4:30pm', start: '15:30:00', end: '16:30:00' },
+                                { time: '4:30-4:45pm', label: 'Flag Lowering (Friday Only)', colspan: true }
                               ].map((slot, index) => (
                                 <tr key={index}>
-                                  <td className="border border-gray-400 px-2 py-1 text-xs font-medium bg-gray-50">
+                                  <td className="border border-gray-400 px-1 py-0.5 text-xs font-medium bg-gray-50">
                                     {slot.time}
                                   </td>
                                   {slot.colspan ? (
-                                    <td className="border border-gray-400 px-2 py-1 text-xs text-center bg-green-200" colSpan="5">
+                                    <td className="border border-gray-400 px-1 py-0.5 text-xs text-center bg-green-200" colSpan="5">
                                       {slot.label}
                                     </td>
                                   ) : (
@@ -1083,86 +1094,244 @@ export default function FacultyEnrollment({ pendingStudents: initialPendingStude
                                       );
 
                                       return (
-                                        <td key={day} className="border border-gray-400 px-2 py-1 text-xs text-center">
+                                        <td key={day} className="border border-gray-400 px-1 py-0.5 text-xs text-center">
                                           {schedules.length > 0 ? (
                                             schedules.map((schedule, idx) => (
-                                              <div key={idx} className={idx > 0 ? 'mt-2 pt-2 border-t border-gray-300' : ''}>
-                                                <div className="font-medium text-blue-800">{schedule.subject_name}</div>
-                                                <div className="text-gray-600">({schedule.faculty_firstname} {schedule.faculty_lastname})</div>
-                                                {schedule.room && <div className="text-gray-500 text-xs">{schedule.room}</div>}
+                                              <div key={idx} className={idx > 0 ? 'mt-1 pt-1 border-t border-gray-300' : ''}>
+                                                <div className="font-medium text-blue-800 text-xs leading-tight">{schedule.subject_name}</div>
+                                                <div className="text-gray-600 text-xs leading-tight">({schedule.faculty_firstname} {schedule.faculty_lastname})</div>
+                                                {schedule.room && <div className="text-gray-500 text-xs leading-tight">{schedule.room}</div>}
                                               </div>
                                             ))
                                           ) : (
-                                            <div className="text-gray-400">-</div>
+                                            <div className="text-gray-400 text-xs">-</div>
                                           )}
                                         </td>
                                       );
                                     }))}
-                                    </tr>
-                                  ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-  
-                        {/* No schedules message */}
-                        {!loadingSchedules && classSchedules.length === 0 && selectedSection && (
-                          <div className="text-center py-8 text-gray-500 border-t">
-                            <FaFileAlt className="mx-auto text-3xl mb-3" />
-                            <p className="font-medium">No class schedules available for this section yet.</p>
-                            <p className="text-sm mt-1">Schedules will be available after enrollment is finalized.</p>
-                          </div>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         )}
                       </div>
+
+                      {/* No schedules message */}
+                      {!loadingSchedules && classSchedules.length === 0 && selectedSection && (
+                        <div className="text-center py-8 text-gray-500 border-t">
+                          <FaFileAlt className="mx-auto text-3xl mb-3" />
+                          <p className="font-medium">No class schedules available for this section yet.</p>
+                          <p className="text-sm mt-1">Schedules will be available after enrollment is finalized.</p>
+                        </div>
+                      )}
                     </div>
+                    </>
                   )}
-  
-                  {/* Signature Section */}
-                  <div className="p-6 border-b">
-                    <div className="grid grid-cols-2 gap-8">
-                      <div className="text-center">
-                        <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                        <p className="font-medium">Principal</p>
-                      </div>
-                      <div className="text-center">
-                        <div className="border-b border-gray-400 mb-2 pb-8"></div>
-                        <p className="font-medium">Academic Supervisor</p>
-                      </div>
+                </div>
+
+                {/* Signature Section */}
+                <div className="p-6 border-b">
+                  <div className="grid grid-cols-2 gap-8">
+                    <div className="text-center">
+                      <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                      <p className="font-medium">Principal</p>
                     </div>
-                    <div className="text-center mt-6">
-                      <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
+                    <div className="text-center">
+                      <div className="border-b border-gray-400 mb-2 pb-8"></div>
+                      <p className="font-medium">Academic Supervisor</p>
                     </div>
                   </div>
-  
-                  {/* Modal Actions */}
-                  <div className="p-6 bg-gray-50 rounded-b-lg flex justify-end space-x-4">
-                    <button
-                      onClick={() => {
+                  <div className="text-center mt-6">
+                    <p className="text-sm text-gray-600">Prepared By: {auth?.user?.firstname} {auth?.user?.lastname} (Coordinator)</p>
+                  </div>
+                </div>
+
+                {/* Modal Actions */}
+                <div className="p-2 bg-gray-50 rounded-b-lg flex justify-end space-x-2 print:hidden flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      if (isStudentEnrolled) {
+                        // If student is already enrolled, ask for confirmation
+                        Swal.fire({
+                          title: 'Student Already Enrolled',
+                          text: 'The student has been enrolled but COR has not been printed. What would you like to do?',
+                          icon: 'warning',
+                          showCancelButton: true,
+                          confirmButtonColor: '#3085d6',
+                          cancelButtonColor: '#d33',
+                          confirmButtonText: 'Keep Enrolled & Close',
+                          cancelButtonText: 'Stay Here'
+                        }).then((result) => {
+                          if (result.isConfirmed) {
+                            // Keep student enrolled and remove from pending list
+                            setPendingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            
+                            // Close modal and reset states
+                            setShowCORModal(false);
+                            setSelectedStudentForCOR(null);
+                            setSelectedStrand("");
+                            setSelectedSection("");
+                            setSelectedSubjects([]);
+                            setIsStudentEnrolled(false);
+                            
+                            Swal.fire({
+                              icon: 'info',
+                              title: 'Student Kept Enrolled',
+                              text: 'Student has been moved to Enrolled Students without printing COR.',
+                              timer: 2000,
+                              showConfirmButton: false
+                            });
+                          }
+                          // If cancelled, stay in modal
+                        });
+                      } else {
+                        // If not enrolled yet, just close modal normally
                         setShowCORModal(false);
                         setSelectedStudentForCOR(null);
                         setSelectedStrand("");
                         setSelectedSection("");
                         setSelectedSubjects([]);
-                      }}
-                      className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                      disabled={isSubmitting}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleFinalizeEnrollment}
-                      disabled={isSubmitting || !selectedStrand || !selectedSection}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
-                    >
-                      {isSubmitting && <FaSpinner className="animate-spin" />}
-                      <span>{isSubmitting ? 'Finalizing...' : 'Finalize Enrollment'}</span>
-                    </button>
-                  </div>
+                        setIsStudentEnrolled(false);
+                      }
+                    }}
+                    className="px-3 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleFinalizeEnrollment}
+                    disabled={isSubmitting || !selectedStrand || !selectedSection}
+                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1"
+                  >
+                    {isSubmitting && <FaSpinner className="animate-spin w-3 h-3" />}
+                    <span>{isSubmitting ? 'Enrolling...' : 'Enroll Student'}</span>
+                  </button>
+                  <button
+                    onClick={handlePrintCOR}
+                    disabled={!isStudentEnrolled}
+                    className={`px-3 py-1 text-xs text-white rounded transition-colors flex items-center space-x-1 ${isStudentEnrolled
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-gray-400 cursor-not-allowed'
+                      }`}
+                    title={isStudentEnrolled ? 'Print or Save COR' : 'Please enroll student first'}
+                  >
+                    <FaPrint className="w-3 h-3" />
+                    <span>Print COR</span>
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
+        </div>
+      )}
+      {/* Print Styles for Faculty COR */}
+      <style>{`
+        @media print {
+          /* Hide everything first */
+          body * { visibility: hidden !important; }
+          
+          /* Show only COR content */
+          .cor-printable, .cor-printable * { visibility: visible !important; }
+          
+          /* Position COR properly */
+          .cor-printable { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important; 
+            height: auto !important;
+            max-height: none !important;
+            background: white !important;
+            margin: 0 !important;
+            padding: 20px !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            overflow: visible !important;
+          }
+          
+          /* Ensure modal content is visible */
+          .cor-printable > div {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          
+          /* Clean styling */
+          .print\\:hidden { display: none !important; }
+          .shadow-xl { box-shadow: none !important; }
+          .rounded-lg { border-radius: 0 !important; }
+          .border { border: 1px solid black !important; }
+          table { 
+            border-collapse: collapse !important; 
+            width: 100% !important;
+            page-break-inside: avoid !important;
+          }
+          th, td { 
+            border: 1px solid black !important; 
+            padding: 4px !important; 
+            font-size: 10px !important;
+          }
+          
+          /* Ensure text is visible */
+          * { 
+            color: black !important; 
+            background: transparent !important;
+          }
+          
+          /* Page breaks */
+          .page-break { page-break-before: always !important; }
+          
+          /* Fix any flex issues */
+          .flex { display: block !important; }
+          .flex-col { display: block !important; }
+        }
+      `}</style>
+
+      {/* Image Viewing Modal */}
+      {showImageModal && selectedImage && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="relative max-w-4xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-gray-800 to-gray-900 p-4 flex items-center justify-between">
+              <h3 className="text-white font-semibold text-lg">{selectedImage.title}</h3>
+              <button
+                onClick={closeImageModal}
+                className="text-white hover:bg-white/20 p-2 rounded-full transition-colors duration-200"
+              >
+                <FaTimes className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Image Container */}
+            <div className="p-4 bg-gray-50">
+              <img
+                src={selectedImage.url}
+                alt={selectedImage.title}
+                className="max-w-full max-h-[70vh] object-contain mx-auto rounded-lg shadow-lg"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'block';
+                }}
+              />
+              <div className="hidden text-center py-8">
+                <FaFileAlt className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600 font-medium">Image could not be loaded</p>
+              </div>
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="bg-gray-100 p-4 flex justify-center">
+              <button
+                onClick={closeImageModal}
+                className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2"
+              >
+                <FaTimes className="w-4 h-4" />
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -5,10 +5,7 @@ import Sidebar from '../layouts/Sidebar';
 import Swal from 'sweetalert2';
 
 const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = {}, strands = [], flash }) => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editSection, setEditSection] = useState(null);
@@ -72,11 +69,11 @@ const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = 
   };
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Head title="Manage Sections - ONSTS" />
       <Sidebar onToggle={setIsCollapsed} />
       
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
+      <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
           {/* Header Section */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-6">

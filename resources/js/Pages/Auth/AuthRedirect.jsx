@@ -8,13 +8,15 @@ export default function AuthRedirect() {
       const sessionResult = await AuthManager.validateSession();
       
       if (sessionResult.valid) {
-        // Get user role and redirect to appropriate dashboard
+        // Get user and redirect URL (which now handles stored pages automatically)
         const user = AuthManager.getUser();
         if (user) {
-          const dashboardUrl = AuthManager.getDashboardUrl();
-          if (dashboardUrl) {
+          const redirectUrl = AuthManager.getRedirectUrl();
+          console.log('AuthRedirect: Redirecting to:', redirectUrl);
+          
+          if (redirectUrl && redirectUrl !== '/login') {
             const baseUrl = `${window.location.protocol}//${window.location.host}`;
-            window.location.href = `${baseUrl}${dashboardUrl}`;
+            window.location.href = `${baseUrl}${redirectUrl}`;
             return;
           }
         }

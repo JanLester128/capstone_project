@@ -22,10 +22,7 @@ import {
 } from "react-icons/fa";
 
 export default function RegistrarGrades() {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [pendingGrades, setPendingGrades] = useState([]);
   const [approvedGrades, setApprovedGrades] = useState([]);
   const [selectedTab, setSelectedTab] = useState("pending");
@@ -182,7 +179,7 @@ export default function RegistrarGrades() {
       <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
         <Head title="Grades Management - ONSTS" />
         <Sidebar onToggle={setIsCollapsed} />
-        <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300`}>
+        <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300`}>
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <FaSpinner className="text-4xl text-blue-600 animate-spin mx-auto mb-4" />
@@ -200,7 +197,7 @@ export default function RegistrarGrades() {
       <Head title="Grades Management - ONSTS" />
       <Sidebar onToggle={setIsCollapsed} />
       
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
+      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden`}>
         <div className="max-w-7xl mx-auto">
           {/* Header */}
           <div className="mb-8">

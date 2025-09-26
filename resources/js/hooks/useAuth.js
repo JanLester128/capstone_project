@@ -116,11 +116,12 @@ const useAuth = () => {
     }
   }, [authState.user]);
 
-  // Redirect to stored page or dashboard
+  // Redirect to stored page or dashboard (now handles stored pages automatically)
   const redirectToStoredPage = useCallback(() => {
     if (!authState.user) return;
     
     const redirectUrl = AuthManager.getRedirectUrl();
+    console.log('useAuth: Redirecting to stored page or dashboard:', redirectUrl);
     if (redirectUrl && redirectUrl !== '/login') {
       router.visit(redirectUrl);
     }
@@ -169,8 +170,12 @@ const useAuth = () => {
     }
   }, [authState.token, clearAuth]);
 
-  // Initialize auth on mount
+  // Initialize auth on mount and track current page
   useEffect(() => {
+    // Store current page before initializing auth
+    const currentPath = window.location.pathname;
+    AuthManager.storeCurrentPage(currentPath);
+    
     initializeAuth();
   }, [initializeAuth]);
 
@@ -180,6 +185,14 @@ const useAuth = () => {
       AuthManager.trackPageChange();
     }
   }, [authState.isAuthenticated]);
+
+  // Track page changes on route changes (for Inertia.js)
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    if (authState.isAuthenticated) {
+      AuthManager.storeCurrentPage(currentPath);
+    }
+  }, [window.location.pathname, authState.isAuthenticated]);
 
   // Listen for storage changes (cross-tab synchronization)
   useEffect(() => {

@@ -104,7 +104,7 @@ export default function FacultyDashboard() {
       <Head title="Faculty Dashboard" />
       <div className="flex h-screen bg-gradient-to-br from-gray-50 to-purple-50 overflow-hidden">
         <Faculty_Sidebar onToggle={handleSidebarToggle} />
-        <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-72'} min-w-0`}>
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'} min-w-0`}>
           {/* Enhanced Header */}
           <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex-shrink-0">
             <div className="flex items-center justify-between">

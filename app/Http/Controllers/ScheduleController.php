@@ -21,9 +21,10 @@ class ScheduleController extends Controller
      */
     public function index()
     {
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-        $currentYear = $activeSchoolYear ? 
-            ($activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end) : 
+        // Philippine SHS System: Use current academic year for schedule display (always visible)
+        $currentAcademicYear = SchoolYear::getCurrentAcademicYear() ?? SchoolYear::where('is_active', true)->first();
+        $currentYear = $currentAcademicYear ? 
+            ($currentAcademicYear->year_start . '-' . $currentAcademicYear->year_end) : 
             date('Y') . '-' . (date('Y') + 1);
 
         // Get schedules filtered by active school year (with historical support)
@@ -38,11 +39,11 @@ class ScheduleController extends Controller
             'schoolYear'
         ]);
 
-        if ($activeSchoolYear) {
-            // Show schedules for active school year only
-            $schedulesQuery->where('school_year_id', $activeSchoolYear->id);
+        if ($currentAcademicYear) {
+            // Show schedules for current academic year only
+            $schedulesQuery->where('school_year_id', $currentAcademicYear->id);
         } else {
-            // If no active school year, show schedules without school year assignment (legacy data)
+            // If no current academic year, show schedules without school year assignment (legacy data)
             $schedulesQuery->whereNull('school_year_id');
         }
 
@@ -51,7 +52,7 @@ class ScheduleController extends Controller
             ->get();
 
         Log::info('Schedule Management Debug:', [
-            'active_school_year' => $activeSchoolYear ? $activeSchoolYear->toArray() : null,
+            'current_academic_year' => $currentAcademicYear ? $currentAcademicYear->toArray() : null,
             'total_schedules_in_db' => ClassSchedule::count(),
             'fetched_schedules_count' => $schedules->count(),
             'schedule_details' => $schedules->map(function($schedule) {
@@ -68,11 +69,11 @@ class ScheduleController extends Controller
             })
         ]);
 
-        // Get subjects filtered by active school year (include legacy subjects with NULL school_year_id)
+        // Get subjects filtered by current academic year (include legacy subjects with NULL school_year_id)
         $subjects = Subject::with('strand')
-            ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
-                $query->where(function($subQuery) use ($activeSchoolYear) {
-                    $subQuery->where('school_year_id', $activeSchoolYear->id)
+            ->when($currentAcademicYear, function($query) use ($currentAcademicYear) {
+                $query->where(function($subQuery) use ($currentAcademicYear) {
+                    $subQuery->where('school_year_id', $currentAcademicYear->id)
                              ->orWhereNull('school_year_id');
                 });
             })
@@ -81,10 +82,10 @@ class ScheduleController extends Controller
 
         $faculties = User::whereIn('role', ['faculty', 'coordinator'])->orderBy('lastname')->get();
         
-        // Get sections filtered by active school year
+        // Get sections filtered by current academic year
         $sections = Section::with(['strand', 'teacher'])
-            ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
-                $query->where('school_year_id', $activeSchoolYear->id);
+            ->when($currentAcademicYear, function($query) use ($currentAcademicYear) {
+                $query->where('school_year_id', $currentAcademicYear->id);
             })
             ->orderBy('section_name')
             ->get();
@@ -100,7 +101,7 @@ class ScheduleController extends Controller
             'schoolYears' => $schoolYears,
             'strands' => $strands,
             'currentSchoolYear' => $currentYear,
-            'activeSchoolYear' => $activeSchoolYear,
+            'activeSchoolYear' => $currentAcademicYear,
             'swal' => session('swal')
         ]);
     }
@@ -883,13 +884,14 @@ class ScheduleController extends Controller
         ]);
 
         try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            // Philippine SHS System: Use current academic year for schedule display
+            $currentAcademicYear = SchoolYear::getCurrentAcademicYear() ?? SchoolYear::where('is_active', true)->first();
             
-            Log::info('Active school year found', [
-                'school_year' => $activeSchoolYear ? $activeSchoolYear->toArray() : null
+            Log::info('Current academic year found', [
+                'school_year' => $currentAcademicYear ? $currentAcademicYear->toArray() : null
             ]);
             
-            if (!$activeSchoolYear) {
+            if (!$currentAcademicYear) {
                 Log::warning('No active school year found');
                 return response()->json([
                     'schedules' => [],
@@ -939,7 +941,7 @@ class ScheduleController extends Controller
                 ->join('sections', 'class.section_id', '=', 'sections.id')
                 ->leftJoin('strands', 'subjects.strand_id', '=', 'strands.id')
                 ->where('class.section_id', $sectionId)
-                ->where('class.school_year_id', $activeSchoolYear->id)
+                ->where('class.school_year_id', $currentAcademicYear->id)
                 ->where(function($subQuery) use ($strandId) {
                     $subQuery->where('subjects.strand_id', $strandId)
                              ->orWhere('sections.strand_id', $strandId);
@@ -996,19 +998,19 @@ class ScheduleController extends Controller
                 'schedules' => $formattedSchedules,
                 'section_id' => $sectionId,
                 'strand_id' => $strandId,
-                'school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
-                'semester' => $activeSchoolYear->semester,
+                'school_year' => $currentAcademicYear->year_start . '-' . $currentAcademicYear->year_end,
+                'semester' => $currentAcademicYear->semester,
                 'success' => true,
                 'message' => $schedules->count() > 0 ? 'Schedules found' : 'No schedules found for this section and strand',
                 'debug' => [
-                    'active_school_year_id' => $activeSchoolYear->id,
+                    'current_academic_year_id' => $currentAcademicYear->id,
                     'section_found' => !!$section,
                     'strand_found' => !!$strand,
                     'class_records_for_section' => $classRecordsForSection->count(),
                     'query_conditions' => [
                         'section_id' => $sectionId,
                         'strand_id' => $strandId,
-                        'school_year_id' => $activeSchoolYear->id
+                        'school_year_id' => $currentAcademicYear->id
                     ]
                 ]
             ]);
@@ -1226,5 +1228,150 @@ class ScheduleController extends Controller
             'schedules_with_section' => $totalSchedules - $schedulesWithoutSection,
             'needs_fix' => $schedulesWithoutSection > 0
         ]);
+    }
+
+    /**
+     * Bulk create schedules to prevent multiple individual notifications
+     */
+    public function bulkCreate(Request $request)
+    {
+        try {
+            $request->validate([
+                'schedules' => 'required|array',
+                'schedules.*.section_id' => 'required|exists:sections,id',
+                'schedules.*.subject_id' => 'required|exists:subjects,id',
+                'schedules.*.faculty_id' => 'required|exists:users,id',
+                'schedules.*.day_of_week' => 'required|string',
+                'schedules.*.start_time' => 'required|date_format:H:i',
+                'schedules.*.end_time' => 'required|date_format:H:i',
+                'schedules.*.duration' => 'required|integer|min:1',
+                'suppress_individual_notifications' => 'boolean'
+            ]);
+
+            $schedules = $request->input('schedules');
+            $suppressNotifications = $request->input('suppress_individual_notifications', false);
+            
+            // Get current academic year
+            $currentAcademicYear = SchoolYear::getCurrentAcademicYear() ?? SchoolYear::where('is_active', true)->first();
+            
+            if (!$currentAcademicYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No active school year found. Please create and activate a school year first.'
+                ], 400);
+            }
+
+            $createdSchedules = [];
+            $errors = [];
+
+            DB::beginTransaction();
+
+            foreach ($schedules as $index => $scheduleData) {
+                try {
+                    // Prepare data for conflict checking
+                    $conflictCheckData = [
+                        'faculty_id' => $scheduleData['faculty_id'],
+                        'section_id' => $scheduleData['section_id'],
+                        'day_of_week' => $scheduleData['day_of_week'],
+                        'start_time' => $scheduleData['start_time'],
+                        'end_time' => $scheduleData['end_time'],
+                        'school_year_id' => $currentAcademicYear->id,
+                        'semester' => $currentAcademicYear->current_semester ?? 1,
+                        'room' => $scheduleData['room'] ?? null
+                    ];
+
+                    // Check for conflicts before creating
+                    $conflicts = $this->checkScheduleConflicts($conflictCheckData);
+
+                    if (!empty($conflicts)) {
+                        $errors[] = [
+                            'index' => $index,
+                            'message' => 'Schedule conflict detected',
+                            'conflicts' => $conflicts
+                        ];
+                        continue;
+                    }
+
+                    // Create the schedule
+                    $schedule = ClassSchedule::create([
+                        'section_id' => $scheduleData['section_id'],
+                        'subject_id' => $scheduleData['subject_id'],
+                        'faculty_id' => $scheduleData['faculty_id'],
+                        'day_of_week' => $scheduleData['day_of_week'],
+                        'start_time' => $scheduleData['start_time'],
+                        'end_time' => $scheduleData['end_time'],
+                        'duration' => $scheduleData['duration'],
+                        'school_year_id' => $currentAcademicYear->id,
+                        'semester' => $currentAcademicYear->current_semester ?? 1,
+                        'room' => $scheduleData['room'] ?? null
+                    ]);
+
+                    $createdSchedules[] = $schedule;
+
+                } catch (\Exception $e) {
+                    $errors[] = [
+                        'index' => $index,
+                        'message' => 'Failed to create schedule: ' . $e->getMessage()
+                    ];
+                }
+            }
+
+            if (!empty($errors)) {
+                DB::rollBack();
+                
+                // Return Inertia response with error data
+                return back()->with([
+                    'swal' => [
+                        'type' => 'error',
+                        'title' => 'Schedule Creation Failed',
+                        'text' => 'Some schedules could not be created due to conflicts or errors. Please review and try again.',
+                        'icon' => 'error',
+                        'confirmButtonText' => 'OK'
+                    ]
+                ]);
+            }
+
+            DB::commit();
+
+            // Return Inertia response with success message
+            $scheduleCount = count($createdSchedules);
+            $scheduleText = $scheduleCount === 1 ? 'schedule' : 'schedules';
+            
+            return back()->with([
+                'swal' => [
+                    'type' => 'success',
+                    'title' => 'Schedules Created Successfully!',
+                    'text' => "Successfully created {$scheduleCount} {$scheduleText} for the selected teacher.",
+                    'icon' => 'success',
+                    'confirmButtonText' => 'OK',
+                    'timer' => 3000,
+                    'timerProgressBar' => true
+                ]
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return back()->with([
+                'swal' => [
+                    'type' => 'error',
+                    'title' => 'Validation Failed',
+                    'text' => 'Please check your input data and try again.',
+                    'icon' => 'error',
+                    'confirmButtonText' => 'OK'
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk schedule creation failed: ' . $e->getMessage());
+            
+            return back()->with([
+                'swal' => [
+                    'type' => 'error',
+                    'title' => 'Creation Failed',
+                    'text' => 'Failed to create schedules. Please try again.',
+                    'icon' => 'error',
+                    'confirmButtonText' => 'OK'
+                ]
+            ]);
+        }
     }
 }

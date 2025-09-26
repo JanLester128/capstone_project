@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { usePage, router } from "@inertiajs/react";
 import { FaPlay, FaPause, FaCalendarAlt, FaToggleOn, FaToggleOff, FaPlus, FaEdit, FaTrash, FaTimes, FaList, FaCalendarTimes, FaGraduationCap, FaClock, FaExclamationTriangle } from "react-icons/fa";
 import Sidebar from "../layouts/Sidebar";
+import { useAuthMiddleware } from "../../middleware/AuthMiddleware";
 import Swal from "sweetalert2";
 
 // Countdown Timer Component
@@ -98,6 +99,25 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
     return new Date().toISOString().split('T')[0];
   };
 
+  // Function to disable weekends in date input
+  const handleDateInput = (e) => {
+    const selectedDate = new Date(e.target.value);
+    const dayOfWeek = selectedDate.getDay();
+    
+    // If weekend is selected, clear the input and show warning
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      e.target.value = '';
+      Swal.fire({
+        title: 'Weekend Not Allowed',
+        text: 'Please select a weekday (Monday - Friday) only.',
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return false;
+    }
+    return true;
+  };
+
   useEffect(() => {
     if (semester) {
       setSemesterName(semester.semester || "");
@@ -113,6 +133,26 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
       setEndDate("");
     }
   }, [semester, isOpen]);
+
+  // Auto-set end date when start date changes (for new semesters)
+  useEffect(() => {
+    if (!semester && startDate && isOpen) {
+      const start = new Date(startDate);
+      const autoEndDate = new Date(start);
+      autoEndDate.setDate(start.getDate() + 7);
+      
+      // If end date falls on weekend, move to next Monday
+      const endDay = autoEndDate.getDay();
+      if (endDay === 0) { // Sunday
+        autoEndDate.setDate(autoEndDate.getDate() + 1); // Move to Monday
+      } else if (endDay === 6) { // Saturday
+        autoEndDate.setDate(autoEndDate.getDate() + 2); // Move to Monday
+      }
+      
+      const formattedEndDate = autoEndDate.toISOString().split('T')[0];
+      setEndDate(formattedEndDate);
+    }
+  }, [startDate, semester, isOpen]);
 
   if (!isOpen) return null;
 
@@ -153,7 +193,134 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
       return;
     }
 
+    // Weekend Validation (Saturday = 6, Sunday = 0)
+    const startDay = start.getDay();
+    const endDay = end.getDay();
+    
+    if (startDay === 0 || startDay === 6) {
+      Swal.fire({
+        title: 'Weekend Not Allowed',
+        html: `
+          <div class="text-left">
+            <p class="mb-2">Start date cannot be on a <strong>weekend</strong>.</p>
+            <p class="text-sm text-gray-600">Please select a weekday (Monday - Friday) for enrollment start.</p>
+            <p class="text-sm text-gray-600 mt-2">This ensures proper administrative support during enrollment period.</p>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+    
+    if (endDay === 0 || endDay === 6) {
+      Swal.fire({
+        title: 'Weekend Not Allowed',
+        html: `
+          <div class="text-left">
+            <p class="mb-2">End date cannot be on a <strong>weekend</strong>.</p>
+            <p class="text-sm text-gray-600">Please select a weekday (Monday - Friday) for enrollment end.</p>
+            <p class="text-sm text-gray-600 mt-2">This ensures proper administrative support during enrollment period.</p>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+
+    // Enrollment Window Validation (1 week minimum, 2 weeks maximum)
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 7) {
+      Swal.fire({
+        title: 'Enrollment Period Too Short',
+        html: `
+          <div class="text-left">
+            <p class="mb-2">Enrollment period must be at least <strong>1 week (7 days)</strong>.</p>
+            <p class="text-sm text-gray-600">Current period: <strong>${diffDays} days</strong></p>
+            <p class="text-sm text-gray-600 mt-2">This ensures students have adequate time to complete their enrollment process.</p>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+    
+    if (diffDays > 14) {
+      Swal.fire({
+        title: 'Enrollment Period Too Long',
+        html: `
+          <div class="text-left">
+            <p class="mb-2">Enrollment period cannot exceed <strong>2 weeks (14 days)</strong>.</p>
+            <p class="text-sm text-gray-600">Current period: <strong>${diffDays} days</strong></p>
+            <p class="text-sm text-gray-600 mt-2">This ensures timely enrollment processing and academic year preparation.</p>
+          </div>
+        `,
+        icon: 'warning',
+        confirmButtonColor: '#f59e0b'
+      });
+      return;
+    }
+
     setProcessing(true);
+    
+    // Philippine SHS System: Handle Full Academic Year creation
+    if (semesterName === "Full Academic Year") {
+      const academicYearData = {
+        year_start: parseInt(yearStart),
+        year_end: parseInt(yearEnd),
+        semester: semesterName.trim(),
+        start_date: startDate,
+        end_date: endDate,
+        create_full_year: true, // Flag to indicate full year creation
+        enrollment_open: true, // Enable enrollment by default
+        is_current_academic_year: true, // Set as current academic year
+        allow_grade_progression: false // Can be enabled later by registrar
+      };
+
+      router.post("/registrar/school-years/create-full-year", academicYearData, {
+        onSuccess: (page) => {
+          if (page.props.flash?.success) {
+            Swal.fire({
+              title: 'Success!',
+              html: `
+                <div class="text-left">
+                  <p class="mb-2">${page.props.flash.success}</p>
+                  <div class="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                    <strong>Created:</strong><br>
+                    • Full Academic Year (${startDate} to ${endDate})<br>
+                    • Covers both 1st and 2nd semester periods<br>
+                    • Full-year enrollment enabled<br>
+                    • Schedule management ready for entire academic year
+                  </div>
+                </div>
+              `,
+              icon: 'success',
+              confirmButtonColor: '#10b981',
+              width: '500px'
+            });
+          }
+          onClose();
+          setProcessing(false);
+        },
+        onError: (errors) => {
+          const errorMessage = errors.error || 'Failed to create full academic year';
+          Swal.fire({
+            title: 'Error!',
+            text: errorMessage,
+            icon: 'error',
+            confirmButtonColor: '#dc2626'
+          });
+          setProcessing(false);
+        },
+      });
+      return;
+    }
+
+    // Regular semester creation
     const data = {
       year_start: parseInt(yearStart),
       year_end: parseInt(yearEnd),
@@ -188,7 +355,7 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
         },
       });
     } else {
-      router.post("/school-years", data, {
+      router.post("/registrar/school-years", data, {
         onSuccess: (page) => {
           if (page.props.flash?.success) {
             Swal.fire({
@@ -216,28 +383,51 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-white/20 backdrop-blur-md flex justify-center items-center z-50" onClick={onClose}>
-      <div className="bg-white/95 backdrop-blur-lg rounded-3xl shadow-2xl w-full max-w-lg p-8 relative border border-white/30" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-2xl font-bold text-gray-900">{semester ? "Edit Semester" : "Add New Semester"}</h3>
+    <div className="fixed inset-0 bg-white/20 backdrop-blur-md flex justify-center items-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white/95 backdrop-blur-lg rounded-3xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto p-6 relative border border-white/30" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold text-gray-900">{semester ? "Edit Semester" : "Add New Semester"}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl">
             <FaTimes />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-2">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Semester Name *</label>
             <select
               value={semesterName}
               onChange={(e) => setSemesterName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
               required
             >
-              <option value="">Select semester</option>
-              <option value="1st Semester">1st Semester</option>
-              <option value="2nd Semester">2nd Semester</option>
-              <option value="Summer">Summer</option>
+              <option value="">Select semester type</option>
+              <option value="Full Academic Year">📚 Full Academic Year (Philippine SHS)</option>
+              <option value="Summer">☀️ Summer (For Failed Subjects)</option>
             </select>
+            
+            {/* Information for Full Academic Year */}
+            {semesterName === "Full Academic Year" && (
+              <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="text-blue-500 mt-0.5">ℹ️</div>
+                  <div className="text-xs text-blue-700">
+                    <strong>Philippine SHS System:</strong> Creates a unified full academic year covering both 1st and 2nd semester periods with proper enrollment and schedule management for regular students.
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Information for Summer */}
+            {semesterName === "Summer" && (
+              <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="text-orange-500 mt-0.5">⚠️</div>
+                  <div className="text-xs text-orange-700">
+                    <strong>Summer Classes:</strong> Creates a summer semester specifically for students who need to retake failed subjects. Summer enrollment focuses on remedial education.
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -271,7 +461,7 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
                 placeholder="Enter start year (e.g., 2026)"
                 min="2020"
                 max="2050"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
                 required
               />
             ) : (
@@ -285,7 +475,7 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
                     setYearEnd("");
                   }
                 }}
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
                 required
               >
                 <option value="">Select start year</option>
@@ -301,51 +491,99 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
               type="number"
               value={yearEnd}
               onChange={(e) => setYearEnd(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none bg-gray-50"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none bg-gray-50"
               required
               disabled
               placeholder="Auto-calculated"
             />
             <p className="text-xs text-gray-500 mt-1">Automatically set to start year + 1</p>
           </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Start Date *</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              min={!semester ? getTodayDate() : undefined}
-              className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-              required
-            />
-            {!semester && (
-              <p className="text-xs text-gray-500 mt-1">Cannot select past dates for new semesters</p>
-            )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Start Date *</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  // First check if weekend is selected
+                  if (!handleDateInput(e)) {
+                    setStartDate('');
+                    setEndDate('');
+                    return;
+                  }
+                  
+                  setStartDate(e.target.value);
+                  // Auto-set end date to 1 week (7 days) from start date, avoiding weekends
+                  if (e.target.value) {
+                    const start = new Date(e.target.value);
+                    const autoEndDate = new Date(start);
+                    autoEndDate.setDate(start.getDate() + 7);
+                    
+                    // If end date falls on weekend, move to next Monday
+                    const endDay = autoEndDate.getDay();
+                    if (endDay === 0) { // Sunday
+                      autoEndDate.setDate(autoEndDate.getDate() + 1); // Move to Monday
+                    } else if (endDay === 6) { // Saturday
+                      autoEndDate.setDate(autoEndDate.getDate() + 2); // Move to Monday
+                    }
+                    
+                    const formattedEndDate = autoEndDate.toISOString().split('T')[0];
+                    setEndDate(formattedEndDate);
+                  }
+                }}
+                min={!semester ? getTodayDate() : undefined}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                required
+              />
+              {!semester && (
+                <div className="mt-1 space-y-1">
+                  <p className="text-xs text-gray-500">Cannot select past dates for new semesters</p>
+                  <p className="text-xs text-green-600">📅 End date will auto-set to 1 week from start date</p>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">End Date *</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  // First check if weekend is selected
+                  if (!handleDateInput(e)) {
+                    setEndDate('');
+                    return;
+                  }
+                  setEndDate(e.target.value);
+                }}
+                min={startDate || (!semester ? getTodayDate() : undefined)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                required
+              />
+              <div className="mt-1 space-y-1">
+                <p className="text-xs text-gray-500">Auto-set to 1 week from start date (can be adjusted)</p>
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">End Date *</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              min={startDate || (!semester ? getTodayDate() : undefined)}
-              className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">Must be after start date</p>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+            <p className="text-xs text-blue-700 font-medium">📅 Requirements:</p>
+            <div className="text-xs text-blue-600 space-y-0.5">
+              <p>• 1-2 weeks (7-14 days)</p>
+              <p>• Weekdays only (Mon-Fri)</p>
+              <p>• Students can enroll if no pre-enrollment submitted</p>
+            </div>
           </div>
           <div className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-lg transition-all duration-200"
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 rounded-lg transition-all duration-200"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={processing}
-              className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 rounded-lg transition-all duration-200"
+              className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-2 rounded-lg transition-all duration-200"
             >
               {processing ? "Saving..." : semester ? "Update Semester" : "Create Semester"}
             </button>
@@ -357,10 +595,10 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
 };
 
 const RegistrarSemester = () => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  // Use auth middleware to handle page persistence and authentication
+  useAuthMiddleware(['registrar']);
+  
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { schoolYears = [], flash } = usePage().props;
   const [modalOpen, setModalOpen] = useState(false);
   const [editSemester, setEditSemester] = useState(null);
@@ -394,7 +632,7 @@ const RegistrarSemester = () => {
     });
 
     if (result.isConfirmed) {
-      router.put(`/school-years/${id}/toggle`, {}, {
+      router.put(`/registrar/school-years/${id}/toggle`, {}, {
         onSuccess: (page) => {
           const message = page.props.flash?.message || 'School year status updated successfully';
           
@@ -501,22 +739,8 @@ const RegistrarSemester = () => {
   return (
     <div className="flex h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
       <Sidebar onToggle={setIsCollapsed} />
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} px-8 py-6 overflow-y-auto transition-all duration-300 overflow-x-hidden`}>
+      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} px-8 py-6 overflow-y-auto transition-all duration-300 overflow-x-hidden`}>
         <div className="max-w-7xl mx-auto space-y-8">
-          {flash?.success && (
-            <div className="bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded-r-lg">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-emerald-800">{flash.success}</p>
-                </div>
-              </div>
-            </div>
-          )}
           {flash?.error && (
             <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-r-lg">
               <div className="flex items-center">

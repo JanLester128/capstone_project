@@ -4,10 +4,7 @@ import { FaPrint, FaArrowLeft, FaBook, FaGraduationCap, FaClock, FaMapMarkerAlt,
 import Sidebar from "../layouts/Sidebar";
 
 const SectionCOR = () => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
   
   const { section, subjectsByYear, activeSchoolYear, sections, scheduledSubjects } = usePage().props;
 
@@ -82,7 +79,7 @@ const SectionCOR = () => {
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
       <Sidebar onToggle={setIsCollapsed} />
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} transition-all duration-300 overflow-x-hidden`}>
+      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} transition-all duration-300 overflow-x-hidden`}>
         <div className="p-8">
           <Head title={`COR - ${section.name} (${section.strand?.name}) - ONSTS`} />
           

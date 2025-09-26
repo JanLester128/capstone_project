@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Head, router } from "@inertiajs/react";
 import Sidebar from "../layouts/Sidebar";
 import useAuth from "../../hooks/useAuth";
+import { useAuthMiddleware } from "../../middleware/AuthMiddleware";
 import Swal from 'sweetalert2';
 import { 
   FaUsers, 
@@ -26,10 +27,10 @@ import {
 
 export default function RegistrarDashboard() {
   const { user, isAuthenticated, isLoading, requireAuth } = useAuth();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  
+  // Use auth middleware to handle page persistence and authentication
+  useAuthMiddleware(['registrar']);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({
     totalStudents: 1247,
@@ -214,11 +215,11 @@ export default function RegistrarDashboard() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Head title="Dashboard - ONSTS" />
-      <Sidebar onToggle={setSidebarCollapsed} />
+      <Sidebar onToggle={handleSidebarToggle} />
       
-      <main className={`flex-1 ${sidebarCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
+      <main className={`${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
           {/* Header Section */}
           <div className="mb-8">

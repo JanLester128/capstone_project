@@ -25,9 +25,11 @@ import {
   FaCog
 } from "react-icons/fa";
 import Swal from 'sweetalert2';
+import { AuthManager } from '../../auth';
 
 export default function FacultySidebar({ onToggle }) {
   const { url } = usePage();
+  const [currentUrl, setCurrentUrl] = useState(url);
   const [userRole, setUserRole] = useState('faculty');
   const [isCoordinator, setIsCoordinator] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -38,6 +40,16 @@ export default function FacultySidebar({ onToggle }) {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [userInfo, setUserInfo] = useState({});
   const [theme, setTheme] = useState('');
+
+  // Update current URL when page URL changes and store in AuthManager
+  useEffect(() => {
+    setCurrentUrl(url);
+    // Use AuthManager to store current page
+    AuthManager.storeCurrentPage(url);
+    console.log('Sidebar: Current URL changed to:', url);
+    console.log('Sidebar: Stored page via AuthManager:', url);
+    console.log('Sidebar: Window location:', window.location.pathname);
+  }, [url]);
 
   // Notify parent component of initial state on mount
   useEffect(() => {
@@ -208,7 +220,7 @@ export default function FacultySidebar({ onToggle }) {
   // Additional menu items for coordinators
   const coordinatorMenuItems = [
     { name: "Enrollment Management", href: "/faculty/enrollment", icon: FaUserGraduate, description: "Review student enrollments" },
-    { name: "Student Assignment", href: "/faculty/students", icon: FaUserCheck, description: "Assign students to sections" },
+    { name: "Enrolled Students", href: "/faculty/students", icon: FaUserCheck, description: "View enrolled students by strand and section" },
   ];
 
   // Combine menu items based on coordinator status
@@ -217,7 +229,29 @@ export default function FacultySidebar({ onToggle }) {
     ...(isCoordinator ? coordinatorMenuItems : []),
   ];
 
-  const isActive = (href) => url === href;
+  // Enhanced active state detection
+  const isActive = (href) => {
+    // Check current URL from usePage hook
+    if (url === href) {
+      console.log(`Sidebar: ${href} is active (matches usePage url: ${url})`);
+      return true;
+    }
+    
+    // Check stored URL using AuthManager key
+    const storedUrl = AuthManager.getCurrentPage();
+    if (storedUrl === href) {
+      console.log(`Sidebar: ${href} is active (matches stored url: ${storedUrl})`);
+      return true;
+    }
+    
+    // Check browser location as fallback
+    if (typeof window !== 'undefined' && window.location.pathname === href) {
+      console.log(`Sidebar: ${href} is active (matches window.location: ${window.location.pathname})`);
+      return true;
+    }
+    
+    return false;
+  };
 
   return (
     <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 ${
@@ -267,6 +301,11 @@ export default function FacultySidebar({ onToggle }) {
                     ? 'bg-gradient-to-r from-purple-500 to-blue-600 text-white shadow-lg'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 } ${isCollapsed ? 'justify-center' : ''}`}
+                onClick={() => {
+                  // Store the clicked URL using AuthManager
+                  AuthManager.storeCurrentPage(item.href);
+                  console.log('Sidebar: Storing clicked page via AuthManager:', item.href);
+                }}
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Icon className={`text-lg flex-shrink-0 transition-transform duration-200 ${

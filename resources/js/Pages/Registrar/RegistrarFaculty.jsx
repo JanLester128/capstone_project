@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { router } from "@inertiajs/react";
 import { usePage, Head } from "@inertiajs/react";
 import Sidebar from "../layouts/Sidebar";
@@ -180,10 +180,7 @@ const EditModal = ({ isOpen, onClose, teacher }) => {
 };
 
 const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], flash }) => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [teachers, setTeachers] = useState(initialTeachers);
   const [formData, setFormData] = useState({
     firstname: "",
@@ -524,35 +521,116 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
   const flashPassword = props.flash?.password || flash?.password;
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
       <Sidebar onToggle={setIsCollapsed} />
-      <main className={`flex-1 p-8 ${isCollapsed ? 'ml-16' : 'ml-72'} transition-all duration-300 overflow-x-hidden`}>
+      <main className={`p-8 ${isCollapsed ? 'ml-16' : 'ml-64'} transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-            Teacher Management
-          </h1>
-          <p className="text-gray-600">Create and manage faculty and coordinator accounts</p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2 flex items-center gap-3">
+                <FaChalkboardTeacher className="text-purple-600" />
+                Teacher Management
+              </h1>
+              <p className="text-gray-600">Create and manage faculty and coordinator accounts</p>
+            </div>
+            {/* System Status Indicator - Visibility of System Status */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-100 rounded-lg">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-green-800">System Online</span>
+              </div>
+              <div className="text-sm text-gray-500">
+                Total Teachers: <span className="font-semibold text-gray-800">{teachers.length}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Add Teacher Button */}
-        <div className="mb-8">
-          <button
-            onClick={() => setAddTeacherModalOpen(true)}
-            className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-8 py-4 rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 font-semibold flex items-center gap-3 shadow-lg hover:shadow-xl transform hover:scale-105"
-          >
-            <FaUserPlus className="w-5 h-5" />
-            Add New Teacher
-          </button>
+        {/* Enhanced Controls Section - User Control and Freedom */}
+        <div className="mb-8 bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={() => setAddTeacherModalOpen(true)}
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-8 py-4 rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 font-semibold flex items-center gap-3 shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-4 focus:ring-purple-300 focus:outline-none"
+                aria-label="Add new teacher to the system"
+              >
+                <FaUserPlus className="w-5 h-5" />
+                Add New Teacher
+              </button>
+              
+              {/* Quick Actions - Flexibility and Efficiency of Use */}
+              <div className="flex gap-2">
+                <button 
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200 flex items-center gap-2 focus:ring-2 focus:ring-gray-300 focus:outline-none"
+                  title="Refresh teacher list"
+                  onClick={() => window.location.reload()}
+                >
+                  <FaSpinner className="w-4 h-4" />
+                  Refresh
+                </button>
+                <button 
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200 flex items-center gap-2 focus:ring-2 focus:ring-gray-300 focus:outline-none"
+                  title="Export teacher data"
+                >
+                  <FaPaperPlane className="w-4 h-4" />
+                  Export
+                </button>
+              </div>
+            </div>
+            
+            {/* Search and Filter - Recognition Rather Than Recall */}
+            <div className="flex gap-3 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="Search teachers..."
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+                  aria-label="Search teachers by name or email"
+                />
+              </div>
+            </div>
+          </div>
+          
+          {/* Quick Stats - Visibility of System Status */}
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+              <span className="text-gray-600">Active: <span className="font-semibold">{teachers.filter(t => !t.is_disabled).length}</span></span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+              <span className="text-gray-600">Disabled: <span className="font-semibold">{teachers.filter(t => t.is_disabled).length}</span></span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+              <span className="text-gray-600">Unassigned: <span className="font-semibold">{teachers.filter(t => !t.assigned_strand_id).length}</span></span>
+            </div>
+          </div>
         </div>
 
         {teachers.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
             <div className="p-12 text-center">
-              <div className="p-4 bg-gray-100 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
-                <FaUsers className="w-10 h-10 text-gray-400" />
+              <div className="p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+                <FaUsers className="w-10 h-10 text-purple-600" />
               </div>
               <h3 className="text-xl font-semibold text-gray-800 mb-2">No Teachers Found</h3>
-              <p className="text-gray-600">Start by adding your first faculty or coordinator account above.</p>
+              <p className="text-gray-600 mb-4">Start by adding your first faculty or coordinator account.</p>
+              {/* Help and Documentation - Provide Clear Next Steps */}
+              <div className="bg-blue-50 rounded-lg p-4 text-left max-w-md mx-auto">
+                <h4 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                  <FaCheckCircle className="w-4 h-4" />
+                  Getting Started
+                </h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• Click "Add New Teacher" to create faculty accounts</li>
+                  <li>• Assign teachers to specific strands</li>
+                  <li>• Manage coordinator permissions</li>
+                  <li>• Enable/disable accounts as needed</li>
+                </ul>
+              </div>
             </div>
           </div>
         ) : (
@@ -624,16 +702,37 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
                     <div className="p-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {strandTeachers.map((teacher) => (
-                          <div key={teacher.id} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition-colors duration-200">
-                            {/* Teacher Info */}
+                          <div key={teacher.id} className="bg-gray-50 rounded-xl p-4 hover:bg-gray-100 transition-all duration-200 hover:shadow-md border border-transparent hover:border-gray-200">
+                            {/* Enhanced Teacher Info with Better Visual Hierarchy */}
                             <div className="flex items-center gap-3 mb-3">
-                              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                                <FaUser className="w-5 h-5 text-purple-600" />
+                              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                                teacher.is_disabled 
+                                  ? 'bg-red-100' 
+                                  : teacher.role === 'coordinator' 
+                                    ? 'bg-blue-100' 
+                                    : 'bg-purple-100'
+                              }`}>
+                                <FaUser className={`w-5 h-5 ${
+                                  teacher.is_disabled 
+                                    ? 'text-red-600' 
+                                    : teacher.role === 'coordinator' 
+                                      ? 'text-blue-600' 
+                                      : 'text-purple-600'
+                                }`} />
                               </div>
                               <div className="flex-1">
-                                <div className="font-semibold text-gray-800">{teacher.name}</div>
+                                <div className="font-semibold text-gray-800 flex items-center gap-2">
+                                  {teacher.name}
+                                  {teacher.role === 'coordinator' && (
+                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">Coordinator</span>
+                                  )}
+                                </div>
                                 <div className="text-sm text-gray-500">ID: {teacher.id}</div>
                               </div>
+                              {/* Status Indicator */}
+                              <div className={`w-3 h-3 rounded-full ${
+                                teacher.is_disabled ? 'bg-red-500' : 'bg-green-500'
+                              }`} title={teacher.is_disabled ? 'Disabled' : 'Active'}></div>
                             </div>
 
                             {/* Email */}
@@ -678,11 +777,13 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
                               </button>
                             </div>
 
-                            {/* Actions */}
+                            {/* Enhanced Actions - Error Prevention & Help Users Recognize */}
                             <div className="flex gap-2">
                               <button
-                                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 text-sm"
+                                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 text-sm focus:ring-4 focus:ring-blue-300 focus:outline-none hover:shadow-md"
                                 onClick={() => handleEdit(teacher)}
+                                aria-label={`Edit ${teacher.name}'s information`}
+                                title="Edit teacher information"
                               >
                                 <FaEdit className="w-3 h-3" />
                                 Edit
@@ -690,10 +791,12 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
                               <button
                                 className={`flex-1 ${
                                   teacher.is_disabled 
-                                    ? 'bg-green-600 hover:bg-green-700' 
-                                    : 'bg-red-600 hover:bg-red-700'
-                                } text-white px-3 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 text-sm`}
+                                    ? 'bg-green-600 hover:bg-green-700 focus:ring-green-300' 
+                                    : 'bg-red-600 hover:bg-red-700 focus:ring-red-300'
+                                } text-white px-3 py-2 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 text-sm focus:ring-4 focus:outline-none hover:shadow-md`}
                                 onClick={() => handleToggleDisable(teacher)}
+                                aria-label={`${teacher.is_disabled ? 'Enable' : 'Disable'} ${teacher.name}`}
+                                title={`${teacher.is_disabled ? 'Enable' : 'Disable'} this teacher account`}
                               >
                                 {teacher.is_disabled ? (
                                   <>
@@ -707,6 +810,31 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
                                   </>
                                 )}
                               </button>
+                            </div>
+                            
+                            {/* Last Activity Indicator - Visibility of System Status */}
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <div className="flex items-center justify-between text-xs text-gray-500">
+                                <span>
+                                  Last seen: {teacher.last_login_at 
+                                    ? new Date(teacher.last_login_at).toLocaleDateString() 
+                                    : 'Never'}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <div className={`w-2 h-2 rounded-full ${
+                                    teacher.is_disabled 
+                                      ? 'bg-gray-400' 
+                                      : teacher.is_online 
+                                        ? 'bg-green-400' 
+                                        : 'bg-red-400'
+                                  }`}></div>
+                                  {teacher.is_disabled 
+                                    ? 'Disabled' 
+                                    : teacher.is_online 
+                                      ? 'Online' 
+                                      : 'Offline'}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         ))}

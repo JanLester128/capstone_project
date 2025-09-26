@@ -64,7 +64,7 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
     <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
       <FacultySidebar onToggle={setIsCollapsed} />
       
-      <div className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-6 transition-all duration-300`}>
+      <div className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-6 transition-all duration-300`}>
         <div className="mb-6">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
             My Schedule

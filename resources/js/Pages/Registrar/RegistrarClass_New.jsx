@@ -489,10 +489,7 @@ const SubjectModal = ({ isOpen, onClose, subject, selectedStrand }) => {
 };
 
 const RegistrarClass = () => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { strands = [], subjects = [], flash } = usePage().props;
   const [activeTab, setActiveTab] = useState('overview');
   const [strandModalOpen, setStrandModalOpen] = useState(false);
@@ -621,11 +618,11 @@ const RegistrarClass = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Head title="Academic Programs - ONSTS" />
       <Sidebar onToggle={setIsCollapsed} />
       
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} p-8 transition-all duration-300 overflow-x-hidden`}>
+      <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
           
           {flash?.success && (

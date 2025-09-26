@@ -12,7 +12,10 @@ import {
   FaEye, 
   FaEyeSlash, 
   FaUserPlus,
-  FaCheckCircle
+  FaCheckCircle,
+  FaCode,
+  FaClock,
+  FaRedo
 } from 'react-icons/fa';
 
 export default function StudentRegister() {
@@ -30,6 +33,14 @@ export default function StudentRegister() {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Email verification states
+  const [step, setStep] = useState(1); // 1: form, 2: verification, 3: complete registration
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isSendingCode, setIsSendingCode] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   // Page transition animation on mount
   useEffect(() => {
@@ -38,6 +49,15 @@ export default function StudentRegister() {
       container.classList.add('animate-fadeIn');
     }
   }, []);
+
+  // Countdown timer for resend code
+  useEffect(() => {
+    let timer;
+    if (countdown > 0) {
+      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [countdown]);
 
   // Handle navigation with smooth transition
   const handleNavigation = (url) => {
@@ -124,6 +144,169 @@ export default function StudentRegister() {
     return newErrors;
   };
 
+  // Send verification code to email
+  const sendVerificationCode = async () => {
+    // Validate complete form including passwords
+    const validationErrors = validateForm();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    setIsSendingCode(true);
+    setErrors({});
+
+    try {
+      const response = await fetch('/auth/send-verification-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          firstname: formData.firstname,
+          lastname: formData.lastname
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.errors) {
+          setErrors(data.errors);
+        } else {
+          setErrors({ general: data.message || 'Failed to send verification code.' });
+        }
+        return;
+      }
+
+      if (data.success) {
+        setStep(2);
+        setCountdown(60); // 60 seconds countdown for resend
+        
+        // Show success message
+        const successMessage = document.createElement('div');
+        successMessage.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        successMessage.textContent = 'Verification code sent to your email!';
+        document.body.appendChild(successMessage);
+        
+        setTimeout(() => {
+          if (document.body.contains(successMessage)) {
+            document.body.removeChild(successMessage);
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Send verification code error:', error);
+      setErrors({ general: 'Network error. Please check your connection and try again.' });
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
+
+  // Verify the code entered by user
+  const verifyCode = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      setErrors({ code: 'Please enter a valid 6-digit verification code.' });
+      return;
+    }
+
+    setIsVerifying(true);
+    setErrors({});
+
+    try {
+      const response = await fetch('/auth/verify-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          code: verificationCode
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ code: data.message || 'Invalid verification code.' });
+        return;
+      }
+
+      if (data.success) {
+        setIsEmailVerified(true);
+        setStep(3);
+        
+        // Show success message
+        const successMessage = document.createElement('div');
+        successMessage.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        successMessage.textContent = 'Email verified successfully!';
+        document.body.appendChild(successMessage);
+        
+        setTimeout(() => {
+          if (document.body.contains(successMessage)) {
+            document.body.removeChild(successMessage);
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Verify code error:', error);
+      setErrors({ code: 'Network error. Please try again.' });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  // Resend verification code
+  const resendVerificationCode = async () => {
+    setIsSendingCode(true);
+    setErrors({});
+
+    try {
+      const response = await fetch('/auth/resend-verification-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ code: data.message || 'Failed to resend verification code.' });
+        return;
+      }
+
+      if (data.success) {
+        setCountdown(60);
+        setVerificationCode(''); // Clear the input
+        
+        // Show success message
+        const successMessage = document.createElement('div');
+        successMessage.className = 'fixed top-4 right-4 bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        successMessage.textContent = 'New verification code sent!';
+        document.body.appendChild(successMessage);
+        
+        setTimeout(() => {
+          if (document.body.contains(successMessage)) {
+            document.body.removeChild(successMessage);
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Resend code error:', error);
+      setErrors({ code: 'Network error. Please try again.' });
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -183,18 +366,66 @@ export default function StudentRegister() {
     <>
       <Head title="Student Registration - ONSTS" />
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-6xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[600px] max-h-[85vh]">
+        <div className="w-full max-w-7xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col lg:flex-row min-h-[600px] max-h-[95vh]">
           
           {/* Left Panel - Registration Form */}
-          <div className="w-1/2 p-8 flex flex-col justify-center">
-            <div className="max-w-md mx-auto w-full">
-              <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">Create Your Account</h2>
-                <p className="text-gray-600 text-sm">Join ONSTS and start your journey</p>
+          <div className="w-full lg:w-1/2 p-3 lg:p-4 flex flex-col justify-start py-6 overflow-y-auto">
+            <div className="max-w-md mx-auto w-full flex-shrink-0">
+              <div className="text-center mb-4">
+                <h2 className="text-xl font-bold text-gray-800 mb-1">Create Your Account</h2>
+                <p className="text-gray-600 text-xs">Join ONSTS and start your journey</p>
               </div>
 
-              {/* Registration Form */}
-              <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Step Indicator */}
+              <div className="flex items-center justify-center mb-4">
+                <div className="flex items-center space-x-4">
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
+                    step >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}>
+                    1
+                  </div>
+                  <div className={`w-12 h-1 ${step >= 2 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
+                    step >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}>
+                    2
+                  </div>
+                  <div className={`w-12 h-1 ${step >= 3 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
+                    step >= 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}>
+                    3
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 1: Basic Information */}
+              {step === 1 && (
+                <div className="space-y-4">
+                  {/* Step Header */}
+                  <div className="text-center mb-3">
+                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <FaUser className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-1">Personal Information</h3>
+                    <p className="text-gray-600 text-xs">
+                      Please provide your basic information to get started
+                    </p>
+                  </div>
+
+                  {/* General Error Display */}
+                  {errors.general && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                          <span className="text-white text-xs">!</span>
+                        </div>
+                        <p className="text-red-600 text-sm font-medium">{errors.general}</p>
+                      </div>
+                    </div>
+                  )}
+
+                <form onSubmit={(e) => { e.preventDefault(); sendVerificationCode(); }} className="space-y-4">
                 {/* Name Fields Row */}
                 <div className="grid grid-cols-2 gap-3">
                   {/* First Name */}
@@ -340,25 +571,205 @@ export default function StudentRegister() {
                   </div>
                 )}
 
-                {/* Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:scale-100 shadow-lg text-sm"
-                >
-                  {isLoading ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      Creating Account...
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={isSendingCode}
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:scale-100 shadow-lg text-sm"
+                  >
+                    {isSendingCode ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Sending Code...
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2">
+                        <FaEnvelope className="w-4 h-4" />
+                        Send Verification Code
+                      </div>
+                    )}
+                  </button>
+                </form>
+                </div>
+              )}
+
+              {/* Step 2: Email Verification */}
+              {step === 2 && (
+                <div className="space-y-4">
+                  {/* Step Header */}
+                  <div className="text-center mb-3">
+                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <FaCode className="w-6 h-6 text-blue-600" />
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2">
-                      <FaUserPlus className="w-4 h-4" />
-                      Create ONSTS Account
+                    <h3 className="text-lg font-bold text-gray-800 mb-1">Check Your Email</h3>
+                    <p className="text-gray-600 text-xs">
+                      We've sent a 6-digit verification code to<br />
+                      <span className="font-semibold text-blue-600">{formData.email}</span>
+                    </p>
+                  </div>
+
+                  {/* General Error Display */}
+                  {errors.general && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                          <span className="text-white text-xs">!</span>
+                        </div>
+                        <p className="text-red-600 text-sm font-medium">{errors.general}</p>
+                      </div>
                     </div>
                   )}
-                </button>
-              </form>
+
+                  {/* Verification Code Input */}
+                  <div>
+                    <label className="block text-gray-700 text-xs font-semibold mb-2 text-center">
+                      Enter Verification Code
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={verificationCode}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setVerificationCode(value);
+                          if (errors.code) {
+                            setErrors(prev => ({ ...prev, code: '' }));
+                          }
+                        }}
+                        className="w-full px-4 py-3 text-center text-2xl font-mono tracking-widest border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        placeholder="000000"
+                        maxLength="6"
+                      />
+                    </div>
+                    {errors.code && <p className="text-red-500 text-xs mt-1 text-center">{errors.code}</p>}
+                  </div>
+
+                  {/* Verify Button */}
+                  <button
+                    onClick={verifyCode}
+                    disabled={isVerifying || verificationCode.length !== 6}
+                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:scale-100 shadow-lg text-sm"
+                  >
+                    {isVerifying ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Verifying...
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2">
+                        <FaCheckCircle className="w-4 h-4" />
+                        Verify Email
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Resend Code Section */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <div className="text-center">
+                      <p className="text-gray-600 text-sm mb-3">Didn't receive the code?</p>
+                      {countdown > 0 ? (
+                        <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+                          <FaClock className="w-4 h-4" />
+                          <span>Resend available in {countdown} seconds</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={resendVerificationCode}
+                          disabled={isSendingCode}
+                          className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 text-sm flex items-center justify-center gap-2 mx-auto"
+                        >
+                          <FaRedo className="w-3 h-3" />
+                          {isSendingCode ? 'Sending...' : 'Resend Code'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Back Button */}
+                  <button
+                    onClick={() => setStep(1)}
+                    className="w-full border border-gray-300 text-gray-700 font-semibold py-3 px-4 rounded-lg hover:bg-gray-50 transition-all duration-200 text-sm"
+                  >
+                    ← Back to Form
+                  </button>
+                </div>
+              )}
+
+              {/* Step 3: Complete Registration */}
+              {step === 3 && (
+                <div className="space-y-4">
+                  {/* Step Header - More Compact */}
+                  <div className="text-center mb-4">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <FaCheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-1">Email Verified!</h3>
+                    <p className="text-gray-600 text-xs">
+                      Ready to create your account
+                    </p>
+                  </div>
+
+                  {/* Compact Account Summary */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 text-blue-800 mb-3">
+                      <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center">
+                        <FaUser className="w-2.5 h-2.5 text-white" />
+                      </div>
+                      <span className="font-semibold text-xs">Account Summary</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-xs font-medium text-blue-700">Name:</span>
+                        <span className="text-xs text-blue-900 font-semibold">
+                          {formData.firstname} {formData.lastname}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-t border-blue-200/30">
+                        <span className="text-xs font-medium text-blue-700">Email:</span>
+                        <span className="text-xs text-blue-900 font-semibold">{formData.email}</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-t border-blue-200/30">
+                        <span className="text-xs font-medium text-blue-700">Status:</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                          <span className="text-xs text-green-700 font-semibold">Verified</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* General Error */}
+                  {errors.general && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
+                          <span className="text-white text-xs">!</span>
+                        </div>
+                        <p className="text-red-600 text-xs font-medium">{errors.general}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Create Account Button */}
+                  <button
+                    onClick={handleSubmit}
+                    disabled={isLoading}
+                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:scale-100 shadow-lg text-sm"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Creating Account...
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2">
+                        <FaUserPlus className="w-4 h-4" />
+                        Create My Account
+                      </div>
+                    )}
+                  </button>
+                </div>
+              )}
 
               {/* Login Link */}
               <div className="mt-4 text-center">
@@ -385,7 +796,7 @@ export default function StudentRegister() {
           </div>
 
           {/* Right Panel - ONSTS Branding */}
-          <div className="w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-purple-700 p-8 flex flex-col justify-center items-center text-white relative overflow-hidden">
+          <div className="w-full lg:w-1/2 bg-gradient-to-br from-blue-600 via-blue-700 to-purple-700 p-6 lg:p-8 flex flex-col justify-center items-center text-white relative overflow-hidden min-h-[400px] lg:min-h-full">
             {/* Background Pattern */}
             <div className="absolute inset-0 opacity-10">
               <div className="absolute top-10 left-10 w-32 h-32 border border-white/20 rounded-full"></div>
@@ -394,43 +805,51 @@ export default function StudentRegister() {
             </div>
             
             {/* Logo and Branding */}
-            <div className="relative z-10 text-center">
+            <div className="relative z-10 text-center w-full max-w-md mx-auto">
               <div className="mb-6">
                 <img 
                   src="/onsts.png" 
                   alt="ONSTS Logo" 
-                  className="w-24 h-24 mx-auto mb-4 rounded-full bg-white p-2 shadow-lg"
+                  className="w-20 h-20 lg:w-24 lg:h-24 mx-auto mb-4 rounded-full bg-white p-2 shadow-lg"
                   onError={(e) => {
                     e.target.style.display = 'none';
                     e.target.nextSibling.style.display = 'flex';
                   }}
                 />
-                <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-lg hidden">
-                  <FaGraduationCap className="w-12 h-12 text-white" />
+                <div className="w-20 h-20 lg:w-24 lg:h-24 mx-auto mb-4 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-lg hidden">
+                  <FaGraduationCap className="w-10 h-10 lg:w-12 lg:h-12 text-white" />
                 </div>
               </div>
               
-              <h1 className="text-3xl font-bold mb-2">Join ONSTS</h1>
-              <p className="text-lg mb-2 font-medium">Online Student Tracking System</p>
-              <p className="text-blue-100 mb-8 text-sm">Start Your Educational Journey Today</p>
+              <h1 className="text-2xl lg:text-3xl xl:text-4xl font-bold mb-2 leading-tight">Join ONSTS</h1>
+              <p className="text-base lg:text-lg mb-2 font-medium leading-relaxed">Online Student Tracking System</p>
+              <p className="text-blue-100 mb-6 lg:mb-8 text-sm lg:text-base leading-relaxed">Start Your Educational Journey Today</p>
               
               {/* Feature Highlights */}
-              <div className="space-y-3 text-left max-w-sm">
-                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <FaShieldAlt className="w-5 h-5 text-green-300" />
-                  <span className="text-sm">Easy Online Enrollment</span>
+              <div className="space-y-3 text-left w-full max-w-sm mx-auto">
+                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3 transition-all duration-200 hover:bg-white/20">
+                  <div className="flex-shrink-0">
+                    <FaShieldAlt className="w-4 h-4 lg:w-5 lg:h-5 text-green-300" />
+                  </div>
+                  <span className="text-sm lg:text-base font-medium">Easy Online Enrollment</span>
                 </div>
-                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <FaChartLine className="w-5 h-5 text-yellow-300" />
-                  <span className="text-sm">Real-time Grade Access</span>
+                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3 transition-all duration-200 hover:bg-white/20">
+                  <div className="flex-shrink-0">
+                    <FaChartLine className="w-4 h-4 lg:w-5 lg:h-5 text-yellow-300" />
+                  </div>
+                  <span className="text-sm lg:text-base font-medium">Real-time Grade Access</span>
                 </div>
-                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <FaCalendarAlt className="w-5 h-5 text-pink-300" />
-                  <span className="text-sm">Digital Schedule Management</span>
+                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3 transition-all duration-200 hover:bg-white/20">
+                  <div className="flex-shrink-0">
+                    <FaCalendarAlt className="w-4 h-4 lg:w-5 lg:h-5 text-pink-300" />
+                  </div>
+                  <span className="text-sm lg:text-base font-medium">Digital Schedule Management</span>
                 </div>
-                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <FaUsers className="w-5 h-5 text-purple-300" />
-                  <span className="text-sm">24/7 Student Portal Access</span>
+                <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg p-3 transition-all duration-200 hover:bg-white/20">
+                  <div className="flex-shrink-0">
+                    <FaUsers className="w-4 h-4 lg:w-5 lg:h-5 text-purple-300" />
+                  </div>
+                  <span className="text-sm lg:text-base font-medium">24/7 Student Portal Access</span>
                 </div>
               </div>
             </div>

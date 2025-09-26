@@ -113,10 +113,7 @@ const StudentDetailsModal = ({ isOpen, onClose, student }) => {
 };
 
 const RegistrarStudents = () => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('registrar-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { approvedStudents = [], enrolledStudents = [], strands = [], sections = [], flash } = usePage().props;
   const [activeTab, setActiveTab] = useState('approved');
   const [searchTerm, setSearchTerm] = useState("");
@@ -155,9 +152,9 @@ const RegistrarStudents = () => {
   const totalSections = sections.length;
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
       <Sidebar onToggle={setIsCollapsed} />
-      <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-72'} px-8 py-6 overflow-y-auto transition-all duration-300 overflow-x-hidden`}>
+      <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} px-8 py-6 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
           {flash?.success && (
             <div className="mb-6 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg">

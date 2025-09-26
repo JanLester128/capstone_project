@@ -22,7 +22,13 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 // Student login
 Route::post('/auth/login/student', [AuthController::class, 'loginStudent']);
 
-// Student register
+// Email verification routes
+Route::post('/auth/send-verification-code', [App\Http\Controllers\EmailVerificationController::class, 'sendVerificationCode']);
+Route::post('/auth/verify-code', [App\Http\Controllers\EmailVerificationController::class, 'verifyCode']);
+Route::post('/auth/resend-verification-code', [App\Http\Controllers\EmailVerificationController::class, 'resendVerificationCode']);
+Route::get('/auth/check-verification-status', [App\Http\Controllers\EmailVerificationController::class, 'checkVerificationStatus']);
+
+// Student register (requires email verification)
 Route::post('/auth/register/student', [AuthController::class, 'registerStudent']);
 
 // Registrar register

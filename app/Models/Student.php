@@ -88,7 +88,7 @@ class Student extends Model
     public function strandPreferences()
     {
         // Preferences table stores users.id in student_id; this model stores user_id
-        return $this->hasMany(StudentStrandPreference::class, 'student_id', 'user_id');
+        return $this->hasMany(StudentStrandPreference::class, 'student_id', 'id');
     }
 
     protected $casts = [

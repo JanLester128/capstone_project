@@ -44,11 +44,19 @@ export const AuthManager = {
     return true;
   },
 
-  // Store current page location
+  // Store current page location with better validation
   storeCurrentPage(path) {
     // Validate path and exclude problematic routes
-    if (path && path !== '/login' && !path.includes('/by-semester')) {
-      localStorage.setItem(this.CURRENT_PAGE_KEY, path);
+    if (path && path !== '/login' && path !== '/' && !path.includes('/by-semester') && !path.includes('/logout')) {
+      // Only store valid authenticated pages
+      const validPaths = [
+        '/registrar/', '/faculty/', '/student/', '/coordinator/'
+      ];
+      
+      if (validPaths.some(validPath => path.startsWith(validPath))) {
+        localStorage.setItem(this.CURRENT_PAGE_KEY, path);
+        console.log('AuthManager: Current page stored:', path);
+      }
     }
   },
 
@@ -60,6 +68,21 @@ export const AuthManager = {
   // Clear stored current page
   clearCurrentPage() {
     localStorage.removeItem(this.CURRENT_PAGE_KEY);
+  },
+
+  // Check if current page matches user role
+  isValidPageForUser(path, userRole) {
+    if (!path || !userRole) return false;
+    
+    const roleBasedPaths = {
+      'registrar': '/registrar/',
+      'faculty': '/faculty/',
+      'coordinator': '/faculty/',
+      'student': '/student/'
+    };
+    
+    const validPath = roleBasedPaths[userRole.toLowerCase()];
+    return validPath && path.startsWith(validPath);
   },
 
   // HCI Principle 9: Help users recognize, diagnose, and recover from errors
@@ -179,13 +202,27 @@ export const AuthManager = {
     };
   },
 
-  // Get appropriate redirect URL based on user role
+  // Get appropriate redirect URL based on user role and stored page
   getRedirectUrl() {
     const user = this.getUser();
     if (!user || !user.role) {
       return '/login';
     }
     
+    // Check if there's a stored page to return to
+    const storedPage = this.getCurrentPage();
+    if (storedPage && storedPage !== '/login') {
+      // Validate that stored page is appropriate for user role
+      if (this.isValidPageForUser(storedPage, user.role)) {
+        console.log('AuthManager.getRedirectUrl(): Using stored page:', storedPage);
+        return storedPage;
+      } else {
+        console.log('AuthManager.getRedirectUrl(): Stored page invalid for user role, clearing:', storedPage);
+        this.clearCurrentPage();
+      }
+    }
+    
+    // Fallback to dashboard
     return this.getDashboardUrl();
   },
 
@@ -239,6 +276,21 @@ export const AuthManager = {
     if (this.isAuthenticated()) {
       this.updateLastActivity();
     }
+  },
+
+  // Login method to store authentication data
+  login(userData, token, sessionId) {
+    this.setToken(token);
+    this.setUser(userData);
+    this.setSession(sessionId);
+    this.updateLastActivity();
+    this.setAxiosAuth();
+    
+    console.log('AuthManager: User logged in successfully', {
+      userId: userData.id,
+      role: userData.role,
+      sessionId: sessionId
+    });
   },
 
   // Track page changes for better UX

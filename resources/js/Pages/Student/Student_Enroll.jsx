@@ -2,14 +2,14 @@ import React, { useState } from "react";
 import { Head, usePage } from "@inertiajs/react";
 import Student_Sidebar from "../layouts/Student_Sidebar";
 import EnrollmentForm from "../layouts/EnrollmentForm";
-import { 
-  FaUserGraduate, 
-  FaFileAlt, 
-  FaCheckCircle, 
-  FaTimesCircle, 
-  FaClock, 
-  FaInfoCircle, 
-  FaExclamationTriangle, 
+import {
+  FaUserGraduate,
+  FaFileAlt,
+  FaCheckCircle,
+  FaTimesCircle,
+  FaClock,
+  FaInfoCircle,
+  FaExclamationTriangle,
   FaSchool,
   FaArrowRight,
   FaCalendarAlt,
@@ -108,7 +108,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
       <div className="flex h-screen bg-gradient-to-br from-gray-50 to-blue-50">
         <Student_Sidebar onToggle={handleSidebarToggle} />
         <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
-          
+
           {/* Enhanced Header */}
           <header className="bg-white shadow-lg border-b border-gray-200 px-6 py-4">
             <div className="flex items-center justify-between">
@@ -119,14 +119,14 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">Student Enrollment</h1>
                   <p className="text-gray-600">
-                    {activeSchoolYear ? 
-                      `${activeSchoolYear.semester} Semester ${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 
+                    {activeSchoolYear ?
+                      `${activeSchoolYear.semester} Semester ${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` :
                       'Academic Year Information'
                     }
                   </p>
                 </div>
               </div>
-              
+
               {/* Status Badge */}
               <div className={`flex items-center space-x-2 px-4 py-2 rounded-full border ${statusInfo.actionColor}`}>
                 <div className="w-2 h-2 rounded-full bg-current animate-pulse"></div>
@@ -138,7 +138,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
           {/* Main Content */}
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-4xl mx-auto space-y-6">
-              
+
               {/* Flash Messages - HCI Principle 1: Visibility of system status */}
               {flash?.success && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center space-x-3">
@@ -166,7 +166,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                   <div className="flex justify-center">
                     {statusInfo.icon}
                   </div>
-                  
+
                   <div className="space-y-3">
                     <h2 className={`text-2xl font-bold ${statusInfo.textColor}`}>
                       {statusInfo.title}
@@ -214,18 +214,15 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                       </button>
                     )}
 
-                    {/* Enrolled status - Show ENROLLED button */}
+                    {/* Enrolled status - Show ENROLLED note (no button) */}
                     {enrollmentStatus?.status === 'enrolled' && (
                       <div className="text-center space-y-4">
-                        <button
-                          disabled
-                          className="flex items-center px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-lg shadow-lg cursor-default"
-                        >
-                          <FaCheckCircle className="mr-3 text-xl" />
-                          ENROLLED
-                          <FaCheckCircle className="ml-3 text-xl" />
-                        </button>
-                        
+                        <div className="flex items-center justify-center px-8 py-4 bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-300 text-green-800 font-bold rounded-lg shadow-lg">
+                          <FaCheckCircle className="mr-3 text-2xl text-green-600" />
+                          <span className="text-xl">ENROLLED</span>
+                          <FaCheckCircle className="ml-3 text-2xl text-green-600" />
+                        </div>
+
                         {/* Grade 12 Note */}
                         {user?.grade_level === '12' && (
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
@@ -268,8 +265,8 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                     <div>
                       <h3 className="font-semibold text-gray-900">Academic Year</h3>
                       <p className="text-sm text-gray-600">
-                        {activeSchoolYear ? 
-                          `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 
+                        {activeSchoolYear ?
+                          `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` :
                           'Not Available'
                         }
                       </p>
@@ -331,7 +328,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                     <div>
                       <p className="text-sm text-blue-800 font-medium">Important Note</p>
                       <p className="text-sm text-blue-700 mt-1">
-                        Please ensure all documents are ready before starting the enrollment process. 
+                        Please ensure all documents are ready before starting the enrollment process.
                         Incomplete applications may cause delays in processing.
                       </p>
                     </div>
@@ -370,7 +367,7 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
 
       {/* Enrollment Form Modal */}
       {showEnrollmentForm && (
-        <EnrollmentForm 
+        <EnrollmentForm
           isOpen={showEnrollmentForm}
           user={user}
           availableStrands={availableStrands}

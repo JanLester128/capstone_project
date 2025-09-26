@@ -36,21 +36,22 @@ class CoordinatorController extends Controller
      */
     public function enrollmentPage()
     {
-        // Get the active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-        
-        if (!$activeSchoolYear) {
-            return Inertia::render('Faculty/Faculty_Enrollment', [
-                'pendingStudents' => [],
-                'rejectedStudents' => [],
-                'activeSchoolYear' => null
-            ]);
-        }
+        try {
+            // Get the active school year
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return Inertia::render('Faculty/Faculty_Enrollment', [
+                    'pendingStudents' => [],
+                    'rejectedStudents' => [],
+                    'activeSchoolYear' => null
+                ]);
+            }
 
         // Helper to process a student (attach preferences and address)
         $processStudent = function ($student) {
             $preferences = \App\Models\StudentStrandPreference::with('strand')
-                ->where('student_id', $student->id) // use student_personal_info PK
+                ->where('student_id', $student->user_id) // use users.id for strand preferences
                 ->orderBy('preference_order')
                 ->get();
 
@@ -64,20 +65,26 @@ class CoordinatorController extends Controller
         // Build lists by deriving status from enrollments (active school year)
         // Only show students that are NOT yet enrolled (pending/rejected only)
         $studentsAll = Student::with(['user', 'strand', 'section'])->get();
+        
         $pendingStudents = collect();
         $rejectedStudents = collect();
 
         foreach ($studentsAll as $student) {
             $latest = DB::table('enrollments')
-                ->where('student_id', $student->user_id) // enrollments.student_id references users.id
+                ->where('student_id', $student->id) // enrollments.student_id references student_personal_info.id
                 ->where('school_year_id', $activeSchoolYear->id)
                 ->orderByDesc('id')
                 ->first();
-            $status = $latest->status ?? 'pending';
+            
+            // Skip students who haven't submitted any enrollment application
+            if (!$latest) {
+                continue; // Don't show students without enrollment records
+            }
+            
+            $status = $latest->status;
             $processed = $processStudent($student);
             
-            // Only include pending and rejected students in Enrollment Management
-            // Students with 'enrolled' status should appear in Student Assignment tab
+            // Only include students who have submitted enrollment applications
             if ($status === 'rejected') {
                 $rejectedStudents->push($processed);
             } elseif ($status === 'pending' || $status === 'approved') {
@@ -87,14 +94,25 @@ class CoordinatorController extends Controller
             // Skip students with 'enrolled' status - they belong in Student Assignment
         }
 
-        return Inertia::render('Faculty/Faculty_Enrollment', [
-            'pendingStudents' => $pendingStudents,
-            'rejectedStudents' => $rejectedStudents,
-            'activeSchoolYear' => $activeSchoolYear,
-            'auth' => [
-                'user' => Auth::user()
-            ]
-        ]);
+            return Inertia::render('Faculty/Faculty_Enrollment', [
+                'pendingStudents' => $pendingStudents,
+                'rejectedStudents' => $rejectedStudents,
+                'activeSchoolYear' => $activeSchoolYear,
+                'auth' => [
+                    'user' => Auth::user()
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in enrollmentPage: ' . $e->getMessage());
+            return Inertia::render('Faculty/Faculty_Enrollment', [
+                'pendingStudents' => [],
+                'rejectedStudents' => [],
+                'activeSchoolYear' => null,
+                'auth' => [
+                    'user' => Auth::user()
+                ]
+            ]);
+        }
     }
 
     /**

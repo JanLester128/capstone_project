@@ -176,6 +176,9 @@ class AuthController extends Controller
 
             // Manually authenticate the user
             Auth::login($user);
+            
+            // Update last login time
+            $user->update(['last_login_at' => now()]);
 
             // Check account status
             if (isset($user->is_disabled) && $user->is_disabled) {
@@ -420,7 +423,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Student registration.
+     * Student registration with email verification.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
@@ -437,6 +440,21 @@ class AuthController extends Controller
                 'password_confirmation' => 'required|string|same:password',
             ]);
 
+            // Check if email is verified
+            $verifiedCacheKey = "email_verified_{$validated['email']}";
+            $verificationData = Cache::get($verifiedCacheKey);
+
+            if (!$verificationData) {
+                if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Email verification required. Please verify your email address first.',
+                        'error_type' => 'email_not_verified'
+                    ], 400);
+                }
+                return back()->withErrors(['email' => 'Email verification required. Please verify your email address first.'])->withInput();
+            }
+
             // Combine names into full name for the name field
             $fullName = trim($validated['firstname'] . ' ' . ($validated['middlename'] ? $validated['middlename'] . ' ' : '') . $validated['lastname']);
             
@@ -448,6 +466,7 @@ class AuthController extends Controller
                 'email' => $validated['email'],
                 'role' => 'student',
                 'password' => Hash::make($validated['password']),
+                'email_verified_at' => now(), // Mark email as verified
             ]);
 
             Student::create([
@@ -457,16 +476,21 @@ class AuthController extends Controller
                 'section_id' => null,
             ]);
 
+            // Clear verification cache
+            Cache::forget($verifiedCacheKey);
+
+            Log::info("Student registered successfully: {$validated['email']}");
+
             // Check if request expects JSON (from frontend fetch)
             if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Student registered successfully. Please login.',
+                    'message' => 'Registration completed successfully! You can now login with your credentials.',
                     'redirect' => '/login'
                 ]);
             }
 
-            return redirect('/login')->with('success', 'Student registered successfully. Please login.');
+            return redirect('/login')->with('success', 'Registration completed successfully! You can now login with your credentials.');
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             // Check if request expects JSON (from frontend fetch)

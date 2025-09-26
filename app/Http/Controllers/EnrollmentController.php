@@ -61,7 +61,7 @@ class EnrollmentController extends Controller
 
         // Map frontend field names to database field names
         $enrollmentData = [
-            'student_id' => Auth::id(),
+            'student_id' => Auth::id(), // This should be the user ID, which is correct
             'grade_level' => $validated['gradeLevel'],
             'last_school_attended' => 'Previous School', // Default value since not in form
             'last_grade_completed' => $validated['lastGrade'],
@@ -174,7 +174,7 @@ class EnrollmentController extends Controller
     public function approve(Request $request, Enrollment $enrollment)
     {
         $validated = $request->validate([
-            'assigned_strand_id' => 'required|exists:strands,id',
+            'strand_id' => 'required|exists:strands,id',
             'assigned_section_id' => 'required|exists:sections,id',
             'coordinator_notes' => 'nullable|string'
         ]);
@@ -200,7 +200,7 @@ class EnrollmentController extends Controller
         // Update enrollment status
         $enrollment->update([
             'status' => 'approved',
-            'assigned_strand_id' => $validated['assigned_strand_id'],
+            'strand_id' => $validated['strand_id'],
             'assigned_section_id' => $validated['assigned_section_id'],
             'coordinator_id' => Auth::id(),
             'coordinator_notes' => $validated['coordinator_notes'],
@@ -210,7 +210,7 @@ class EnrollmentController extends Controller
         // Create class detail record for the approved student
         ClassDetail::create([
             'student_id' => $enrollment->student_id,
-            'strand_id' => $validated['assigned_strand_id'],
+            'strand_id' => $validated['strand_id'],
             'section_id' => $validated['assigned_section_id'],
             'school_year_id' => $enrollment->school_year_id,
             'coordinator_notes' => $validated['coordinator_notes'],

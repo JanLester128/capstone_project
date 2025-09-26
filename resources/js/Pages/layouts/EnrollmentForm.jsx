@@ -57,7 +57,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
   const [errors, setErrors] = useState({});
   const [uploadedFiles, setUploadedFiles] = useState({
     reportCard: null,
-    image: null,
     psaBirthCertificate: null
   });
   const [showValidation, setShowValidation] = useState(false);
@@ -118,10 +117,11 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         break;
       case 3:
         if (!form.lastGrade) stepErrors.lastGrade = "Last grade completed is required";
+        if (!form.guardianName) stepErrors.guardianName = "Guardian name is required";
+        if (!form.guardianContact) stepErrors.guardianContact = "Guardian contact number is required";
         break;
       case 4:
         if (!uploadedFiles.reportCard) stepErrors.reportCard = "Report card is required";
-        if (!uploadedFiles.image) stepErrors.image = "Student photo is required";
         if (!uploadedFiles.psaBirthCertificate) stepErrors.psaBirthCertificate = "PSA Birth certificate is required";
         break;
     }
@@ -352,7 +352,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             });
             setUploadedFiles({
               reportCard: null,
-              image: null,
               psaBirthCertificate: null
             });
           });
@@ -420,7 +419,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
 
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Guardian Name
+            Guardian Name *
           </label>
           <input
             type="text"
@@ -428,13 +427,20 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             value={form.guardianName || ''}
             onChange={handleChange}
             placeholder="Enter guardian's full name"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianName ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
           />
+          {showValidation && errors.guardianName && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.guardianName}
+            </p>
+          )}
         </div>
 
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Guardian Contact Number
+            Guardian Contact Number *
           </label>
           <input
             type="tel"
@@ -442,8 +448,15 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             value={form.guardianContact || ''}
             onChange={handleChange}
             placeholder="Enter contact number"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianContact ? 'border-red-500 bg-red-50' : 'border-gray-300'
+              }`}
           />
+          {showValidation && errors.guardianContact && (
+            <p className="mt-1 text-sm text-red-600 flex items-center">
+              <FaExclamationTriangle className="mr-1" />
+              {errors.guardianContact}
+            </p>
+          )}
         </div>
 
         {/* Additional Information */}
@@ -580,64 +593,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             <p className="mt-2 text-sm text-red-600 flex items-center">
               <FaExclamationTriangle className="mr-1" />
               {errors.reportCard}
-            </p>
-          )}
-        </div>
-
-        {/* Student Photo Upload */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-3">
-            <FaFileImage className="inline mr-2 text-green-600" />
-            Student Photo *
-          </label>
-
-          {!uploadedFiles.image ? (
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-              <FaUpload className="mx-auto text-4xl text-gray-400 mb-4" />
-              <p className="text-gray-600 mb-4">Click to upload or drag and drop</p>
-              <input
-                type="file"
-                name="image"
-                accept=".jpg,.jpeg,.png"
-                onChange={(e) => handleFileUpload(e, 'image')}
-                className="hidden"
-                id="image"
-              />
-              <label
-                htmlFor="image"
-                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer transition-colors"
-              >
-                <FaUpload className="mr-2" />
-                Choose File
-              </label>
-            </div>
-          ) : (
-            <div className="border border-green-300 bg-green-50 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <FaCheckCircle className="text-green-600 mr-3" />
-                  <div>
-                    <p className="font-medium text-green-800">{uploadedFiles.image.name}</p>
-                    <p className="text-sm text-green-600">
-                      {(uploadedFiles.image.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeFile('image')}
-                  className="text-red-600 hover:text-red-800 transition-colors"
-                >
-                  <FaTimes />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {showValidation && errors.image && (
-            <p className="mt-2 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.image}
             </p>
           )}
         </div>
@@ -1097,24 +1052,27 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-3xl max-w-6xl w-full h-[95vh] overflow-hidden shadow-2xl animate-in fade-in duration-300 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 flex-shrink-0">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-2xl font-bold">Student Enrollment Form</h2>
-              <p className="text-blue-100 mt-1">
-                School Year: {activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 'N/A'}
-              </p>
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+          <div className="relative z-10">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Student Enrollment Form</h2>
+                <p className="text-blue-100 mt-1">
+                  School Year: {activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 'N/A'}
+                </p>
+              </div>
+              <button
+                onClick={onClose}
+                className="text-white hover:text-gray-200 transition-colors p-2 hover:bg-white/20 rounded-lg"
+                disabled={loading}
+              >
+                <FaTimes className="w-6 h-6" />
+              </button>
             </div>
-            <button
-              onClick={onClose}
-              className="text-white hover:text-gray-200 transition-colors p-2 hover:bg-white hover:bg-opacity-20 rounded-lg"
-              disabled={loading}
-            >
-              <FaTimes className="w-6 h-6" />
-            </button>
           </div>
         </div>
 
