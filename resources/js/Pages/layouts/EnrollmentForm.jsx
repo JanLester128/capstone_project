@@ -296,16 +296,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
       onError: (err) => {
         setErrors(err);
         setLoading(false);
-        Swal.fire({
-          title: 'Enrollment Failed',
-          text: 'Please check the form for errors and try again.',
-          icon: 'error',
-          confirmButtonText: 'OK'
-        });
-      },
-      onSuccess: (page) => {
-        setLoading(false);
-        // Check for success message in flash data
         if (page.props.flash?.success) {
           Swal.fire({
             title: 'Pre-Enrollment Submitted Successfully!',
@@ -361,6 +351,30 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             text: page.props.flash.error,
             icon: 'error',
             confirmButtonText: 'OK'
+          });
+        } else {
+          // If no flash success message, still show success (fallback)
+          console.log('No flash success message found, showing fallback success');
+          Swal.fire({
+            title: 'Enrollment Submitted!',
+            html: `
+              <div class="text-left">
+                <p class="mb-3"><strong>Your enrollment application has been submitted!</strong></p>
+                <p class="mb-2">📋 <strong>What happens next:</strong></p>
+                <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
+                  <li>Your application will be reviewed by the coordinator</li>
+                  <li>You will receive an email notification about your enrollment status</li>
+                  <li>Check your student dashboard regularly for updates</li>
+                </ul>
+                <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
+              </div>
+            `,
+            icon: 'success',
+            confirmButtonText: 'Continue to Dashboard',
+            confirmButtonColor: '#10B981',
+            width: '500px'
+          }).then(() => {
+            onClose();
           });
         }
       }

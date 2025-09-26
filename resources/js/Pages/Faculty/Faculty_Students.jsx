@@ -115,6 +115,47 @@ export default function Faculty_Students() {
     return sortDirection === 'asc' ? <FaSortUp /> : <FaSortDown />;
   };
 
+  const handlePopulateClassDetails = async () => {
+    try {
+      const response = await fetch('/faculty/populate-class-details', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        Swal.fire({
+          title: 'Success!',
+          text: data.message,
+          icon: 'success',
+          confirmButtonText: 'OK'
+        }).then(() => {
+          // Refresh the page to show the populated data
+          window.location.reload();
+        });
+      } else {
+        Swal.fire({
+          title: 'Error!',
+          text: data.message || 'Failed to populate class_details table',
+          icon: 'error',
+          confirmButtonText: 'OK'
+        });
+      }
+    } catch (error) {
+      console.error('Error populating class_details:', error);
+      Swal.fire({
+        title: 'Error!',
+        text: 'An error occurred while populating the class_details table',
+        icon: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  };
+
   const filteredStudents = getFilteredStudents();
   const sortedStudents = getSortedStudents(filteredStudents);
 
@@ -149,6 +190,16 @@ export default function Faculty_Students() {
                       <span className="text-lg font-bold text-blue-600">{students.length}</span>
                     </div>
                   </div>
+                  
+                  {/* Populate Class Details Button */}
+                  <button
+                    onClick={handlePopulateClassDetails}
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors duration-200"
+                    title="Populate class_details table with existing enrollment data"
+                  >
+                    <FaCheckCircle className="w-4 h-4" />
+                    <span>Populate Data</span>
+                  </button>
                 </div>
               </div>
             </div>

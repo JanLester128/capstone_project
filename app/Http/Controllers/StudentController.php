@@ -474,49 +474,7 @@ class StudentController extends Controller
         }
     }
 
-    /**
-     * Display student notifications page with enrollment status
-     */
-    public function notifications(Request $request)
-    {
-        $user = $request->user();
-        $student = Student::where('user_id', $user->id)->first();
-
-        if (!$student) {
-            return response()->json(['message' => 'Student record not found.'], 404);
-        }
-
-        // Resolve current enrollment status from enrollments table (active school year)
-        $activeSy = SchoolYear::where('is_active', true)->first();
-        $currentStatus = 'pending';
-        if ($activeSy) {
-            $latest = DB::table('enrollments')
-                ->where('student_id', $student->id)
-                ->where('school_year_id', $activeSy->id)
-                ->orderByDesc('id')
-                ->first();
-            if ($latest) {
-                $currentStatus = $latest->status ?? 'pending';
-            }
-        }
-
-        // Get current class details for enrolled student (if already approved)
-        $classDetails = ClassDetail::with(['strand', 'section', 'schoolYear'])
-            ->where('student_id', $student->id)
-            ->when($currentStatus === 'approved', function ($q) {
-                return $q->where('enrollment_status', 'approved');
-            })
-            ->first();
-
-        return Inertia::render('Student/Student_Notifications', [
-            'student' => $student,
-            'enrollmentStatus' => [
-                'status' => $currentStatus,
-                'strand' => $classDetails?->strand,
-                'section' => $classDetails?->section
-            ]
-        ]);
-    }
+    // Note: Notifications method removed as requested
 
     /**
      * Display student profile page with personal information

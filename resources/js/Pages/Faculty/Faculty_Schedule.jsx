@@ -13,18 +13,15 @@ import {
   FaTable
 } from "react-icons/fa";
 
-export default function FacultySchedule({ classSchedules: initialSchedules = [], user }) {
+export default function FacultySchedule({ schedules: initialSchedules = [], activeSchoolYear, displaySchoolYear, auth }) {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
   const [currentWeek, setCurrentWeek] = useState(0);
   const [viewType, setViewType] = useState("timetable"); 
-  const [schedules, setSchedules] = useState(initialSchedules);
-
-  useEffect(() => {
-    setSchedules(initialSchedules);
-  }, [initialSchedules]);
+  // Use the prop directly instead of local state to prevent infinite loops
+  const schedules = initialSchedules || [];
 
   const formatTime12Hour = (time24) => {
     const [hours, minutes] = time24.split(':');
@@ -264,43 +261,31 @@ export default function FacultySchedule({ classSchedules: initialSchedules = [],
         ) : (
           <div className="space-y-4">
             {weekSchedules.map((schedule) => (
-              <div key={schedule.id} className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-gray-800 mb-2">
-                      {schedule.subject?.name || 'Subject TBA'}
-                    </h3>
-                    <div className="flex items-center gap-4 text-gray-600 mb-3">
-                      <div className="flex items-center gap-2">
-                        <FaClock className="w-4 h-4 text-purple-500" />
-                        <span className="text-sm">{schedule.day_of_week} {formatTime12Hour(schedule.start_time)} - {formatTime12Hour(schedule.end_time)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <FaUsers className="w-4 h-4 text-purple-500" />
-                        <span className="text-sm">{schedule.section?.section_name || 'Section TBA'}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <FaMapMarkerAlt className="w-4 h-4 text-purple-500" />
-                        <span className="text-sm">Room TBA</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                        {schedule.subject?.strand?.name || 'No Strand'}
-                      </span>
-                      <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                        {schedule.semester || '1st Semester'}
-                      </span>
-                    </div>
+              <div key={schedule.id} className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h3 className="text-xl font-bold text-gray-800 mb-3">
+                  {schedule.subject?.name || 'Subject TBA'}
+                </h3>
+                <div className="flex items-center gap-4 text-gray-600 mb-3">
+                  <div className="flex items-center gap-2">
+                    <FaClock className="w-4 h-4 text-purple-500" />
+                    <span className="text-sm">{schedule.day_of_week} {formatTime12Hour(schedule.start_time)} - {formatTime12Hour(schedule.end_time)}</span>
                   </div>
-                  <div className="flex gap-2">
-                    <button className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 text-sm">
-                      View Class
-                    </button>
-                    <button className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 text-sm">
-                      Input Grades
-                    </button>
+                  <div className="flex items-center gap-2">
+                    <FaUsers className="w-4 h-4 text-indigo-500" />
+                    <span className="text-sm">{schedule.section?.section_name || 'Section TBA'}</span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <FaMapMarkerAlt className="w-4 h-4 text-green-500" />
+                    <span className="text-sm">{schedule.room || 'No Room Assigned'}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
+                    {schedule.subject?.strand?.name || 'No Strand'}
+                  </span>
+                  <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                    {schedule.semester || '1st Semester'}
+                  </span>
                 </div>
               </div>
             ))}

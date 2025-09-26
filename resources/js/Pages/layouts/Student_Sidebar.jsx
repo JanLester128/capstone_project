@@ -25,7 +25,7 @@ import {
   FaPalette
 } from "react-icons/fa";
 
-export default function StudentSidebar({ auth, notifications = [], onToggle }) {
+export default function StudentSidebar({ auth, onToggle }) {
   const { url } = usePage();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     // Get initial state from localStorage
@@ -138,15 +138,9 @@ export default function StudentSidebar({ auth, notifications = [], onToggle }) {
       icon: FaCalendarAlt,
       label: 'Enrollment',
       description: 'Course Registration',
-      badge: notifications.filter(n => n.type === 'enrollment').length || null
+      badge: null
     },
-    {
-      path: '/student/notifications',
-      icon: FaBell,
-      label: 'Notifications',
-      description: 'Updates & Alerts',
-      badge: notifications.length || null
-    }
+    // Note: Notifications menu item removed as requested
   ];
 
   // HCI Principle 1: Visibility of system status - Show current page

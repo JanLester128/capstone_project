@@ -31,6 +31,7 @@ class User extends Authenticatable
         'is_disabled',
         'password_changed',
         'password_change_required',
+        'last_login_at',
     ];
 
     /**
@@ -55,6 +56,7 @@ class User extends Authenticatable
         'is_coordinator' => 'boolean',
         'is_disabled' => 'boolean',
         'password_change_required' => 'boolean',
+        'last_login_at' => 'datetime',
     ];
 
     // Relationships for role-based authentication system

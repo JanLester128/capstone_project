@@ -1231,7 +1231,7 @@ class ScheduleController extends Controller
     }
 
     /**
-     * Bulk create schedules to prevent multiple individual notifications
+     * Bulk create schedules
      */
     public function bulkCreate(Request $request)
     {
@@ -1245,11 +1245,11 @@ class ScheduleController extends Controller
                 'schedules.*.start_time' => 'required|date_format:H:i',
                 'schedules.*.end_time' => 'required|date_format:H:i',
                 'schedules.*.duration' => 'required|integer|min:1',
-                'suppress_individual_notifications' => 'boolean'
+                // Note: notifications parameter removed
             ]);
 
             $schedules = $request->input('schedules');
-            $suppressNotifications = $request->input('suppress_individual_notifications', false);
+            // Note: notifications suppression removed
             
             // Get current academic year
             $currentAcademicYear = SchoolYear::getCurrentAcademicYear() ?? SchoolYear::where('is_active', true)->first();

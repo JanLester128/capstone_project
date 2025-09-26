@@ -401,7 +401,7 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
               required
             >
               <option value="">Select semester type</option>
-              <option value="Full Academic Year">📚 Full Academic Year (Philippine SHS)</option>
+              <option value="Full Academic Year">📚 Full Academic Year</option>
               <option value="Summer">☀️ Summer (For Failed Subjects)</option>
             </select>
             

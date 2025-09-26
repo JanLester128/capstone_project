@@ -32,11 +32,11 @@ return new class extends Migration
 
         // Update enrollments table for full-year enrollment
         Schema::table('enrollments', function (Blueprint $table) {
-            // Add grade level tracking for progression
-            $table->integer('enrolled_grade_level')->default(11)->after('strand_id');
+            // Add grade level tracking for progression (intended grade level for application)
+            $table->integer('intended_grade_level')->default(11)->after('strand_id');
             
             // Add academic year completion tracking
-            $table->boolean('first_semester_completed')->default(false)->after('enrolled_grade_level');
+            $table->boolean('first_semester_completed')->default(false)->after('intended_grade_level');
             $table->boolean('second_semester_completed')->default(false)->after('first_semester_completed');
             $table->boolean('academic_year_completed')->default(false)->after('second_semester_completed');
             
@@ -49,31 +49,7 @@ return new class extends Migration
             $table->foreign('progressed_by')->references('id')->on('users')->onDelete('set null');
         });
 
-        // Create subjects_schedule table for full-year subject scheduling
-        Schema::create('subjects_schedule', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('subject_id');
-            $table->unsignedBigInteger('section_id');
-            $table->unsignedBigInteger('school_year_id');
-            $table->enum('semester', ['1st', '2nd', 'both'])->default('both');
-            $table->enum('quarter', ['1st', '2nd', '3rd', '4th', 'all'])->default('all');
-            $table->string('day_of_week');
-            $table->time('start_time');
-            $table->time('end_time');
-            $table->string('room')->nullable();
-            $table->unsignedBigInteger('faculty_id')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamps();
-
-            // Foreign keys
-            $table->foreign('subject_id')->references('id')->on('subjects')->onDelete('cascade');
-            $table->foreign('section_id')->references('id')->on('sections')->onDelete('cascade');
-            $table->foreign('school_year_id')->references('id')->on('school_years')->onDelete('cascade');
-            $table->foreign('faculty_id')->references('id')->on('users')->onDelete('set null');
-
-            // Unique constraint to prevent scheduling conflicts
-            $table->unique(['section_id', 'day_of_week', 'start_time', 'end_time', 'semester'], 'unique_schedule_slot');
-        });
+        // Note: subjects_schedule table creation removed as requested
 
         // Create enrollment_subjects table for tracking student-subject enrollment
         Schema::create('enrollment_subjects', function (Blueprint $table) {
@@ -105,13 +81,13 @@ return new class extends Migration
     {
         // Drop new tables
         Schema::dropIfExists('enrollment_subjects');
-        Schema::dropIfExists('subjects_schedule');
+        // Note: subjects_schedule table drop removed as table creation was removed
 
         // Remove columns from enrollments
         Schema::table('enrollments', function (Blueprint $table) {
             $table->dropForeign(['progressed_by']);
             $table->dropColumn([
-                'enrolled_grade_level',
+                'intended_grade_level',
                 'first_semester_completed',
                 'second_semester_completed', 
                 'academic_year_completed',

@@ -46,7 +46,7 @@ const Sidebar = ({ onToggle }) => {
     isOnline: navigator.onLine,
     lastSync: new Date().toLocaleTimeString(),
     pendingActions: 0,
-    notifications: 0,
+    // Note: notifications removed
     serverHealth: 'healthy',
     lastActivity: new Date().toLocaleTimeString()
   });
@@ -762,9 +762,7 @@ const Sidebar = ({ onToggle }) => {
               <div className={`w-3 h-3 rounded-full ${
                 systemStatus.isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'
               }`} title={systemStatus.isOnline ? 'System Online' : 'System Offline'}></div>
-              {systemStatus.notifications > 0 && (
-                <div className="w-2 h-2 bg-orange-500 rounded-full animate-bounce" title={`${systemStatus.notifications} notifications`}></div>
-              )}
+              {/* Note: notifications indicator removed */}
             </div>
           )}
         </div>

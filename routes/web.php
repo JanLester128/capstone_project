@@ -297,7 +297,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->name('faculty.schedule');
 
         // Faculty Classes
-        Route::get('/classes', fn() => Inertia::render('Faculty/Faculty_Classes'))
+        Route::get('/classes', [App\Http\Controllers\FacultyController::class, 'classesPage'])
             ->name('faculty.classes');
 
         // Faculty Grade Input
@@ -315,6 +315,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Faculty Students/Assignment
         Route::get('/students', [App\Http\Controllers\FacultyController::class, 'studentsPage'])
             ->name('faculty.students');
+            
+        // Manual populate class_details table (for initial setup)
+        Route::post('/populate-class-details', [App\Http\Controllers\FacultyController::class, 'populateClassDetails'])
+            ->name('faculty.populate-class-details');
 
         // Coordinator functionality within Faculty routes
         Route::get('/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])
@@ -402,9 +406,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/student/{id}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule'])
             ->name('student.schedule.data');
         
-        // Student notifications route
-        Route::get('/student/notifications', [App\Http\Controllers\StudentController::class, 'getNotifications'])
-            ->name('student.notifications.data');
+        // Note: Student notifications route removed as requested
     });
 
 });

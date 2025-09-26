@@ -165,8 +165,8 @@ export default function ScheduleManagement() {
     const availableSubjects = getFilteredSubjects();
 
     // Get filtered subjects for bulk assignment
-    const getBulkFilteredSubjects = (sectionId, gradeLevel) => {
-        console.log('getBulkFilteredSubjects called with:', { sectionId, gradeLevel });
+    const getBulkFilteredSubjects = (sectionId, gradeLevel, currentAssignmentId = null) => {
+        console.log('getBulkFilteredSubjects called with:', { sectionId, gradeLevel, currentAssignmentId });
         
         if (!sectionId || !gradeLevel) {
             console.log('Missing sectionId or gradeLevel, returning empty array');
@@ -176,19 +176,34 @@ export default function ScheduleManagement() {
         const selectedSection = sections?.find(s => s.id == sectionId);
         console.log('Selected section:', selectedSection);
         
+        // Get subjects already selected in OTHER bulk assignments (exclude current one)
+        const selectedSubjectsInBulk = bulkAssignments
+            .filter(assignment => 
+                assignment.subject_id && 
+                assignment.id !== currentAssignmentId // Exclude current assignment
+            )
+            .map(assignment => assignment.subject_id);
+        
         const filteredSubjects = subjects?.filter(subject => {
             const matchesGradeLevel = subject.year_level == gradeLevel || subject.grade_level == gradeLevel;
             const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
             
-            // Check if subject is already assigned to this section
+            // Check if subject matches semester filter
+            const matchesSemester = semesterFilter === 'all' || 
+                subject.semester?.toString() === semesterFilter;
+            
+            // Check if subject is already assigned to this section in existing schedules
             const isAlreadyAssigned = schedules.some(schedule => 
                 schedule.section_id == sectionId && 
                 schedule.subject_id == subject.id
             );
             
-            console.log(`Subject ${subject.name}: gradeMatch=${matchesGradeLevel}, strandMatch=${matchesStrand}, alreadyAssigned=${isAlreadyAssigned}`);
+            // Check if subject is already selected in other bulk assignments
+            const isSelectedInBulk = selectedSubjectsInBulk.includes(subject.id.toString());
             
-            return matchesGradeLevel && matchesStrand && !isAlreadyAssigned;
+            console.log(`Subject ${subject.name}: gradeMatch=${matchesGradeLevel}, strandMatch=${matchesStrand}, semesterMatch=${matchesSemester}, alreadyAssigned=${isAlreadyAssigned}, selectedInBulk=${isSelectedInBulk}`);
+            
+            return matchesGradeLevel && matchesStrand && matchesSemester && !isAlreadyAssigned && !isSelectedInBulk;
         }) || [];
         
         console.log('Filtered subjects:', filteredSubjects.length);
@@ -1255,8 +1270,8 @@ export default function ScheduleManagement() {
                                             aria-label="Filter by semester"
                                         >
                                             <option value="all">All Semesters</option>
-                                            <option value="1st Semester">1st Semester</option>
-                                            <option value="2nd Semester">2nd Semester</option>
+                                            <option value="1">1st Semester</option>
+                                            <option value="2">2nd Semester</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1592,16 +1607,6 @@ export default function ScheduleManagement() {
                                             </li>
                                         </ol>
                                     </div>
-                                    
-                                    <button
-                                        onClick={() => setShowModal(true)}
-                                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 flex items-center gap-3 mx-auto font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-4 focus:ring-purple-300 focus:outline-none"
-                                        aria-label="Create your first class schedule"
-                                    >
-                                        <FaPlus className="w-5 h-5" />
-                                        Create Your First Schedule
-                                        <span className="text-purple-200">→</span>
-                                    </button>
                                 </div>
                             </div>
                         )}
@@ -2256,7 +2261,7 @@ export default function ScheduleManagement() {
                                                                     required
                                                                 >
                                                                     <option value="">Select Subject</option>
-                                                                    {getBulkFilteredSubjects(assignment.section_id, assignment.grade_level).map((subject) => (
+                                                                    {getBulkFilteredSubjects(assignment.section_id, assignment.grade_level, assignment.id).map((subject) => (
                                                                         <option key={subject.id} value={subject.id}>
                                                                             [{subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}] {subject.code} - {subject.name}
                                                                         </option>

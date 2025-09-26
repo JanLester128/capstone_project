@@ -11,24 +11,18 @@ import {
   FaFilter
 } from "react-icons/fa";
 
-export default function FacultyClasses() {
+export default function FacultyClasses({ classes = [], activeSchoolYear, displaySchoolYear, auth }) {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSemester, setSelectedSemester] = useState("current");
-  const [classes, setClasses] = useState([]);
-
-  useEffect(() => {
-    // TODO: Replace with actual API calls
-    // Fetch faculty classes data
-  }, []);
 
   const filteredClasses = classes.filter(cls =>
-    cls.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cls.section.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cls.strand.toLowerCase().includes(searchTerm.toLowerCase())
+    (cls.subject?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (cls.section?.section_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (cls.strand?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleViewStudents = (classId) => {
@@ -85,56 +79,53 @@ export default function FacultyClasses() {
           </div>
         </div>
 
-        {/* Classes Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Classes List View */}
+        <div className="space-y-4">
           {filteredClasses.map((cls) => (
-            <div key={cls.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div key={cls.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200">
               <div className="p-6">
-                <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <h3 className="text-xl font-bold text-gray-800 mb-1">{cls.subject}</h3>
-                    <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-xl font-bold text-gray-800 mb-2">{cls.subject?.name || 'Unknown Subject'}</h3>
+                    
+                    <div className="flex items-center gap-4 text-sm text-gray-600 mb-3">
+                      <div className="flex items-center gap-2">
+                        <FaClock className="w-4 h-4 text-purple-500" />
+                        <span>{cls.day_of_week} {cls.start_time} - {cls.end_time}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FaGraduationCap className="w-4 h-4 text-indigo-500" />
+                        <span>{cls.strand?.name || 'No Strand'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FaMapMarkerAlt className="w-4 h-4 text-green-500" />
+                        <span>{cls.room || 'No Room Assigned'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
                       <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                        {cls.section}
+                        {cls.section?.section_name || 'No Section'}
                       </span>
-                      <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">
-                        {cls.strand}
+                      <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                        {cls.student_count || 0} students
                       </span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold text-purple-600">{cls.students}</div>
-                    <div className="text-sm text-gray-600">students</div>
-                  </div>
-                </div>
 
-                <div className="space-y-3 mb-6">
-                  <div className="flex items-center gap-3 text-gray-600">
-                    <FaClock className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm">{cls.schedule}</span>
+                  <div className="flex gap-3 ml-6">
+                    <button
+                      onClick={() => handleViewStudents(cls.id)}
+                      className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                    >
+                      <FaUsers className="w-4 h-4" />
+                      View Class
+                    </button>
+                    <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                      <FaGraduationCap className="w-4 h-4" />
+                      Input Grades
+                    </button>
                   </div>
-                  <div className="flex items-center gap-3 text-gray-600">
-                    <FaMapMarkerAlt className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm">{cls.room}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-gray-600">
-                    <FaCalendarAlt className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm">{cls.semester}</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleViewStudents(cls.id)}
-                    className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-2 px-4 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 flex items-center justify-center gap-2"
-                  >
-                    <FaUsers className="w-4 h-4" />
-                    View Students
-                  </button>
-                  <button className="flex-1 bg-gradient-to-r from-green-600 to-teal-600 text-white py-2 px-4 rounded-lg hover:from-green-700 hover:to-teal-700 transition-all duration-200 flex items-center justify-center gap-2">
-                    <FaGraduationCap className="w-4 h-4" />
-                    Input Grades
-                  </button>
                 </div>
               </div>
             </div>
@@ -161,13 +152,13 @@ export default function FacultyClasses() {
             </div>
             <div className="text-center p-4 bg-blue-50 rounded-xl">
               <div className="text-2xl font-bold text-blue-600">
-                {classes.reduce((sum, cls) => sum + cls.students, 0)}
+                {classes.reduce((sum, cls) => sum + (cls.student_count || 0), 0)}
               </div>
               <div className="text-sm text-gray-600">Total Students</div>
             </div>
             <div className="text-center p-4 bg-green-50 rounded-xl">
               <div className="text-2xl font-bold text-green-600">
-                {Math.round(classes.reduce((sum, cls) => sum + cls.students, 0) / classes.length)}
+                {classes.length > 0 ? Math.round(classes.reduce((sum, cls) => sum + (cls.student_count || 0), 0) / classes.length) : 0}
               </div>
               <div className="text-sm text-gray-600">Avg per Class</div>
             </div>

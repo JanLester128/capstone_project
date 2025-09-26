@@ -1271,20 +1271,71 @@ class RegistrarController extends Controller
     {
         // Get all faculty and coordinators with session information
         $teachers = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id', 'is_disabled', 'updated_at')
+            ->select('id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id', 'is_disabled', 'updated_at', 'last_login_at')
             ->with('assignedStrand:id,name,code')
             ->orderBy('lastname')
             ->get()
             ->map(function ($user) {
-                // Check if user has active session (within last 5 minutes)
+                // Check if user has active session by looking at sessions table
                 $isOnline = false;
-                if ($user->updated_at) {
-                    $lastActivity = \Carbon\Carbon::parse($user->updated_at);
-                    $isOnline = $lastActivity->diffInMinutes(now()) <= 5;
-                }
+                $lastLoginAt = null;
                 
-                // Use updated_at as fallback for last activity
-                $lastLoginAt = $user->updated_at;
+                // Use last_login_at as primary source for last activity
+                $lastLoginAt = $user->last_login_at;
+                
+                try {
+                    // Check for active sessions in the last 15 minutes
+                    $activeSessionsCount = DB::table('sessions')
+                        ->where('user_id', $user->id)
+                        ->where('last_activity', '>', now()->subMinutes(15)->timestamp)
+                        ->count();
+                    
+                    // Get the most recent session activity
+                    $lastSession = DB::table('sessions')
+                        ->where('user_id', $user->id)
+                        ->orderBy('last_activity', 'desc')
+                        ->first();
+                    
+                    // Determine online status based on active sessions OR recent login
+                    $sessionBasedOnline = $activeSessionsCount > 0;
+                    $recentLogin = false;
+                    
+                    if ($user->last_login_at) {
+                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
+                        $recentLogin = $loginTime->diffInMinutes(now()) <= 15;
+                    }
+                    
+                    $isOnline = $sessionBasedOnline || $recentLogin;
+                    
+                    // Use session activity if more recent than last_login_at
+                    if ($lastSession && $user->last_login_at) {
+                        $sessionTime = \Carbon\Carbon::createFromTimestamp($lastSession->last_activity);
+                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
+                        
+                        if ($sessionTime->gt($loginTime)) {
+                            $lastLoginAt = $sessionTime;
+                        }
+                    } elseif ($lastSession && !$user->last_login_at) {
+                        $lastLoginAt = \Carbon\Carbon::createFromTimestamp($lastSession->last_activity);
+                    }
+                    
+                } catch (\Exception $e) {
+                    // Fallback to last_login_at only
+                    Log::warning('Sessions table not accessible, using last_login_at for user ' . $user->id . ': ' . $e->getMessage());
+                    
+                    if ($user->last_login_at) {
+                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
+                        $isOnline = $loginTime->diffInMinutes(now()) <= 15;
+                        $lastLoginAt = $user->last_login_at;
+                    } else {
+                        // Final fallback to updated_at
+                        $lastLoginAt = $user->updated_at;
+                        if ($user->updated_at) {
+                            $lastActivity = \Carbon\Carbon::parse($user->updated_at);
+                            $isOnline = $lastActivity->diffInMinutes(now()) <= 15;
+                        }
+                    }
+                }
                 
                 return [
                     'id' => $user->id,

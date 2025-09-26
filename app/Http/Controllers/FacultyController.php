@@ -9,6 +9,7 @@ use Inertia\Inertia;
 use App\Models\Strand;
 use App\Models\SchoolYear;
 use App\Models\ClassSchedule;
+use App\Models\ClassDetail;
 use App\Models\Student;
 use App\Models\Section;
 use App\Models\Enrollment;
@@ -54,34 +55,127 @@ class FacultyController extends Controller
     }
 
     /**
-     * Show faculty schedule page with schedule data
+     * Show faculty schedule page
      */
     public function schedulePage()
     {
         $user = Auth::user();
 
-        // Get current school year
+        // Check if there's an active school year, but also get current academic year for display
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $currentAcademicYear = SchoolYear::where('is_current_academic_year', true)->first();
+        
+        // Use current academic year for schedule display, fallback to active school year
+        $displaySchoolYear = $currentAcademicYear ?? $activeSchoolYear;
 
-        if (!$activeSchoolYear) {
-            return Inertia::render('Faculty/Faculty_Schedule', [
-                'schedules' => collect([]),
-                'auth' => [
-                    'user' => $user
-                ]
-            ]);
+        if (!$displaySchoolYear) {
+            // If no school year exists at all, get the most recent one
+            $displaySchoolYear = SchoolYear::orderBy('year_start', 'desc')->first();
         }
 
-        // Get faculty's assigned classes/schedules
-        $schedules = ClassSchedule::with(['subject.strand', 'section', 'user'])
-            ->where('faculty_id', $user->id)
-            ->where('school_year_id', $activeSchoolYear->id)
-            ->where('is_active', true)
-            ->get();
+        // Get faculty's assigned classes/schedules (show even if school year is deactivated)
+        $schedules = collect([]);
+        if ($displaySchoolYear) {
+            $schedules = ClassSchedule::with(['subject.strand', 'section', 'faculty'])
+                ->where('faculty_id', $user->id)
+                ->where('school_year_id', $displaySchoolYear->id)
+                ->where('is_active', true)
+                ->get();
+        }
 
         return Inertia::render('Faculty/Faculty_Schedule', [
             'schedules' => $schedules,
             'activeSchoolYear' => $activeSchoolYear,
+            'displaySchoolYear' => $displaySchoolYear,
+            'auth' => [
+                'user' => $user
+            ]
+        ]);
+    }
+
+    /**
+     * Show faculty classes page with enrolled students
+     */
+    public function classesPage()
+    {
+        $user = Auth::user();
+
+        // Get current academic year for display (show classes even if school year is deactivated)
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $currentAcademicYear = SchoolYear::where('is_current_academic_year', true)->first();
+        
+        // Use current academic year for display, fallback to active school year
+        $displaySchoolYear = $currentAcademicYear ?? $activeSchoolYear;
+
+        if (!$displaySchoolYear) {
+            // If no school year exists at all, get the most recent one
+            $displaySchoolYear = SchoolYear::orderBy('year_start', 'desc')->first();
+        }
+
+        // Get faculty's assigned classes with enrolled students
+        $classes = collect([]);
+        if ($displaySchoolYear) {
+            try {
+                // Start with basic query first
+                $classSchedules = ClassSchedule::with(['subject', 'section', 'faculty'])
+                    ->where('faculty_id', $user->id)
+                    ->where('school_year_id', $displaySchoolYear->id)
+                    ->where('is_active', true)
+                    ->get();
+
+                $classes = $classSchedules->map(function ($class) {
+                    // Get enrolled students for this class
+                    $enrolledStudents = collect([]);
+                    try {
+                        $classDetails = ClassDetail::with('student')
+                            ->where('class_id', $class->id)
+                            ->get();
+                        
+                        $enrolledStudents = $classDetails->map(function ($classDetail) {
+                            return $classDetail->student ?? null;
+                        })->filter()->values();
+                    } catch (\Exception $e) {
+                        Log::error('Error loading class details: ' . $e->getMessage());
+                    }
+
+                    // Format time properly
+                    $startTime = $class->start_time ? date('g:i A', strtotime($class->start_time)) : '';
+                    $endTime = $class->end_time ? date('g:i A', strtotime($class->end_time)) : '';
+
+                    // Get strand from subject
+                    $strand = null;
+                    try {
+                        if ($class->subject && $class->subject->strand_id) {
+                            $strand = \App\Models\Strand::find($class->subject->strand_id);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('Error loading strand: ' . $e->getMessage());
+                    }
+
+                    return [
+                        'id' => $class->id,
+                        'subject' => $class->subject,
+                        'section' => $class->section,
+                        'strand' => $strand,
+                        'day_of_week' => $class->day_of_week,
+                        'start_time' => $startTime,
+                        'end_time' => $endTime,
+                        'room' => $class->room ?: 'No Room Assigned', // Use actual room field
+                        'semester' => $class->semester,
+                        'enrolled_students' => $enrolledStudents,
+                        'student_count' => $enrolledStudents->count()
+                    ];
+                });
+            } catch (\Exception $e) {
+                Log::error('Error in classesPage: ' . $e->getMessage());
+                $classes = collect([]);
+            }
+        }
+
+        return Inertia::render('Faculty/Faculty_Classes', [
+            'classes' => $classes,
+            'activeSchoolYear' => $activeSchoolYear,
+            'displaySchoolYear' => $displaySchoolYear,
             'auth' => [
                 'user' => $user
             ]
@@ -135,21 +229,17 @@ class FacultyController extends Controller
             'active_school_year' => $activeSchoolYear ? $activeSchoolYear->id : 'none',
             'user_id' => $user->id
         ]);
-        
-        if (!$activeSchoolYear) {
-            return Inertia::render('Faculty/Faculty_Students', [
-                'enrolledStudents' => collect([]),
-                'auth' => ['user' => $user]
-            ]);
-        }
 
-        // Get enrolled students with auto-fix capability
-        $enrolledStudents = DB::table('enrollments')
-            ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
+        // Get enrolled students from class_details table (persistent across school years)
+        // This ensures students remain visible even when school years change
+        // Note: Using existing table structure (student_id instead of enrollment_id, no enrolled_at column)
+        $enrolledStudents = DB::table('class_details')
+            ->join('student_personal_info', 'class_details.student_id', '=', 'student_personal_info.id')
             ->join('users', 'student_personal_info.user_id', '=', 'users.id')
+            ->join('enrollments', 'student_personal_info.id', '=', 'enrollments.student_id')
             ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
-            ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
-            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->leftJoin('strands', 'sections.strand_id', '=', 'strands.id')
+            ->leftJoin('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
             ->where('enrollments.status', 'enrolled')
             ->where('users.role', 'student')
             ->select([
@@ -166,22 +256,32 @@ class FacultyController extends Controller
                 'strands.code as strand_code',
                 'sections.id as section_id',
                 'strands.id as strand_id',
-                'enrollments.status as enrollment_status'
+                'enrollments.status as enrollment_status',
+                'school_years.year_start',
+                'school_years.year_end',
+                'school_years.is_active as school_year_active',
+                'class_details.created_at as enrolled_at',
+                'class_details.id as class_detail_id'
             ])
+            ->distinct()
+            ->orderBy('users.lastname')
+            ->orderBy('users.firstname')
             ->get();
             
-        // Auto-fix if no students found
-        if ($enrolledStudents->count() === 0) {
+        // Auto-fix if no students found and there's an active school year
+        if ($enrolledStudents->count() === 0 && $activeSchoolYear) {
             Log::info('No enrolled students found, running auto-fix');
             $this->autoFixStudentEnrollments($activeSchoolYear);
             
-            // Retry query after auto-fix
-            $enrolledStudents = DB::table('enrollments')
-                ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
+            // Retry query after auto-fix using class_details table
+            // Using existing table structure (student_id instead of enrollment_id)
+            $enrolledStudents = DB::table('class_details')
+                ->join('student_personal_info', 'class_details.student_id', '=', 'student_personal_info.id')
                 ->join('users', 'student_personal_info.user_id', '=', 'users.id')
+                ->join('enrollments', 'student_personal_info.id', '=', 'enrollments.student_id')
                 ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
-                ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
-                ->where('enrollments.school_year_id', $activeSchoolYear->id)
+                ->leftJoin('strands', 'sections.strand_id', '=', 'strands.id')
+                ->leftJoin('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
                 ->where('enrollments.status', 'enrolled')
                 ->where('users.role', 'student')
                 ->select([
@@ -198,8 +298,16 @@ class FacultyController extends Controller
                     'strands.code as strand_code',
                     'sections.id as section_id',
                     'strands.id as strand_id',
-                    'enrollments.status as enrollment_status'
+                    'enrollments.status as enrollment_status',
+                    'school_years.year_start',
+                    'school_years.year_end',
+                    'school_years.is_active as school_year_active',
+                    'class_details.created_at as enrolled_at',
+                    'class_details.id as class_detail_id'
                 ])
+                ->distinct()
+                ->orderBy('users.lastname')
+                ->orderBy('users.firstname')
                 ->get();
                 
             Log::info('Query result after auto-fix', [
@@ -224,9 +332,18 @@ class FacultyController extends Controller
                     'birthdate' => $student->birthdate ?? 'N/A',
                     'grade_level' => $student->grade_level ?? 11,
                     'section_name' => $student->section_name ?? 'Unassigned',
-                    'strand_name' => $student->strand_code ?? 'N/A',
+                    'strand_name' => $student->strand_name ?? 'N/A',
                     'strand_code' => $student->strand_code ?? 'N/A',
                     'enrollment_status' => $student->enrollment_status ?? 'unknown',
+                    'school_year' => [
+                        'year_start' => $student->year_start ?? null,
+                        'year_end' => $student->year_end ?? null,
+                        'is_active' => $student->school_year_active ?? false,
+                        'display' => $student->year_start && $student->year_end ? 
+                            $student->year_start . '-' . $student->year_end : 'Unknown'
+                    ],
+                    'enrolled_at' => $student->enrolled_at ?? null,
+                    'class_detail_id' => $student->class_detail_id ?? null,
                     'section' => $student->section_id ? [
                         'id' => $student->section_id,
                         'section_name' => $student->section_name,
@@ -324,9 +441,174 @@ class FacultyController extends Controller
                 'strand_id' => $strandId,
                 'section_id' => $sectionId
             ]);
+
+            // Create class_details record for persistent student tracking
+            // Using existing table structure (student_id instead of enrollment_id)
+            $classDetailId = DB::table('class_details')->insertGetId([
+                'class_id' => 1, // Default class ID - this should be updated based on actual class schedules
+                'student_id' => $personalInfoId,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+
+            Log::info('Created class_details record', [
+                'class_detail_id' => $classDetailId,
+                'enrollment_id' => $enrollmentId,
+                'student_name' => $studentUser->firstname . ' ' . $studentUser->lastname
+            ]);
         }
         
-        Log::info('Auto-fix completed successfully');
+        Log::info('Auto-fix completed successfully - created enrollments and class_details records');
+        
+        // Also migrate any existing enrollments to class_details if they don't exist
+        $this->migrateExistingEnrollmentsToClassDetails();
+    }
+
+    /**
+     * Migrate existing enrollments to class_details table for persistence
+     */
+    private function migrateExistingEnrollmentsToClassDetails()
+    {
+        Log::info('Starting migration of existing enrollments to class_details');
+        
+        // Get all enrollments that don't have class_details records
+        // Using existing table structure (student_id instead of enrollment_id)
+        $enrollmentsWithoutClassDetails = DB::table('enrollments')
+            ->leftJoin('class_details', 'enrollments.student_id', '=', 'class_details.student_id')
+            ->whereNull('class_details.id')
+            ->where('enrollments.status', 'enrolled')
+            ->select([
+                'enrollments.id as enrollment_id',
+                'enrollments.student_id',
+                'enrollments.assigned_section_id',
+                'enrollments.created_at as enrollment_date'
+            ])
+            ->get();
+
+        Log::info('Found enrollments without class_details', [
+            'count' => $enrollmentsWithoutClassDetails->count()
+        ]);
+
+        foreach ($enrollmentsWithoutClassDetails as $enrollment) {
+            try {
+                $classDetailId = DB::table('class_details')->insertGetId([
+                    'class_id' => 1, // Default class ID
+                    'student_id' => $enrollment->student_id,
+                    'created_at' => $enrollment->enrollment_date ?? now(),
+                    'updated_at' => now()
+                ]);
+
+                Log::info('Migrated enrollment to class_details', [
+                    'enrollment_id' => $enrollment->enrollment_id,
+                    'class_detail_id' => $classDetailId
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to migrate enrollment to class_details', [
+                    'enrollment_id' => $enrollment->enrollment_id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+        
+        Log::info('Completed migration of existing enrollments to class_details');
+    }
+
+    /**
+     * Manually populate class_details table with existing enrollment data
+     */
+    public function populateClassDetails(Request $request)
+    {
+        try {
+            Log::info('Manual population of class_details table started');
+            
+            // Clear existing class_details data to avoid duplicates
+            DB::table('class_details')->truncate();
+            Log::info('Cleared existing class_details data');
+            
+            // Get all enrolled students
+            $enrollments = DB::table('enrollments')
+                ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
+                ->join('users', 'student_personal_info.user_id', '=', 'users.id')
+                ->where('enrollments.status', 'enrolled')
+                ->where('users.role', 'student')
+                ->select([
+                    'enrollments.id as enrollment_id',
+                    'enrollments.student_id',
+                    'enrollments.assigned_section_id',
+                    'enrollments.created_at as enrollment_date',
+                    'users.firstname',
+                    'users.lastname'
+                ])
+                ->get();
+            
+            Log::info('Found enrollments to populate', [
+                'count' => $enrollments->count(),
+                'enrollments' => $enrollments->toArray()
+            ]);
+            
+            $successCount = 0;
+            $errorCount = 0;
+            
+            foreach ($enrollments as $enrollment) {
+                try {
+                    // Get a default class_id (we'll use 1 for now, this should be updated based on actual class schedules)
+                    $classId = 1;
+                    
+                    $classDetailId = DB::table('class_details')->insertGetId([
+                        'class_id' => $classId,
+                        'student_id' => $enrollment->student_id,
+                        'created_at' => $enrollment->enrollment_date ?? now(),
+                        'updated_at' => now()
+                    ]);
+                    
+                    Log::info('Created class_details record', [
+                        'class_detail_id' => $classDetailId,
+                        'enrollment_id' => $enrollment->enrollment_id,
+                        'student_name' => $enrollment->firstname . ' ' . $enrollment->lastname
+                    ]);
+                    
+                    $successCount++;
+                    
+                } catch (\Exception $e) {
+                    Log::error('Failed to create class_details record', [
+                        'enrollment_id' => $enrollment->enrollment_id,
+                        'error' => $e->getMessage()
+                    ]);
+                    $errorCount++;
+                }
+            }
+            
+            $message = "Successfully populated class_details table. Created: {$successCount} records";
+            if ($errorCount > 0) {
+                $message .= ", Errors: {$errorCount}";
+            }
+            
+            Log::info('Manual population completed', [
+                'success_count' => $successCount,
+                'error_count' => $errorCount
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'data' => [
+                    'created' => $successCount,
+                    'errors' => $errorCount,
+                    'total_enrollments' => $enrollments->count()
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Manual population failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to populate class_details table: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

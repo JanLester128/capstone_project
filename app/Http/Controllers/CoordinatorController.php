@@ -406,24 +406,7 @@ class CoordinatorController extends Controller
             }
         }
 
-        // Store notification in database
-        DB::table('notifications')->insert([
-            'student_id' => $student->id,
-            'type' => 'enrollment',
-            'status' => 'approved',
-            'title' => 'Pre-Enrollment Approved!',
-            'message' => "Congratulations! Your pre-enrollment has been approved. Assigned Strand: {$strand->name}. " . 
-                        ($validated['coordinator_notes'] ? "Coordinator Notes: {$validated['coordinator_notes']}" : ''),
-            'priority' => 'high',
-            'action_required' => true,
-            'details' => json_encode([
-                'assignedStrand' => $strand->name,
-                'coordinatorNotes' => $validated['coordinator_notes'],
-                'reviewedAt' => now()->toISOString()
-            ]),
-            'created_at' => now(),
-            'updated_at' => now()
-        ]);
+        // Note: Notification system removed as requested
 
         // Send approval notification email
         $this->sendEnrollmentNotification($student, 'approved');
