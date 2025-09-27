@@ -23,11 +23,8 @@ use App\Http\Controllers\CoordinatorController;
 |--------------------------------------------------------------------------
 */
 
-// Root route - Check authentication and redirect accordingly
-Route::get('/', [AuthController::class, 'handleRootAccess'])->name('root');
-
-// Authentication routes
-Route::get('/login', function() {
+// Login Page
+Route::get('/login', function () {
     return Inertia::render('Auth/Login');
 })->name('login');
 
@@ -299,6 +296,29 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Faculty Classes
         Route::get('/classes', [App\Http\Controllers\FacultyController::class, 'classesPage'])
             ->name('faculty.classes');
+        
+        // View Class Students
+        Route::get('/classes/{classId}/students', [App\Http\Controllers\FacultyController::class, 'viewClassStudents'])
+            ->name('faculty.classes.students');
+        
+        // Student Profile
+        Route::get('/student/{studentId}/profile', [App\Http\Controllers\FacultyController::class, 'viewStudentProfile'])
+            ->name('faculty.student.profile');
+        
+        // Input Grades
+        Route::get('/classes/{classId}/student/{studentId}/grades', [App\Http\Controllers\FacultyController::class, 'inputStudentGrades'])
+            ->name('faculty.student.grades');
+        
+        // Save Grades
+        Route::post('/classes/{classId}/student/{studentId}/grades', [App\Http\Controllers\FacultyController::class, 'saveStudentGrades'])
+            ->name('faculty.student.grades.save');
+        
+        // Excel Export/Import
+        Route::get('/classes/{classId}/export', [App\Http\Controllers\FacultyController::class, 'exportClassRecord'])
+            ->name('faculty.classes.export');
+        Route::post('/classes/{classId}/import', [App\Http\Controllers\FacultyController::class, 'importClassGrades'])
+            ->name('faculty.classes.import');
+        
 
         // Faculty Grade Input
         Route::get('/grades', [App\Http\Controllers\FacultyController::class, 'gradesPage'])
@@ -413,3 +433,37 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
 // Student schedule routes
 Route::get('/student/{student}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule']);
+
+// Catch-all profile route for debugging
+Route::get('/profile', function() {
+    return response()->json([
+        'error' => 'Profile route accessed without prefix',
+        'message' => 'Use /student/profile, /faculty/profile, or /registrar/profile instead',
+        'redirect' => '/student/profile'
+    ], 404);
+});
+
+// Test export route - outside middleware for testing
+Route::get('/test-export', function() {
+    try {
+        \Illuminate\Support\Facades\Log::info('🔴 TEST EXPORT ROUTE HIT SUCCESSFULLY!');
+        
+        $csvContent = "Student Name,1st Quarter,2nd Quarter,3rd Quarter,4th Quarter,Semester Grade,Remarks\n";
+        $csvContent .= "Test Student 1,85,88,90,87,87.5,Good performance\n";
+        $csvContent .= "Test Student 2,78,82,85,80,81.25,Satisfactory\n";
+        $csvContent .= "Test Student 3,92,95,89,93,92.25,Excellent\n";
+        
+        \Illuminate\Support\Facades\Log::info('🔴 CSV Content prepared, sending response');
+        
+        return response($csvContent, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="test-export.csv"',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0'
+        ]);
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::error('🔴 TEST EXPORT ERROR: ' . $e->getMessage());
+        return response('Error: ' . $e->getMessage(), 500);
+    }
+})->name('test.export');

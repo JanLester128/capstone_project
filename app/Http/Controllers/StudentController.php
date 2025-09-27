@@ -481,16 +481,51 @@ class StudentController extends Controller
      */
     public function profile(Request $request)
     {
-        $user = $request->user();
-        $student = Student::where('user_id', $user->id)->first();
+        try {
+            $user = $request->user();
+            
+            // Get student personal info using the correct database structure
+            $studentPersonalInfo = DB::table('student_personal_info')
+                ->where('user_id', $user->id)
+                ->first();
+            
+            // Get enrollment information
+            $enrollment = null;
+            if ($studentPersonalInfo) {
+                $enrollment = DB::table('enrollments')
+                    ->join('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
+                    ->join('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
+                    ->where('enrollments.student_id', $studentPersonalInfo->id)
+                    ->select([
+                        'enrollments.*',
+                        'school_years.year_start',
+                        'school_years.year_end',
+                        'sections.section_name'
+                    ])
+                    ->first();
+            }
 
-        return Inertia::render('Student/Student_Profile', [
-            'auth' => [
-                'user' => $user
-            ],
-            'student' => $student,
-            'personalInfo' => $student // Personal info is now part of student model
-        ]);
+            return Inertia::render('Student/Student_Profile', [
+                'auth' => [
+                    'user' => $user
+                ],
+                'student' => $user, // Use user data as student data
+                'personalInfo' => $studentPersonalInfo,
+                'enrollment' => $enrollment
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error loading student profile: ' . $e->getMessage());
+            
+            return Inertia::render('Student/Student_Profile', [
+                'auth' => [
+                    'user' => $request->user()
+                ],
+                'student' => $request->user(),
+                'personalInfo' => null,
+                'enrollment' => null,
+                'error' => 'Failed to load profile data'
+            ]);
+        }
     }
 
     /**
