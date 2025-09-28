@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Student;
 
 class Grade extends Model
 {
@@ -11,19 +12,23 @@ class Grade extends Model
 
     protected $fillable = [
         'student_id',
-        'subject_id', 
+        'subject_id',
         'faculty_id',
         'class_id',
         'school_year_id',
         'first_quarter',
         'second_quarter',
-        'third_quarter', 
+        'third_quarter',
         'fourth_quarter',
         'semester_grade',
-        'final_grade',
         'semester',
         'status',
-        'remarks'
+        'remarks',
+        'approval_status',
+        'approved_by',
+        'approved_at',
+        'approval_notes',
+        'submitted_for_approval_at'
     ];
 
     protected $casts = [
@@ -32,12 +37,13 @@ class Grade extends Model
         'third_quarter' => 'decimal:2',
         'fourth_quarter' => 'decimal:2',
         'semester_grade' => 'decimal:2',
-        'final_grade' => 'decimal:2',
+        'approved_at' => 'datetime',
+        'submitted_for_approval_at' => 'datetime',
     ];
 
     // Relationships
     public function student() {
-        return $this->belongsTo(User::class, 'student_id');
+        return $this->belongsTo(Student::class, 'student_id');
     }
 
     public function subject() {
@@ -46,6 +52,10 @@ class Grade extends Model
 
     public function faculty() {
         return $this->belongsTo(User::class, 'faculty_id');
+    }
+
+    public function approver() {
+        return $this->belongsTo(User::class, 'approved_by');
     }
 
     public function class() {
@@ -92,7 +102,7 @@ class Grade extends Model
      */
     public function getLetterGrade($grade = null)
     {
-        $grade = $grade ?? $this->semester_grade ?? $this->final_grade;
+        $grade = $grade ?? $this->semester_grade;
         
         if ($grade === null) return 'NG'; // No Grade
         
@@ -110,7 +120,7 @@ class Grade extends Model
      */
     public function isPassed($grade = null)
     {
-        $grade = $grade ?? $this->semester_grade ?? $this->final_grade;
+        $grade = $grade ?? $this->semester_grade;
         return $grade !== null && $grade >= 75;
     }
 
@@ -150,5 +160,95 @@ class Grade extends Model
     public function scopeByStudent($query, $studentId)
     {
         return $query->where('student_id', $studentId);
+    }
+
+    // Approval System Methods
+    
+    /**
+     * Submit grade for approval
+     */
+    public function submitForApproval()
+    {
+        $this->update([
+            'approval_status' => 'pending_approval',
+            'submitted_for_approval_at' => now()
+        ]);
+        return $this;
+    }
+
+    /**
+     * Approve the grade
+     */
+    public function approve($approverId, $notes = null)
+    {
+        $this->update([
+            'approval_status' => 'approved',
+            'approved_by' => $approverId,
+            'approved_at' => now(),
+            'approval_notes' => $notes
+        ]);
+        return $this;
+    }
+
+    /**
+     * Reject the grade
+     */
+    public function reject($approverId, $notes = null)
+    {
+        $this->update([
+            'approval_status' => 'rejected',
+            'approved_by' => $approverId,
+            'approved_at' => now(),
+            'approval_notes' => $notes
+        ]);
+        return $this;
+    }
+
+    /**
+     * Check if grade is approved
+     */
+    public function isApproved()
+    {
+        return $this->approval_status === 'approved';
+    }
+
+    /**
+     * Check if grade is pending approval
+     */
+    public function isPendingApproval()
+    {
+        return $this->approval_status === 'pending_approval';
+    }
+
+    /**
+     * Check if grade is rejected
+     */
+    public function isRejected()
+    {
+        return $this->approval_status === 'rejected';
+    }
+
+    /**
+     * Scope for approved grades only
+     */
+    public function scopeApproved($query)
+    {
+        return $query->where('approval_status', 'approved');
+    }
+
+    /**
+     * Scope for pending approval grades
+     */
+    public function scopePendingApproval($query)
+    {
+        return $query->where('approval_status', 'pending_approval');
+    }
+
+    /**
+     * Scope for rejected grades
+     */
+    public function scopeRejected($query)
+    {
+        return $query->where('approval_status', 'rejected');
     }
 }

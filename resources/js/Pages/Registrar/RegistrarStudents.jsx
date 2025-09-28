@@ -114,15 +114,14 @@ const StudentDetailsModal = ({ isOpen, onClose, student }) => {
 
 const RegistrarStudents = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { approvedStudents = [], enrolledStudents = [], strands = [], sections = [], flash } = usePage().props;
-  const [activeTab, setActiveTab] = useState('approved');
+  const { enrolledStudents = [], strands = [], sections = [], flash } = usePage().props;
   const [searchTerm, setSearchTerm] = useState("");
   const [strandFilter, setStrandFilter] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const currentStudents = activeTab === 'approved' ? approvedStudents : enrolledStudents;
+  const currentStudents = enrolledStudents;
 
   const filteredStudents = currentStudents.filter((student) => {
     const matchesSearch = 
@@ -146,7 +145,6 @@ const RegistrarStudents = () => {
     alert('Excel export functionality would be implemented here');
   };
 
-  const totalApproved = approvedStudents.length;
   const totalEnrolled = enrolledStudents.length;
   const totalStrands = strands.length;
   const totalSections = sections.length;
@@ -165,9 +163,9 @@ const RegistrarStudents = () => {
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-10 gap-4">
             <div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-                Student Management
+                Enrolled Students
               </h1>
-              <p className="text-gray-600 mt-2">View and manage approved and enrolled students</p>
+              <p className="text-gray-600 mt-2">View and manage enrolled students</p>
             </div>
             <button
               onClick={exportToExcel}
@@ -178,19 +176,7 @@ const RegistrarStudents = () => {
           </div>
 
           {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg p-6 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Approved Students</p>
-                  <p className="text-3xl font-bold text-blue-600">{totalApproved}</p>
-                </div>
-                <div className="p-3 bg-blue-100 rounded-full">
-                  <FaCheckCircle className="text-blue-600 text-xl" />
-                </div>
-              </div>
-            </div>
-            
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg p-6 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
@@ -228,31 +214,6 @@ const RegistrarStudents = () => {
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="flex space-x-1 bg-white bg-opacity-80 rounded-xl p-1 mb-8 shadow-lg border border-gray-200">
-            <button
-              onClick={() => setActiveTab('approved')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold transition-all duration-200 ${
-                activeTab === 'approved'
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-              }`}
-            >
-              <FaCheckCircle />
-              Approved Students ({totalApproved})
-            </button>
-            <button
-              onClick={() => setActiveTab('enrolled')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold transition-all duration-200 ${
-                activeTab === 'enrolled'
-                  ? 'bg-gradient-to-r from-green-600 to-teal-600 text-white shadow-lg'
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-              }`}
-            >
-              <FaGraduationCap />
-              Enrolled Students ({totalEnrolled})
-            </button>
-          </div>
 
           {/* Filter and Search Bar */}
           <div className="bg-white bg-opacity-80 rounded-xl shadow-lg p-4 border border-gray-200 mb-8">
@@ -337,10 +298,8 @@ const RegistrarStudents = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                            activeTab === 'enrolled' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {activeTab === 'enrolled' ? 'Enrolled' : 'Approved'}
+                          <span className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                            Enrolled
                           </span>
                         </td>
                         <td className="px-6 py-4">

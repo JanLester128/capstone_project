@@ -1,58 +1,72 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from 'react';
+import { router, useForm } from '@inertiajs/react';
 import FacultySidebar from "../layouts/Faculty_Sidebar";
+import Swal from 'sweetalert2';
 import { 
-  FaGraduationCap, 
-  FaSearch, 
+  FaUsers, 
+  FaArrowLeft,
+  FaEnvelope,
+  FaPhone,
+  FaIdCard,
+  FaCalendarAlt,
+  FaClock,
+  FaMapMarkerAlt,
+  FaGraduationCap,
+  FaSearch,
+  FaUser,
   FaSave,
-  FaUsers,
-  FaFilter,
   FaEdit,
   FaCheck,
-  FaTimes
+  FaTimes,
+  FaEye,
+  FaChartLine,
+  FaDownload
 } from "react-icons/fa";
 
-export default function FacultyGrades({ classes: initialClasses = [], students: initialStudents = [], user }) {
+export default function FacultyGrades({ classes = [], auth }) {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
   const [selectedClass, setSelectedClass] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [editingGrade, setEditingGrade] = useState(null);
-  const [tempGrade, setTempGrade] = useState("");
+  const [classStudents, setClassStudents] = useState([]);
+  const [classGrades, setClassGrades] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const [classes, setClasses] = useState(initialClasses);
-
-  const [students, setStudents] = useState(initialStudents);
-
-  const filteredStudents = students.filter(student =>
-    student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.studentId.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredStudents = classStudents.filter(student =>
+    (student?.firstname || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (student?.lastname || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (student?.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (student?.student_id || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleGradeEdit = (studentId, period) => {
-    const student = students.find(s => s.id === studentId);
-    setEditingGrade(`${studentId}-${period}`);
-    setTempGrade(student[period]);
-  };
-
-  const handleGradeSave = (studentId, period) => {
-    // Here you would typically save to backend
-    console.log(`Saving grade: Student ${studentId}, ${period}: ${tempGrade}`);
-    setEditingGrade(null);
-    setTempGrade("");
-  };
-
-  const handleGradeCancel = () => {
-    setEditingGrade(null);
-    setTempGrade("");
-  };
+  // Load class students when a class is selected
+  useEffect(() => {
+    if (selectedClass) {
+      setLoading(true);
+      router.get(`/faculty/classes/${selectedClass}/students`, {}, {
+        preserveState: true,
+        onSuccess: (page) => {
+          setClassStudents(page.props.students || []);
+          setClassGrades(page.props.grades || []);
+          setLoading(false);
+        },
+        onError: () => {
+          setLoading(false);
+          Swal.fire('Error', 'Failed to load class data', 'error');
+        }
+      });
+    }
+  }, [selectedClass]);
 
   const getGradeColor = (grade) => {
-    if (!grade) return "text-gray-400";
-    if (grade.startsWith('A')) return "text-green-600";
-    if (grade.startsWith('B')) return "text-blue-600";
-    if (grade.startsWith('C')) return "text-yellow-600";
+    const numGrade = parseFloat(grade);
+    if (!grade || isNaN(numGrade)) return "text-gray-400";
+    if (numGrade >= 90) return "text-green-600";
+    if (numGrade >= 85) return "text-blue-600";
+    if (numGrade >= 80) return "text-yellow-600";
+    if (numGrade >= 75) return "text-orange-600";
     return "text-red-600";
   };
 
@@ -84,7 +98,7 @@ export default function FacultyGrades({ classes: initialClasses = [], students: 
                 <option value="">Choose a class...</option>
                 {classes.map(cls => (
                   <option key={cls.id} value={cls.id}>
-                    {cls.name} - {cls.section} ({cls.students} students)
+                    {cls.subject?.name || 'Unknown Subject'} - {cls.section?.section_name || 'Unknown Section'} ({cls.student_count || 0} students)
                   </option>
                 ))}
               </select>
@@ -118,7 +132,7 @@ export default function FacultyGrades({ classes: initialClasses = [], students: 
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-gray-800">
-                    {classes.find(c => c.id == selectedClass)?.name} - {classes.find(c => c.id == selectedClass)?.section}
+                    {classes.find(c => c.id == selectedClass)?.subject?.name || 'Subject'} - {classes.find(c => c.id == selectedClass)?.section?.section_name || 'Section'}
                   </h3>
                   <p className="text-gray-600 text-sm">
                     {filteredStudents.length} students

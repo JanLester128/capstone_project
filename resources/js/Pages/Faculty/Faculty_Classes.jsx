@@ -22,9 +22,6 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
   });
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSemester, setSelectedSemester] = useState("current");
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [selectedClass, setSelectedClass] = useState(null);
-  const [importSemester, setImportSemester] = useState("1st");
 
   const filteredClasses = classes.filter(cls =>
     (cls.subject?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -37,35 +34,7 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
     router.visit(`/faculty/classes/${classId}/students`);
   };
 
-  const handleExportClass = (classData, semester) => {
-    // Export class record to Excel
-    console.log('Export button clicked:', { classId: classData.id, semester });
-    const url = `/faculty/classes/${classData.id}/export?semester=${semester}`;
-    console.log('Export URL:', url);
-    window.location.href = url;
-  };
 
-  const handleImportClick = (classData) => {
-    setSelectedClass(classData);
-    setShowImportModal(true);
-  };
-
-  const handleImportSubmit = (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    formData.append('semester', importSemester);
-
-    // Submit import form
-    router.post(`/faculty/classes/${selectedClass.id}/import`, formData, {
-      onSuccess: () => {
-        setShowImportModal(false);
-        setSelectedClass(null);
-      },
-      onError: (errors) => {
-        console.error('Import errors:', errors);
-      }
-    });
-  };
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
@@ -78,50 +47,6 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
             <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
               My Classes
             </h1>
-            <button
-              onClick={() => {
-                console.log('🔴 TEST EXPORT BUTTON CLICKED!');
-                console.log('🔴 Redirecting to: /faculty/test-export');
-                
-                // Try fetch method to see what's happening
-                fetch('/faculty/test-export')
-                  .then(response => {
-                    console.log('🔴 Response status:', response.status);
-                    console.log('🔴 Response headers:', response.headers);
-                    
-                    if (response.ok) {
-                      return response.blob();
-                    } else {
-                      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                  })
-                  .then(blob => {
-                    console.log('🔴 Blob received:', blob);
-                    
-                    // Create download link
-                    const url = window.URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = 'test-export.csv';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    window.URL.revokeObjectURL(url);
-                    
-                    console.log('🔴 Download initiated successfully!');
-                  })
-                  .catch(error => {
-                    console.error('🔴 Fetch error:', error);
-                    
-                    // Fallback to window.location
-                    console.log('🔴 Trying fallback method...');
-                    window.location.href = '/faculty/test-export';
-                  });
-              }}
-              className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm"
-            >
-              🔴 TEST EXPORT
-            </button>
           </div>
           <p className="text-gray-600">View and manage your assigned classes and students</p>
         </div>
@@ -205,42 +130,6 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
                       View Students
                     </button>
                     
-                    {/* Export Buttons */}
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => {
-                          console.log('🟢 1ST SEM BUTTON CLICKED for class:', cls);
-                          alert(`1st Sem Export clicked for ${cls.subject?.name}!`);
-                          handleExportClass(cls, '1st');
-                        }}
-                        className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm"
-                        title="Export 1st Semester Class Record"
-                      >
-                        <FaDownload className="w-3 h-3" />
-                        🟢 1st Sem
-                      </button>
-                      <button
-                        onClick={() => {
-                          console.log('2nd Sem button clicked for class:', cls);
-                          handleExportClass(cls, '2nd');
-                        }}
-                        className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm"
-                        title="Export 2nd Semester Class Record"
-                      >
-                        <FaDownload className="w-3 h-3" />
-                        2nd Sem
-                      </button>
-                    </div>
-                    
-                    {/* Import Button */}
-                    <button
-                      onClick={() => handleImportClick(cls)}
-                      className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm"
-                      title="Import Grades from Excel"
-                    >
-                      <FaUpload className="w-3 h-3" />
-                      Import
-                    </button>
                   </div>
                 </div>
               </div>
@@ -285,81 +174,6 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
           </div>
         </div>
 
-        {/* Import Modal */}
-        {showImportModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                  <FaFileExcel className="w-5 h-5 text-green-600" />
-                  Import Grades
-                </h3>
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ×
-                </button>
-              </div>
-              
-              <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>Subject:</strong> {selectedClass?.subject?.name}<br/>
-                  <strong>Section:</strong> {selectedClass?.section?.section_name || 'No Section'}
-                </p>
-              </div>
-
-              <form onSubmit={handleImportSubmit}>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Semester
-                  </label>
-                  <select
-                    value={importSemester}
-                    onChange={(e) => setImportSemester(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="1st">1st Semester</option>
-                    <option value="2nd">2nd Semester</option>
-                  </select>
-                </div>
-
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Excel File
-                  </label>
-                  <input
-                    type="file"
-                    name="excel_file"
-                    accept=".xlsx,.xls"
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Upload the completed class record Excel file
-                  </p>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowImportModal(false)}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
-                  >
-                    <FaUpload className="w-4 h-4" />
-                    Import Grades
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

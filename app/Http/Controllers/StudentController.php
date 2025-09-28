@@ -8,6 +8,7 @@ use App\Models\SchoolYear;
 use App\Models\Enrollment;
 use App\Models\ClassDetail;
 use App\Models\EnrollmentSubject;
+use App\Models\Subject;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Schema;
@@ -1077,5 +1078,119 @@ class StudentController extends Controller
                 'user' => $user
             ]
         ]);
+    }
+
+    /**
+     * Display student grades page with only approved grades
+     */
+    public function gradesPage(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            
+            // Get student record
+            $student = Student::where('user_id', $user->id)->first();
+            if (!$student) {
+                return Inertia::render('Student/Student_Grades', [
+                    'grades' => [],
+                    'studentInfo' => null,
+                    'message' => 'Student record not found',
+                    'auth' => ['user' => $user]
+                ]);
+            }
+
+            // Get active school year
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            if (!$activeSchoolYear) {
+                return Inertia::render('Student/Student_Grades', [
+                    'grades' => [],
+                    'studentInfo' => $student,
+                    'message' => 'No active school year found',
+                    'auth' => ['user' => $user]
+                ]);
+            }
+
+            // Get only APPROVED grades for this student
+            $approvedGrades = \App\Models\Grade::with([
+                'subject',
+                'faculty',
+                'class.section',
+                'schoolYear'
+            ])
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->where('approval_status', 'approved') // Only show approved grades
+            ->orderBy('subject_id')
+            ->get();
+
+            // Group grades by subject and semester
+            $groupedGrades = $approvedGrades->groupBy(['subject.name', 'semester']);
+
+            // Format grades for frontend
+            $formattedGrades = [];
+            foreach ($groupedGrades as $subjectName => $semesters) {
+                $subjectData = [
+                    'subject_name' => $subjectName,
+                    'semesters' => []
+                ];
+
+                foreach ($semesters as $semester => $grades) {
+                    $grade = $grades->first(); // Get the grade record
+                    
+                    $semesterData = [
+                        'semester' => $semester,
+                        'first_quarter' => $grade->first_quarter,
+                        'second_quarter' => $grade->second_quarter,
+                        'third_quarter' => $grade->third_quarter,
+                        'fourth_quarter' => $grade->fourth_quarter,
+                        'semester_grade' => $grade->semester_grade,
+                        'status' => $grade->status,
+                        'remarks' => $grade->remarks,
+                        'faculty_name' => $grade->faculty ? 
+                            $grade->faculty->firstname . ' ' . $grade->faculty->lastname : 'N/A',
+                        'approved_at' => $grade->approved_at,
+                        'approved_by' => $grade->approver ? 
+                            $grade->approver->firstname . ' ' . $grade->approver->lastname : 'N/A'
+                    ];
+                    
+                    $subjectData['semesters'][] = $semesterData;
+                }
+
+                $formattedGrades[] = $subjectData;
+            }
+
+            Log::info('Student grades fetched', [
+                'student_id' => $student->id,
+                'approved_grades_count' => $approvedGrades->count(),
+                'school_year_id' => $activeSchoolYear->id
+            ]);
+
+            return Inertia::render('Student/Student_Grades', [
+                'grades' => $formattedGrades,
+                'studentInfo' => [
+                    'id' => $student->id,
+                    'name' => $user->firstname . ' ' . $user->lastname,
+                    'email' => $user->email,
+                    'lrn' => $student->lrn,
+                    'grade_level' => $student->grade_level
+                ],
+                'schoolYear' => $activeSchoolYear,
+                'totalApprovedGrades' => $approvedGrades->count(),
+                'auth' => ['user' => $user]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching student grades', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->id
+            ]);
+
+            return Inertia::render('Student/Student_Grades', [
+                'grades' => [],
+                'studentInfo' => null,
+                'message' => 'Error loading grades. Please try again.',
+                'auth' => ['user' => $user]
+            ]);
+        }
     }
 }

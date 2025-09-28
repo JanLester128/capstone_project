@@ -18,17 +18,16 @@ use App\Models\User;
 use App\Models\Subject;
 use App\Models\Strand;
 use App\Models\Section;
+use App\Models\Student;
 use App\Models\SchoolYear;
 use App\Models\StudentPersonalInfo;
 use App\Models\Enrollment;
-use App\Models\Grade;
 use App\Models\ClassSchedule;
 use App\Models\ClassDetail;
 use App\Models\Notification;
 use App\Models\Registrar;
 use App\Models\Coordinator;
 use App\Models\Semester;
-use App\Models\Student;
 
 class RegistrarController extends Controller
 {
@@ -441,6 +440,10 @@ class RegistrarController extends Controller
         // Get active school year
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
         
+        Log::info('Active school year for students query', [
+            'school_year' => $activeSchoolYear ? $activeSchoolYear->toArray() : null
+        ]);
+        
         if (!$activeSchoolYear) {
             return Inertia::render('Registrar/RegistrarStudents', [
                 'students' => collect([]),
@@ -452,11 +455,12 @@ class RegistrarController extends Controller
 
         // Get all students with their enrollment data
         $students = DB::table('enrollments')
-            ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.user_id')
+            ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
             ->join('users', 'student_personal_info.user_id', '=', 'users.id')
             ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
             ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
             ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->where('enrollments.student_id', '>', 0) // Exclude invalid student_id = 0
             ->select([
                 'student_personal_info.id',
                 'student_personal_info.user_id',
@@ -475,32 +479,18 @@ class RegistrarController extends Controller
             ])
             ->get();
 
-        // Separate students by enrollment status
-        $approvedStudents = $students->where('enrollment_status', 'approved');
-        $enrolledStudents = $students->where('enrollment_status', 'enrolled');
+        // Debug: Log the query results
+        Log::info('Students query results', [
+            'count' => $students->count(),
+            'students' => $students->toArray()
+        ]);
+
+        // Get all students with enrollment records (regardless of specific status)
+        // Since we removed the approved students tab, we'll show all enrolled students
+        $enrolledStudents = $students; // Show all students with enrollment records
         $allStudents = $students;
 
         return Inertia::render('Registrar/RegistrarStudents', [
-            'approvedStudents' => $approvedStudents->map(function($student) {
-                return [
-                    'id' => $student->id,
-                    'user_id' => $student->user_id,
-                    'name' => ($student->firstname ?? '') . ' ' . ($student->lastname ?? ''),
-                    'firstname' => $student->firstname ?? '',
-                    'lastname' => $student->lastname ?? '',
-                    'email' => $student->email ?? '',
-                    'student_id' => $student->lrn ?? 'N/A',
-                    'lrn' => $student->lrn ?? 'N/A',
-                    'birthdate' => $student->birthdate ?? 'N/A',
-                    'grade_level' => $student->grade_level ?? 11,
-                    'section' => $student->section_name ?? 'Unassigned',
-                    'section_name' => $student->section_name ?? 'Unassigned',
-                    'strand' => $student->strand_code ?? 'N/A',
-                    'strand_name' => $student->strand_code ?? 'N/A',
-                    'strand_code' => $student->strand_code ?? 'N/A',
-                    'enrollment_status' => $student->enrollment_status ?? 'unknown',
-                ];
-            })->values(),
             'enrolledStudents' => $enrolledStudents->map(function($student) {
                 return [
                     'id' => $student->id,
@@ -1804,6 +1794,143 @@ class RegistrarController extends Controller
             return redirect()->back()->withErrors([
                 'error' => 'Failed to create full academic year: ' . $e->getMessage()
             ]);
+        }
+    }
+
+    // Grade Approval System Methods
+
+    /**
+     * Display pending grades for approval
+     */
+    public function pendingGrades()
+    {
+        $user = Auth::user();
+        
+        // Get all pending grades with relationships
+        $pendingGrades = \App\Models\Grade::with([
+            'student.user', 
+            'faculty', 
+            'subject', 
+            'class.section'
+        ])
+        ->pendingApproval()
+        ->orderBy('submitted_for_approval_at', 'desc')
+        ->paginate(20);
+
+        return Inertia::render('Registrar/PendingGrades', [
+            'pendingGrades' => $pendingGrades,
+            'auth' => ['user' => $user]
+        ]);
+    }
+
+    /**
+     * Approve a grade
+     */
+    public function approveGrade(Request $request, $gradeId)
+    {
+        $request->validate([
+            'approval_notes' => 'nullable|string|max:500'
+        ]);
+
+        try {
+            $grade = \App\Models\Grade::findOrFail($gradeId);
+            $user = Auth::user();
+
+            // Ensure only registrar can approve
+            if ($user->role !== 'registrar') {
+                return back()->withErrors(['error' => 'Unauthorized to approve grades.']);
+            }
+
+            $grade->approve($user->id, $request->approval_notes);
+
+            Log::info('Grade approved', [
+                'grade_id' => $gradeId,
+                'approved_by' => $user->id,
+                'student_id' => $grade->student_id,
+                'subject_id' => $grade->subject_id
+            ]);
+
+            return back()->with('success', 'Grade approved successfully.');
+
+        } catch (\Exception $e) {
+            Log::error('Failed to approve grade: ' . $e->getMessage());
+            return back()->withErrors(['error' => 'Failed to approve grade.']);
+        }
+    }
+
+    /**
+     * Reject a grade
+     */
+    public function rejectGrade(Request $request, $gradeId)
+    {
+        $request->validate([
+            'approval_notes' => 'required|string|max:500'
+        ]);
+
+        try {
+            $grade = \App\Models\Grade::findOrFail($gradeId);
+            $user = Auth::user();
+
+            // Ensure only registrar can reject
+            if ($user->role !== 'registrar') {
+                return back()->withErrors(['error' => 'Unauthorized to reject grades.']);
+            }
+
+            $grade->reject($user->id, $request->approval_notes);
+
+            Log::info('Grade rejected', [
+                'grade_id' => $gradeId,
+                'rejected_by' => $user->id,
+                'student_id' => $grade->student_id,
+                'subject_id' => $grade->subject_id,
+                'reason' => $request->approval_notes
+            ]);
+
+            return back()->with('success', 'Grade rejected successfully.');
+
+        } catch (\Exception $e) {
+            Log::error('Failed to reject grade: ' . $e->getMessage());
+            return back()->withErrors(['error' => 'Failed to reject grade.']);
+        }
+    }
+
+    /**
+     * Bulk approve grades
+     */
+    public function bulkApproveGrades(Request $request)
+    {
+        $request->validate([
+            'grade_ids' => 'required|array',
+            'grade_ids.*' => 'exists:grades,id',
+            'approval_notes' => 'nullable|string|max:500'
+        ]);
+
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return back()->withErrors(['error' => 'Unauthorized to approve grades.']);
+            }
+
+            $approvedCount = 0;
+            foreach ($request->grade_ids as $gradeId) {
+                $grade = \App\Models\Grade::find($gradeId);
+                if ($grade && $grade->isPendingApproval()) {
+                    $grade->approve($user->id, $request->approval_notes);
+                    $approvedCount++;
+                }
+            }
+
+            Log::info('Bulk grade approval', [
+                'approved_count' => $approvedCount,
+                'approved_by' => $user->id
+            ]);
+
+            return back()->with('success', "Successfully approved {$approvedCount} grades.");
+
+        } catch (\Exception $e) {
+            Log::error('Failed to bulk approve grades: ' . $e->getMessage());
+            return back()->withErrors(['error' => 'Failed to approve grades.']);
         }
     }
 }

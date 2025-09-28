@@ -25,7 +25,8 @@ import {
   FaChevronUp,
   FaChevronRight,
   FaPalette,
-  FaCog
+  FaCog,
+  FaClipboardCheck
 } from "react-icons/fa";
 import Swal from "sweetalert2";
 
@@ -350,6 +351,12 @@ const Sidebar = ({ onToggle }) => {
           icon: FaGraduationCap,
           label: "School Years",
           description: "Academic periods"
+        },
+        {
+          path: "/registrar/grades/pending",
+          icon: FaClipboardCheck,
+          label: "Grade Approvals",
+          description: "Review & approve grades"
         }
       ]
     },

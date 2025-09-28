@@ -23,6 +23,11 @@ use App\Http\Controllers\CoordinatorController;
 |--------------------------------------------------------------------------
 */
 
+// Root route - redirect to login
+Route::get('/', function () {
+    return redirect('/login');
+})->name('home');
+
 // Login Page
 Route::get('/login', function () {
     return Inertia::render('Auth/Login');
@@ -194,6 +199,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Grades Management
         Route::get('/grades', [RegistrarController::class, 'gradesPage'])->name('registrar.grades');
+        
+        // Grade Approval System
+        Route::get('/grades/pending', [RegistrarController::class, 'pendingGrades'])->name('registrar.grades.pending');
+        Route::post('/grades/{grade}/approve', [RegistrarController::class, 'approveGrade'])->name('registrar.grades.approve');
+        Route::post('/grades/{grade}/reject', [RegistrarController::class, 'rejectGrade'])->name('registrar.grades.reject');
+        Route::post('/grades/bulk-approve', [RegistrarController::class, 'bulkApproveGrades'])->name('registrar.grades.bulk-approve');
 
         // School Year Management Routes
         Route::get('/school-years', [RegistrarController::class, 'schoolYearsPage'])->name('registrar.school-years');
@@ -250,6 +261,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     Route::prefix('student')->middleware(['hybrid.auth'])->group(function () {
 
+        // Student Grades Page - Only show approved grades
+        Route::get('/grades', [App\Http\Controllers\StudentController::class, 'gradesPage'])
+            ->name('student.grades');
+
         // Enroll Page - Philippine SHS System
         Route::get('/enroll', function(Request $request) {
             // Philippine SHS: Check enrollment window instead of just active school year
@@ -297,6 +312,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/classes', [App\Http\Controllers\FacultyController::class, 'classesPage'])
             ->name('faculty.classes');
         
+        // Excel Export/Import (Put specific routes before generic ones)
+        Route::get('/classes/{classId}/export-students', [App\Http\Controllers\FacultyController::class, 'exportStudentList'])
+            ->name('faculty.classes.export-students');
+            
+        // Simple test route
+        Route::get('/test-export-simple', function() {
+            \Illuminate\Support\Facades\Log::info('🔥 SIMPLE TEST ROUTE CALLED');
+            return response('Simple test route is working! Time: ' . now(), 200, [
+                'Content-Type' => 'text/plain'
+            ]);
+        });
+        
         // View Class Students
         Route::get('/classes/{classId}/students', [App\Http\Controllers\FacultyController::class, 'viewClassStudents'])
             ->name('faculty.classes.students');
@@ -312,8 +339,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Save Grades
         Route::post('/classes/{classId}/student/{studentId}/grades', [App\Http\Controllers\FacultyController::class, 'saveStudentGrades'])
             ->name('faculty.student.grades.save');
+            
+        // Test POST route
+        Route::post('/test-post-grades', function() {
+            \Illuminate\Support\Facades\Log::info('🔥 TEST POST ROUTE CALLED');
+            return response()->json([
+                'success' => true,
+                'message' => 'Test POST route working',
+                'timestamp' => now()
+            ]);
+        });
+            
         
-        // Excel Export/Import
         Route::get('/classes/{classId}/export', [App\Http\Controllers\FacultyController::class, 'exportClassRecord'])
             ->name('faculty.classes.export');
         Route::post('/classes/{classId}/import', [App\Http\Controllers\FacultyController::class, 'importClassGrades'])
@@ -374,9 +411,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Student enrollment actions
         Route::post('/students/{id}/approve', [App\Http\Controllers\CoordinatorController::class, 'approveEnrollment'])
-            ->name('coordinator.enrollment.approve');
+            ->name('coordinator.student.approve');
         Route::post('/students/{id}/reject', [App\Http\Controllers\CoordinatorController::class, 'rejectEnrollment'])
-            ->name('coordinator.enrollment.reject');
+            ->name('coordinator.student.reject');
         Route::post('/students/{id}/finalize', [App\Http\Controllers\CoordinatorController::class, 'finalizeEnrollmentWithAssignment'])
             ->name('coordinator.enrollment.finalize');
 
