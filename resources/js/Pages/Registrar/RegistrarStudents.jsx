@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { usePage, router } from "@inertiajs/react";
-import { FaUsers, FaGraduationCap, FaCheckCircle, FaEye, FaFilter, FaSearch, FaDownload, FaFileExcel } from "react-icons/fa";
+import { FaUsers, FaGraduationCap, FaCheckCircle, FaEye, FaFilter, FaSearch, FaDownload, FaFileExcel, FaPrint, FaToggleOn, FaToggleOff } from "react-icons/fa";
 import Sidebar from "../layouts/Sidebar";
 
 const StudentDetailsModal = ({ isOpen, onClose, student }) => {
@@ -114,7 +114,7 @@ const StudentDetailsModal = ({ isOpen, onClose, student }) => {
 
 const RegistrarStudents = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { enrolledStudents = [], strands = [], sections = [], flash } = usePage().props;
+  const { enrolledStudents = [], strands = [], sections = [], allowFacultyCorPrint = true, flash } = usePage().props;
   const [searchTerm, setSearchTerm] = useState("");
   const [strandFilter, setStrandFilter] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
@@ -145,6 +145,17 @@ const RegistrarStudents = () => {
     alert('Excel export functionality would be implemented here');
   };
 
+  const toggleFacultyCorPrint = async () => {
+    try {
+      await router.post('/registrar/settings/toggle-faculty-cor-print', {}, {
+        preserveState: true,
+        preserveScroll: true,
+      });
+    } catch (error) {
+      console.error('Error toggling faculty COR print setting:', error);
+    }
+  };
+
   const totalEnrolled = enrolledStudents.length;
   const totalStrands = strands.length;
   const totalSections = sections.length;
@@ -167,12 +178,38 @@ const RegistrarStudents = () => {
               </h1>
               <p className="text-gray-600 mt-2">View and manage enrolled students</p>
             </div>
-            <button
-              onClick={exportToExcel}
-              className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 transition-all duration-200 transform hover:scale-105"
-            >
-              <FaFileExcel /> Export to Excel
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Faculty COR Print Toggle */}
+              <div className="flex items-center gap-3 bg-white bg-opacity-95 backdrop-blur-xl rounded-lg shadow-lg p-3 border border-gray-200">
+                <FaPrint className="text-gray-600" />
+                <span className="text-sm font-medium text-gray-700">Faculty COR Print:</span>
+                <button
+                  onClick={toggleFacultyCorPrint}
+                  className={`flex items-center transition-colors duration-200 ${
+                    allowFacultyCorPrint ? 'text-green-600' : 'text-red-600'
+                  }`}
+                  title={`Click to ${allowFacultyCorPrint ? 'disable' : 'enable'} faculty COR printing`}
+                >
+                  {allowFacultyCorPrint ? (
+                    <FaToggleOn className="text-2xl" />
+                  ) : (
+                    <FaToggleOff className="text-2xl" />
+                  )}
+                </button>
+                <span className={`text-xs font-medium ${
+                  allowFacultyCorPrint ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {allowFacultyCorPrint ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              
+              <button
+                onClick={exportToExcel}
+                className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 transition-all duration-200 transform hover:scale-105"
+              >
+                <FaFileExcel /> Export to Excel
+              </button>
+            </div>
           </div>
 
           {/* Statistics Cards */}

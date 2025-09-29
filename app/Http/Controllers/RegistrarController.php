@@ -31,6 +31,27 @@ use App\Models\Semester;
 
 class RegistrarController extends Controller
 {
+    /**
+     * Toggle whether faculty can print COR for the active school year
+     */
+    public function toggleFacultyCorPrint(Request $request)
+    {
+        try {
+            $active = SchoolYear::where('is_active', true)->first();
+            if (!$active) {
+                return redirect()->back()->withErrors(['general' => 'No active school year found.']);
+            }
+
+            $new = !((bool)$active->allow_faculty_cor_print);
+            $active->update(['allow_faculty_cor_print' => $new]);
+
+            $msg = $new ? 'Faculty COR printing has been enabled.' : 'Faculty COR printing has been disabled.';
+            return redirect()->back()->with('success', $msg);
+        } catch (\Exception $e) {
+            Log::error('toggleFacultyCorPrint error: '.$e->getMessage());
+            return redirect()->back()->withErrors(['general' => 'Failed to update setting.']);
+        }
+    }
     public function sectionCOR($sectionId, $studentId = null)
     {
         $section = Section::with(['strand'])->findOrFail($sectionId);
@@ -447,6 +468,7 @@ class RegistrarController extends Controller
         if (!$activeSchoolYear) {
             return Inertia::render('Registrar/RegistrarStudents', [
                 'students' => collect([]),
+                'allowFacultyCorPrint' => true,
                 'auth' => [
                     'user' => Auth::user()
                 ]
@@ -513,6 +535,7 @@ class RegistrarController extends Controller
             })->values(),
             'strands' => Strand::orderBy('name')->get(),
             'sections' => Section::with('strand')->orderBy('section_name')->get(),
+            'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
             'auth' => [
                 'user' => Auth::user()
             ]

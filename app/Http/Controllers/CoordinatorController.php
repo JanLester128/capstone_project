@@ -44,7 +44,8 @@ class CoordinatorController extends Controller
                 return Inertia::render('Faculty/Faculty_Enrollment', [
                     'pendingStudents' => [],
                     'rejectedStudents' => [],
-                    'activeSchoolYear' => null
+                    'activeSchoolYear' => null,
+                    'allowFacultyCorPrint' => true
                 ]);
             }
 
@@ -98,6 +99,7 @@ class CoordinatorController extends Controller
                 'pendingStudents' => $pendingStudents,
                 'rejectedStudents' => $rejectedStudents,
                 'activeSchoolYear' => $activeSchoolYear,
+                'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
                 'auth' => [
                     'user' => Auth::user()
                 ]
@@ -108,6 +110,7 @@ class CoordinatorController extends Controller
                 'pendingStudents' => [],
                 'rejectedStudents' => [],
                 'activeSchoolYear' => null,
+                'allowFacultyCorPrint' => true,
                 'auth' => [
                     'user' => Auth::user()
                 ]
@@ -180,21 +183,51 @@ class CoordinatorController extends Controller
         if (!$activeSchoolYear) {
             return Inertia::render('Faculty/Faculty_Students', [
                 'enrolledStudents' => collect([]),
+                'allowFacultyCorPrint' => true,
                 'auth' => [
                     'user' => Auth::user()
                 ]
             ]);
         }
 
+        // Debug: Check what data exists
+        $allEnrollments = DB::table('enrollments')
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->get();
+        
+        Log::info('Faculty Students Debug', [
+            'active_school_year_id' => $activeSchoolYear->id,
+            'total_enrollments' => $allEnrollments->count(),
+            'enrollment_statuses' => $allEnrollments->pluck('status')->unique()->values()->toArray(),
+            'enrolled_count' => $allEnrollments->where('status', 'enrolled')->count(),
+            'approved_count' => $allEnrollments->where('status', 'approved')->count(),
+        ]);
+
         // Get enrolled students for the active school year only via enrollments
+        // Include both 'enrolled' and 'approved' status students
         $enrolledUserIds = DB::table('enrollments')
             ->where('school_year_id', $activeSchoolYear->id)
-            ->where('status', 'enrolled')
+            ->whereIn('status', ['enrolled', 'approved'])
             ->pluck('student_id');
 
         $enrolledStudents = Student::with(['user', 'strand', 'section', 'schoolYear'])
             ->whereIn('user_id', $enrolledUserIds)
             ->get();
+
+        Log::info('Faculty Students Data', [
+            'enrolled_user_ids_count' => $enrolledUserIds->count(),
+            'enrolled_user_ids' => $enrolledUserIds->toArray(),
+            'found_students_count' => $enrolledStudents->count(),
+            'student_sample' => $enrolledStudents->take(2)->map(function($s) {
+                return [
+                    'id' => $s->id,
+                    'user_id' => $s->user_id,
+                    'user_name' => $s->user ? $s->user->firstname . ' ' . $s->user->lastname : 'No User',
+                    'strand' => $s->strand ? $s->strand->name : 'No Strand',
+                    'section' => $s->section ? $s->section->section_name : 'No Section'
+                ];
+            })->toArray()
+        ]);
 
         return Inertia::render('Faculty/Faculty_Students', [
             'enrolledStudents' => $enrolledStudents->map(function($student) {
@@ -212,6 +245,7 @@ class CoordinatorController extends Controller
                     ]
                 ];
             }),
+            'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
             'auth' => [
                 'user' => Auth::user()
             ]

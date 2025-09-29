@@ -218,6 +218,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/school-years/status/{id?}', [RegistrarController::class, 'getSemesterStatus'])->name('registrar.school-years.status');
         Route::post('/school-years/auto-deactivate', [RegistrarController::class, 'autoDeactivateExpired'])->name('registrar.school-years.auto-deactivate');
 
+        // Settings: Toggle whether faculty can print COR
+        Route::post('/settings/toggle-faculty-cor-print', [RegistrarController::class, 'toggleFacultyCorPrint'])
+            ->name('registrar.settings.toggle-faculty-cor-print');
+
         // Data fetching routes for schedule management - REMOVED CONFLICTING ROUTES
         // These routes were conflicting with page routes and causing JSON responses
         // Route::get('/strands', [RegistrarController::class, 'getStrands'])->name('registrar.strands');
@@ -388,6 +392,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Student schedule route for COR
         Route::get('/student/{studentId}/schedule', [App\Http\Controllers\FacultyController::class, 'getStudentSchedule'])
             ->name('faculty.student.schedule');
+            
+        // Grade 11 to Grade 12 Progression Routes
+        Route::get('/grade11-students', [App\Http\Controllers\FacultyController::class, 'getGrade11Students'])
+            ->name('faculty.grade11-students');
+        Route::post('/progress-to-grade12', [App\Http\Controllers\FacultyController::class, 'progressToGrade12'])
+            ->name('faculty.progress-to-grade12');
+        Route::get('/student-details/{id}', [App\Http\Controllers\FacultyController::class, 'getStudentDetails'])
+            ->name('faculty.student-details');
     });
 
 

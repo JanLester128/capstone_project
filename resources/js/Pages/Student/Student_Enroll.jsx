@@ -137,6 +137,21 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
 
           {/* Main Content */}
           <main className="flex-1 overflow-y-auto p-6">
+            
+            {/* Grade 12 Progression Notice for Students */}
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start space-x-3">
+                <FaInfoCircle className="text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm">
+                  <p className="text-blue-800 font-medium">Grade 12 Progression Requirements:</p>
+                  <p className="text-blue-700 mt-1">
+                    If you are progressing from Grade 11 to Grade 12, please note that faculty will handle your enrollment process. 
+                    You must present your Grade 11 report cards showing passing grades before enrollment can be completed.
+                    Please contact the academic coordinator's office with your documents.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="max-w-4xl mx-auto space-y-6">
 
               {/* Flash Messages - HCI Principle 1: Visibility of system status */}

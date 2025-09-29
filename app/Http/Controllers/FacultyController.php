@@ -1318,7 +1318,41 @@ class FacultyController extends Controller
         ]);
 
         // Format students for frontend
-        $formattedStudents = $enrolledStudents->map(function($student) {
+        $formattedStudents = $enrolledStudents->map(function($student) use ($activeSchoolYear) {
+            // Get class schedules for the student's section
+            $schedules = [];
+            if ($student->section_id && $activeSchoolYear) {
+                $sectionSchedules = DB::table('class')
+                    ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                    ->leftJoin('users', 'class.faculty_id', '=', 'users.id')
+                    ->where('class.section_id', $student->section_id)
+                    ->where('class.school_year_id', $activeSchoolYear->id)
+                    ->where('class.is_active', true)
+                    ->select([
+                        'class.*',
+                        'subjects.name as subject_name',
+                        'subjects.code as subject_code',
+                        'users.firstname as faculty_firstname',
+                        'users.lastname as faculty_lastname'
+                    ])
+                    ->get();
+
+                $schedules = $sectionSchedules->map(function($schedule) {
+                    return [
+                        'id' => $schedule->id,
+                        'subject_name' => $schedule->subject_name,
+                        'subject_code' => $schedule->subject_code,
+                        'day_of_week' => $schedule->day_of_week,
+                        'start_time' => $schedule->start_time,
+                        'end_time' => $schedule->end_time,
+                        'room' => $schedule->room,
+                        'faculty_firstname' => $schedule->faculty_firstname,
+                        'faculty_lastname' => $schedule->faculty_lastname,
+                        'semester' => $schedule->semester
+                    ];
+                })->toArray();
+            }
+
             return [
                 'id' => $student->user_id,
                 'personal_info_id' => $student->personal_info_id,
@@ -1351,12 +1385,13 @@ class FacultyController extends Controller
                         'code' => $student->strand_code ?? 'N/A'
                     ]
                 ] : null,
-                'schedules' => []
+                'schedules' => $schedules
             ];
         });
 
         return Inertia::render('Faculty/Faculty_Students', [
-            'students' => $formattedStudents,
+            'enrolledStudents' => $formattedStudents,
+            'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
             'activeSchoolYear' => $activeSchoolYear,
             'auth' => ['user' => $user]
         ]);
@@ -1786,6 +1821,210 @@ class FacultyController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while progressing the student'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all Grade 11 students eligible for progression to Grade 12
+     */
+    public function getGrade11Students()
+    {
+        try {
+            // Simple test first - just return basic response
+            return response()->json([
+                'success' => true,
+                'message' => 'Backend endpoint working',
+                'students' => [
+                    [
+                        'id' => 999,
+                        'firstname' => 'Test',
+                        'lastname' => 'Student',
+                        'email' => 'test@example.com',
+                        'grade_level' => '11',
+                        'strand_name' => 'STEM',
+                        'section_name' => 'STEM-A',
+                        'lrn' => '123456789999',
+                        'student_status' => 'regular'
+                    ]
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching Grade 11 students: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch Grade 11 students: ' . $e->getMessage(),
+                'students' => []
+            ], 500);
+        }
+    }
+
+    /**
+     * Progress a Grade 11 student to Grade 12
+     */
+    public function progressToGrade12(Request $request)
+    {
+        $request->validate([
+            'student_id' => 'required|integer|exists:users,id',
+            'school_year_id' => 'required|integer|exists:school_years,id'
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $studentId = $request->student_id;
+            $schoolYearId = $request->school_year_id;
+
+            // Check if student exists and has Grade 11 enrollment
+            $grade11Enrollment = Enrollment::where('user_id', $studentId)
+                ->where('grade_level', '11')
+                ->where('school_year_id', $schoolYearId)
+                ->where('status', 'enrolled')
+                ->first();
+
+            if (!$grade11Enrollment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found or not enrolled in Grade 11'
+                ]);
+            }
+
+            // Check if student already has Grade 12 enrollment
+            $existingGrade12 = Enrollment::where('user_id', $studentId)
+                ->where('grade_level', '12')
+                ->where('school_year_id', $schoolYearId)
+                ->first();
+
+            if ($existingGrade12) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student is already enrolled in Grade 12'
+                ]);
+            }
+
+            // Get the student's current section and strand
+            $currentSection = Section::find($grade11Enrollment->section_id);
+            
+            // Find corresponding Grade 12 section (same strand)
+            $grade12Section = Section::where('strand_id', $currentSection->strand_id)
+                ->where('grade_level', '12')
+                ->first();
+
+            // If no Grade 12 section exists, create one
+            if (!$grade12Section) {
+                $strand = \App\Models\Strand::find($currentSection->strand_id);
+                $grade12Section = new Section();
+                $grade12Section->name = $strand->code . '-12A'; // e.g., STEM-12A, HUMSS-12A
+                $grade12Section->strand_id = $currentSection->strand_id;
+                $grade12Section->grade_level = '12';
+                $grade12Section->capacity = 40; // Default capacity
+                $grade12Section->save();
+                
+                Log::info("Created new Grade 12 section: {$grade12Section->name} for strand: {$strand->name}");
+            }
+
+            // Create new Grade 12 enrollment
+            $grade12Enrollment = new Enrollment();
+            $grade12Enrollment->user_id = $studentId;
+            $grade12Enrollment->school_year_id = $schoolYearId;
+            $grade12Enrollment->section_id = $grade12Section->id;
+            $grade12Enrollment->grade_level = '12';
+            $grade12Enrollment->status = 'enrolled';
+            $grade12Enrollment->student_status = 'continuing';
+            $grade12Enrollment->lrn = $grade11Enrollment->lrn;
+            $grade12Enrollment->enrollment_date = now();
+            $grade12Enrollment->save();
+
+            // Copy Grade 11 subjects to Grade 12 (for COR continuity)
+            $grade11Subjects = DB::table('enrollment_subjects')
+                ->where('enrollment_id', $grade11Enrollment->id)
+                ->get();
+
+            foreach ($grade11Subjects as $subject) {
+                // Get corresponding Grade 12 subjects for the same strand
+                $grade12Subject = DB::table('subjects')
+                    ->where('strand_id', $currentSection->strand_id)
+                    ->where('grade_level', '12')
+                    ->where('semester', $subject->semester)
+                    ->first();
+
+                if ($grade12Subject) {
+                    DB::table('enrollment_subjects')->insert([
+                        'enrollment_id' => $grade12Enrollment->id,
+                        'subject_id' => $grade12Subject->id,
+                        'semester' => $subject->semester,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            // Update Grade 11 enrollment status to completed
+            $grade11Enrollment->status = 'completed';
+            $grade11Enrollment->save();
+
+            DB::commit();
+
+            // Get student name for response
+            $student = User::find($studentId);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Student {$student->firstname} {$student->lastname} has been successfully progressed to Grade 12",
+                'grade12_section' => $grade12Section->name,
+                'enrollment_id' => $grade12Enrollment->id
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error progressing student to Grade 12: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to progress student to Grade 12. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detailed student information
+     */
+    public function getStudentDetails($id)
+    {
+        try {
+            $student = DB::table('enrollments')
+                ->join('users', 'enrollments.user_id', '=', 'users.id')
+                ->leftJoin('sections', 'enrollments.section_id', '=', 'sections.id')
+                ->leftJoin('strands', 'sections.strand_id', '=', 'strands.id')
+                ->where('users.id', $id)
+                ->select([
+                    'users.*',
+                    'enrollments.grade_level',
+                    'enrollments.lrn',
+                    'enrollments.student_status',
+                    'enrollments.enrollment_date',
+                    'strands.name as strand_name',
+                    'sections.name as section_name'
+                ])
+                ->first();
+
+            if (!$student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found'
+                ], 404);
+            }
+
+            return response()->json($student);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching student details: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch student details'
             ], 500);
         }
     }
