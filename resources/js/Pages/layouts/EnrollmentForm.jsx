@@ -20,7 +20,12 @@ import {
   FaMapMarkerAlt,
   FaClipboardCheck,
   FaEye,
-  FaEyeSlash
+  FaEyeSlash,
+  FaPhone,
+  FaEnvelope,
+  FaUsers,
+  FaUserPlus,
+  FaSchool
 } from "react-icons/fa";
 
 export default function EnrollmentForm({ isOpen, onClose, user, availableStrands = [], activeSchoolYear = null }) {
@@ -51,6 +56,10 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     pwdId: '',
     guardianName: '',
     guardianContact: '',
+    guardianRelationship: '',
+    emergencyContactName: '',
+    emergencyContactNumber: '',
+    emergencyContactRelationship: '',
     lastSchool: ''
   });
   const [loading, setLoading] = useState(false);
@@ -109,6 +118,10 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         if (!form.sex) stepErrors.sex = "Sex is required";
         if (!form.birthPlace) stepErrors.birthPlace = "Place of birth is required";
         if (!form.address) stepErrors.address = "Address is required";
+        // Guardian information validation
+        if (!form.guardianName) stepErrors.guardianName = "Guardian name is required";
+        if (!form.guardianContact) stepErrors.guardianContact = "Guardian contact number is required";
+        if (!form.guardianRelationship) stepErrors.guardianRelationship = "Guardian relationship is required";
         break;
       case 2:
         if (!form.firstChoice) stepErrors.firstChoice = "First choice is required";
@@ -117,8 +130,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         break;
       case 3:
         if (!form.lastGrade) stepErrors.lastGrade = "Last grade completed is required";
-        if (!form.guardianName) stepErrors.guardianName = "Guardian name is required";
-        if (!form.guardianContact) stepErrors.guardianContact = "Guardian contact number is required";
         break;
       case 4:
         if (!uploadedFiles.reportCard) stepErrors.reportCard = "Report card is required";
@@ -293,90 +304,73 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
 
     router.post('/student/enroll', formData, {
       forceFormData: true,
-      onError: (err) => {
-        setErrors(err);
+      onSuccess: (page) => {
         setLoading(false);
-        if (page.props.flash?.success) {
-          Swal.fire({
-            title: 'Pre-Enrollment Submitted Successfully!',
-            html: `
-              <div class="text-left">
-                <p class="mb-3"><strong>Your pre-enrollment application has been submitted successfully!</strong></p>
-                <p class="mb-2">📋 <strong>What happens next:</strong></p>
-                <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
-                  <li>Your application will be reviewed by the coordinator</li>
-                  <li>You will receive an email notification about your enrollment status</li>
-                  <li>Check your student dashboard regularly for updates</li>
-                </ul>
-                <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
-              </div>
-            `,
-            icon: 'success',
-            confirmButtonText: 'Continue to Dashboard',
-            confirmButtonColor: '#10B981',
-            width: '500px'
-          }).then(() => {
-            onClose();
-            setForm({
-              studentName: user ? `${user.firstname || ''} ${user.middlename ? user.middlename + ' ' : ''}${user.lastname || ''}` : '',
-              firstname: user?.firstname || '',
-              lastname: user?.lastname || '',
-              middlename: user?.middlename || '',
-              firstName: user?.firstname || '',
-              lastName: user?.lastname || '',
-              middleName: user?.middlename || '',
-              schoolYear: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '',
-              lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : '',
-              firstChoice: '',
-              secondChoice: '',
-              thirdChoice: '',
-              studentStatus: 'New Student',
-              extensionName: '',
-              religion: '',
-              ipCommunity: '',
-              fourPs: '',
-              pwdId: '',
-              guardianName: '',
-              guardianContact: '',
-              lastSchool: ''
-            });
-            setUploadedFiles({
-              reportCard: null,
-              psaBirthCertificate: null
-            });
+        
+        // Show success message
+        const successTitle = page.props.flash?.success ? 'Pre-Enrollment Submitted Successfully!' : 'Enrollment Submitted!';
+        
+        Swal.fire({
+          title: successTitle,
+          html: `
+            <div class="text-left">
+              <p class="mb-3"><strong>Your enrollment application has been submitted successfully!</strong></p>
+              <p class="mb-2">📋 <strong>What happens next:</strong></p>
+              <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
+                <li>Your application will be reviewed by the coordinator</li>
+                <li>You will receive an email notification about your enrollment status</li>
+                <li>Check your student dashboard regularly for updates</li>
+              </ul>
+              <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
+            </div>
+          `,
+          icon: 'success',
+          confirmButtonText: 'Continue to Dashboard',
+          confirmButtonColor: '#10B981',
+          width: '500px'
+        }).then(() => {
+          onClose();
+          // Reset form
+          setForm({
+            studentName: user ? `${user.firstname || ''} ${user.middlename ? user.middlename + ' ' : ''}${user.lastname || ''}` : '',
+            firstname: user?.firstname || '',
+            lastname: user?.lastname || '',
+            middlename: user?.middlename || '',
+            firstName: user?.firstname || '',
+            lastName: user?.lastname || '',
+            middleName: user?.middlename || '',
+            schoolYear: activeSchoolYear ? `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : '',
+            lastSY: activeSchoolYear ? `${activeSchoolYear.year_start - 1}-${activeSchoolYear.year_start}` : '',
+            firstChoice: '',
+            secondChoice: '',
+            thirdChoice: '',
+            studentStatus: 'New Student',
+            extensionName: '',
+            religion: '',
+            ipCommunity: '',
+            fourPs: '',
+            pwdId: '',
+            guardianName: '',
+            guardianContact: '',
+            lastSchool: ''
           });
-        } else if (page.props.flash?.error) {
-          Swal.fire({
-            title: 'Enrollment Failed',
-            text: page.props.flash.error,
-            icon: 'error',
-            confirmButtonText: 'OK'
-          });
-        } else {
-          // If no flash success message, still show success (fallback)
-          console.log('No flash success message found, showing fallback success');
-          Swal.fire({
-            title: 'Enrollment Submitted!',
-            html: `
-              <div class="text-left">
-                <p class="mb-3"><strong>Your enrollment application has been submitted!</strong></p>
-                <p class="mb-2">📋 <strong>What happens next:</strong></p>
-                <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
-                  <li>Your application will be reviewed by the coordinator</li>
-                  <li>You will receive an email notification about your enrollment status</li>
-                  <li>Check your student dashboard regularly for updates</li>
-                </ul>
-                <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
-              </div>
-            `,
-            icon: 'success',
-            confirmButtonText: 'Continue to Dashboard',
-            confirmButtonColor: '#10B981',
-            width: '500px'
-          }).then(() => {
-            onClose();
-          });
-        }
+          setUploadedFiles({});
+          setCurrentStep(1);
+        });
+      },
+      onError: (errors) => {
+        setLoading(false);
+        setErrors(errors);
+        
+        // Show error message
+        const errorMessage = errors.general || Object.values(errors)[0] || 'An error occurred during enrollment submission.';
+        Swal.fire({
+          title: 'Enrollment Failed',
+          text: errorMessage,
+          icon: 'error',
+          confirmButtonText: 'OK',
+          confirmButtonColor: '#dc2626'
+        });
       }
     });
   };
@@ -897,6 +891,160 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
               {errors.address}
             </p>
           )}
+        </div>
+
+        {/* Guardian Information Section */}
+        <div className="md:col-span-2 mt-8">
+          <div className="border-t border-gray-200 pt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <FaUsers className="mr-2 text-blue-600" />
+              Guardian Information
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Guardian Name */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <FaUser className="inline mr-2 text-green-600" />
+                  Guardian Name *
+                </label>
+                <input
+                  type="text"
+                  name="guardianName"
+                  value={form.guardianName || ''}
+                  onChange={handleChange}
+                  placeholder="Enter guardian's full name"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianName ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}
+                />
+                {showValidation && errors.guardianName && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <FaExclamationTriangle className="mr-1" />
+                    {errors.guardianName}
+                  </p>
+                )}
+              </div>
+
+              {/* Guardian Contact */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <FaPhone className="inline mr-2 text-purple-600" />
+                  Guardian Contact Number *
+                </label>
+                <input
+                  type="tel"
+                  name="guardianContact"
+                  value={form.guardianContact || ''}
+                  onChange={handleChange}
+                  placeholder="Enter guardian's contact number"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianContact ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}
+                />
+                {showValidation && errors.guardianContact && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <FaExclamationTriangle className="mr-1" />
+                    {errors.guardianContact}
+                  </p>
+                )}
+              </div>
+
+              {/* Guardian Relationship */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <FaUsers className="inline mr-2 text-indigo-600" />
+                  Relationship to Student *
+                </label>
+                <select
+                  name="guardianRelationship"
+                  value={form.guardianRelationship || ''}
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianRelationship ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}
+                >
+                  <option value="">Select Relationship</option>
+                  <option value="Father">Father</option>
+                  <option value="Mother">Mother</option>
+                  <option value="Grandfather">Grandfather</option>
+                  <option value="Grandmother">Grandmother</option>
+                  <option value="Uncle">Uncle</option>
+                  <option value="Aunt">Aunt</option>
+                  <option value="Brother">Brother</option>
+                  <option value="Sister">Sister</option>
+                  <option value="Cousin">Cousin</option>
+                  <option value="Legal Guardian">Legal Guardian</option>
+                  <option value="Other">Other</option>
+                </select>
+                {showValidation && errors.guardianRelationship && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <FaExclamationTriangle className="mr-1" />
+                    {errors.guardianRelationship}
+                  </p>
+                )}
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        {/* Emergency Contact Section */}
+        <div className="md:col-span-2 mt-6">
+          <div className="border-t border-gray-200 pt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <FaPhone className="mr-2 text-red-600" />
+              Emergency Contact (Optional)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Emergency Contact Name */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Emergency Contact Name
+                </label>
+                <input
+                  type="text"
+                  name="emergencyContactName"
+                  value={form.emergencyContactName || ''}
+                  onChange={handleChange}
+                  placeholder="Enter emergency contact name"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              {/* Emergency Contact Number */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Emergency Contact Number
+                </label>
+                <input
+                  type="tel"
+                  name="emergencyContactNumber"
+                  value={form.emergencyContactNumber || ''}
+                  onChange={handleChange}
+                  placeholder="Enter emergency contact number"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              {/* Emergency Contact Relationship */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Relationship
+                </label>
+                <select
+                  name="emergencyContactRelationship"
+                  value={form.emergencyContactRelationship || ''}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                >
+                  <option value="">Select Relationship</option>
+                  <option value="Father">Father</option>
+                  <option value="Mother">Mother</option>
+                  <option value="Sibling">Sibling</option>
+                  <option value="Relative">Relative</option>
+                  <option value="Family Friend">Family Friend</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'persistent.auth' => \App\Http\Middleware\PersistentAuthMiddleware::class,
             'hybrid.auth' => \App\Http\Middleware\HybridAuthMiddleware::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'require.active.school.year' => \App\Http\Middleware\RequireActiveSchoolYear::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

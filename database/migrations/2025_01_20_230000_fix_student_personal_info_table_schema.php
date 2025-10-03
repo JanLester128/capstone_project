@@ -17,22 +17,32 @@ return new class extends Migration
             return;
         }
 
-        // First, drop foreign key constraints before dropping columns
-        Schema::table('student_personal_info', function (Blueprint $table) {
-            // Drop foreign key constraints first
-            if (Schema::hasColumn('student_personal_info', 'strand_id')) {
-                $table->dropForeign(['strand_id']);
+        // First, drop foreign key constraints before dropping columns (if they exist)
+        try {
+            Schema::table('student_personal_info', function (Blueprint $table) {
+                // Try to drop foreign key constraints if they exist
+                // Use try-catch for each constraint since they may not exist
+            });
+        } catch (\Exception $e) {
+            // Ignore foreign key errors since table was recreated
+        }
+        
+        // Check and drop foreign keys using raw SQL to avoid Laravel's naming assumptions
+        try {
+            $foreignKeys = DB::select("
+                SELECT CONSTRAINT_NAME 
+                FROM information_schema.KEY_COLUMN_USAGE 
+                WHERE TABLE_NAME = 'student_personal_info' 
+                AND TABLE_SCHEMA = DATABASE()
+                AND REFERENCED_TABLE_NAME IS NOT NULL
+            ");
+            
+            foreach ($foreignKeys as $fk) {
+                DB::statement("ALTER TABLE student_personal_info DROP FOREIGN KEY {$fk->CONSTRAINT_NAME}");
             }
-            if (Schema::hasColumn('student_personal_info', 'section_id')) {
-                $table->dropForeign(['section_id']);
-            }
-            if (Schema::hasColumn('student_personal_info', 'school_year_id')) {
-                $table->dropForeign(['school_year_id']);
-            }
-            if (Schema::hasColumn('student_personal_info', 'reviewed_by')) {
-                $table->dropForeign(['reviewed_by']);
-            }
-        });
+        } catch (\Exception $e) {
+            // Ignore if no foreign keys exist
+        }
 
         // Then drop the unwanted columns
         Schema::table('student_personal_info', function (Blueprint $table) {

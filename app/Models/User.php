@@ -23,6 +23,7 @@ class User extends Authenticatable
         'middlename',
         'email',
         'role',
+        'student_type',
         'status',
         'password',
         'plain_password',
@@ -32,6 +33,17 @@ class User extends Authenticatable
         'password_changed',
         'password_change_required',
         'last_login_at',
+        // Manual enrollment fields
+        'is_manual_enrollment',
+        'enrolled_by_coordinator',
+        'guardian_name',
+        'guardian_contact',
+        'guardian_relationship',
+        'suffix',
+        'birthdate',
+        'gender',
+        'contact_number',
+        'address',
     ];
 
     /**
@@ -78,5 +90,34 @@ class User extends Authenticatable
     public function getFullNameAttribute()
     {
         return trim($this->firstname . ' ' . ($this->middlename ? $this->middlename . ' ' : '') . $this->lastname);
+    }
+
+    // Transferee relationships
+    public function transfereeCreditedSubjects()
+    {
+        return $this->hasMany(TransfereeCreditedSubject::class, 'student_id');
+    }
+
+    public function transfereePreviousSchools()
+    {
+        return $this->hasMany(TransfereePreviousSchool::class, 'student_id');
+    }
+
+    // Helper methods for transferee functionality
+    public function isTransferee()
+    {
+        return $this->transfereePreviousSchools()->exists();
+    }
+
+    public function getCreditedSubjectsCount()
+    {
+        return $this->transfereeCreditedSubjects()->count();
+    }
+
+    public function getTotalCreditedUnits()
+    {
+        return $this->transfereeCreditedSubjects()
+            ->join('subjects', 'transferee_credited_subjects.subject_id', '=', 'subjects.id')
+            ->sum('subjects.units') ?? 0;
     }
 }

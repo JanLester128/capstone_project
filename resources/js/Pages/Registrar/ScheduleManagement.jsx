@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { usePage, router } from '@inertiajs/react';
 import Sidebar from '../layouts/Sidebar';
+import SchoolYearWarning from '../../Components/SchoolYearWarning';
 import { FaPlus, FaEdit, FaTrash, FaClock, FaUser, FaBook, FaCalendarAlt, FaTimes, FaUsers, FaChalkboardTeacher, FaInfoCircle, FaEye, FaMapMarkerAlt, FaSearch, FaFilter, FaSync, FaCheckCircle, FaExclamationTriangle, FaBell, FaQuestionCircle, FaKeyboard, FaArrowLeft, FaSpinner } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 
 export default function ScheduleManagement() {
-    const { schedules: initialSchedules, subjects: initialSubjects, sections, faculties, schoolYears, activeSchoolYear, currentSchoolYear, swal } = usePage().props;
+    const { schedules: initialSchedules, subjects: initialSubjects, sections, faculties, schoolYears, activeSchoolYear, currentSchoolYear, swal, hasActiveSchoolYear = false } = usePage().props;
 
     const [schedules, setSchedules] = useState(initialSchedules || []);
     const [subjects, setSubjects] = useState(initialSubjects || []);
@@ -14,6 +15,7 @@ export default function ScheduleManagement() {
     const [selectedStrand, setSelectedStrand] = useState(null);
     const [showStrandModal, setShowStrandModal] = useState(false);
     const [semesterFilter, setSemesterFilter] = useState('all'); // Add semester filter
+    const [activeSemesterTab, setActiveSemesterTab] = useState('1'); // NEW: Active semester tab for timetable
     
     // Bulk assignment states
     const [showBulkModal, setShowBulkModal] = useState(false);
@@ -47,6 +49,7 @@ export default function ScheduleManagement() {
         subject_id: '',
         faculty_id: '',
         grade_level: '', // Add grade level filter
+        semester_filter: '', // NEW: Required semester filter
         day_of_week: '',
         start_time: '',
         end_time: '',
@@ -73,7 +76,8 @@ export default function ScheduleManagement() {
         localStorage.setItem('schedule-filter-strand', filterStrand);
         localStorage.setItem('schedule-filter-grade-level', filterGradeLevel);
         localStorage.setItem('schedule-semester-filter', semesterFilter);
-    }, [searchTerm, filterStrand, filterGradeLevel, semesterFilter]);
+        localStorage.setItem('schedule-active-semester-tab', activeSemesterTab);
+    }, [searchTerm, filterStrand, filterGradeLevel, semesterFilter, activeSemesterTab]);
 
     // Load saved preferences on mount
     useEffect(() => {
@@ -81,11 +85,13 @@ export default function ScheduleManagement() {
         const savedFilterStrand = localStorage.getItem('schedule-filter-strand');
         const savedFilterGradeLevel = localStorage.getItem('schedule-filter-grade-level');
         const savedSemesterFilter = localStorage.getItem('schedule-semester-filter');
+        const savedActiveSemesterTab = localStorage.getItem('schedule-active-semester-tab');
         
         if (savedSearchTerm) setSearchTerm(savedSearchTerm);
         if (savedFilterStrand) setFilterStrand(savedFilterStrand);
         if (savedFilterGradeLevel) setFilterGradeLevel(savedFilterGradeLevel);
         if (savedSemesterFilter) setSemesterFilter(savedSemesterFilter);
+        if (savedActiveSemesterTab) setActiveSemesterTab(savedActiveSemesterTab);
     }, []);
 
     // Handle SweetAlert from backend session data
@@ -579,6 +585,7 @@ export default function ScheduleManagement() {
             subject_id: '',
             faculty_id: '',
             grade_level: '', // Add grade level filter
+            semester_filter: '', // NEW: Required semester filter
             day_of_week: '',
             start_time: '',
             end_time: '',
@@ -791,7 +798,13 @@ export default function ScheduleManagement() {
     });
 
     // Group schedules by strand, then by grade level, then by section for better organization
-    const schedulesByStrand = filteredSchedules.reduce((acc, schedule) => {
+    // Filter by active semester tab for timetable display
+    const semesterFilteredSchedules = filteredSchedules.filter(schedule => {
+        const scheduleSemester = schedule.semester?.toString() || schedule.subject?.semester?.toString() || '1';
+        return activeSemesterTab === 'all' || scheduleSemester === activeSemesterTab;
+    });
+
+    const schedulesByStrand = semesterFilteredSchedules.reduce((acc, schedule) => {
         const strandKey = schedule.section?.strand?.name || 'Unknown Strand';
         const strandCode = schedule.section?.strand?.code || 'UNK';
         const gradeLevel = getScheduleGradeLevel(schedule);
@@ -998,6 +1011,7 @@ export default function ScheduleManagement() {
             section_id: '',
             subject_id: '',
             grade_level: '',
+            semester_filter: '', // NEW: Required semester filter
             day_of_week: '',
             start_time: '',
             end_time: '',
@@ -1040,15 +1054,15 @@ export default function ScheduleManagement() {
 
         // Validate all assignments
         const incompleteAssignments = bulkAssignments.filter(assignment => 
-            !assignment.section_id || !assignment.grade_level || !assignment.subject_id || 
-            !assignment.day_of_week || !assignment.start_time || !assignment.end_time
+            !assignment.section_id || !assignment.grade_level || !assignment.semester_filter || 
+            !assignment.subject_id || !assignment.day_of_week || !assignment.start_time || !assignment.end_time
         );
 
         if (incompleteAssignments.length > 0) {
             Swal.fire({
                 icon: 'warning',
                 title: 'Incomplete Assignments',
-                text: `Please complete all fields for ${incompleteAssignments.length} assignment(s). Check that each assignment has: Section, Grade Level, Subject, Day, Start Time, and End Time selected.`,
+                text: `Please complete all fields for ${incompleteAssignments.length} assignment(s). Check that each assignment has: Section, Grade Level, Semester, Subject, Day, Start Time, and End Time selected.`,
                 confirmButtonColor: '#f59e0b'
             });
             setBulkLoading(false);
@@ -1164,6 +1178,15 @@ export default function ScheduleManagement() {
 
             <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden`}>
                 <div className="max-w-7xl mx-auto">
+                    {/* School Year Warning */}
+                    <SchoolYearWarning 
+                        show={!hasActiveSchoolYear}
+                        title="No Active School Year Found"
+                        message="You need to create and activate a school year before creating or managing class schedules. All schedules must be associated with an active academic year."
+                        actionText="Create School Year"
+                        actionLink="/registrar/school-years"
+                    />
+
                     {/* Enhanced Header with System Status - HCI Principle 1: Visibility of System Status */}
                     <div className="mb-8">
                         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
@@ -1439,6 +1462,164 @@ export default function ScheduleManagement() {
                                         <p className="text-xs text-gray-500 mt-1">
                                             {filterGradeLevel !== 'all' ? `Grade ${filterGradeLevel} hours` : 'Total teaching hours'}
                                         </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Semester Tabs for Timetable Separation */}
+                    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-4">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-3">
+                                <FaCalendarAlt className="w-5 h-5" />
+                                Schedule Timetables by Semester
+                            </h2>
+                            <p className="text-indigo-100 text-sm mt-1">View schedules separated by semester to avoid confusion</p>
+                        </div>
+                        
+                        <div className="p-6">
+                            {/* Semester Tab Navigation */}
+                            <div className="flex flex-wrap gap-2 mb-6">
+                                <button
+                                    onClick={() => setActiveSemesterTab('1')}
+                                    className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 ${
+                                        activeSemesterTab === '1'
+                                            ? 'bg-green-600 text-white shadow-lg scale-105'
+                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    }`}
+                                >
+                                    <span className="w-3 h-3 bg-green-400 rounded-full"></span>
+                                    1st Semester
+                                    <span className="bg-white/20 text-xs px-2 py-1 rounded-full">
+                                        {filteredSchedules.filter(s => (s.semester?.toString() || s.subject?.semester?.toString() || '1') === '1').length}
+                                    </span>
+                                </button>
+                                
+                                <button
+                                    onClick={() => setActiveSemesterTab('2')}
+                                    className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 ${
+                                        activeSemesterTab === '2'
+                                            ? 'bg-orange-600 text-white shadow-lg scale-105'
+                                            : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                    }`}
+                                >
+                                    <span className="w-3 h-3 bg-orange-400 rounded-full"></span>
+                                    2nd Semester
+                                    <span className="bg-white/20 text-xs px-2 py-1 rounded-full">
+                                        {filteredSchedules.filter(s => (s.semester?.toString() || s.subject?.semester?.toString() || '1') === '2').length}
+                                    </span>
+                                </button>
+                                
+                                <button
+                                    onClick={() => setActiveSemesterTab('all')}
+                                    className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 ${
+                                        activeSemesterTab === 'all'
+                                            ? 'bg-blue-600 text-white shadow-lg scale-105'
+                                            : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                                    }`}
+                                >
+                                    <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
+                                    All Semesters
+                                    <span className="bg-white/20 text-xs px-2 py-1 rounded-full">
+                                        {filteredSchedules.length}
+                                    </span>
+                                </button>
+                            </div>
+                            
+                            {/* Active Semester Info */}
+                            <div className={`p-4 rounded-lg border-l-4 ${
+                                activeSemesterTab === '1' 
+                                    ? 'bg-green-50 border-green-400' 
+                                    : activeSemesterTab === '2' 
+                                        ? 'bg-orange-50 border-orange-400'
+                                        : 'bg-blue-50 border-blue-400'
+                            }`}>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <FaInfoCircle className={`w-4 h-4 ${
+                                        activeSemesterTab === '1' 
+                                            ? 'text-green-600' 
+                                            : activeSemesterTab === '2' 
+                                                ? 'text-orange-600'
+                                                : 'text-blue-600'
+                                    }`} />
+                                    <h3 className={`font-semibold ${
+                                        activeSemesterTab === '1' 
+                                            ? 'text-green-800' 
+                                            : activeSemesterTab === '2' 
+                                                ? 'text-orange-800'
+                                                : 'text-blue-800'
+                                    }`}>
+                                        {activeSemesterTab === '1' 
+                                            ? 'Viewing 1st Semester Schedules' 
+                                            : activeSemesterTab === '2' 
+                                                ? 'Viewing 2nd Semester Schedules'
+                                                : 'Viewing All Semester Schedules'
+                                        }
+                                    </h3>
+                                </div>
+                                <p className={`text-sm ${
+                                    activeSemesterTab === '1' 
+                                        ? 'text-green-700' 
+                                        : activeSemesterTab === '2' 
+                                            ? 'text-orange-700'
+                                            : 'text-blue-700'
+                                }`}>
+                                    {activeSemesterTab === '1' 
+                                        ? 'Showing only 1st semester subjects and schedules. These are typically taught in the first half of the academic year.'
+                                        : activeSemesterTab === '2' 
+                                            ? 'Showing only 2nd semester subjects and schedules. These are typically taught in the second half of the academic year.'
+                                            : 'Showing schedules from both semesters. Use the semester tabs above to filter by specific semester.'
+                                    }
+                                </p>
+                            </div>
+                            
+                            {/* Semester Statistics Summary */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                                <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-green-500 rounded-lg">
+                                            <FaCalendarAlt className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div>
+                                            <p className="text-green-800 font-semibold">1st Semester</p>
+                                            <p className="text-2xl font-bold text-green-900">
+                                                {filteredSchedules.filter(s => (s.semester?.toString() || s.subject?.semester?.toString() || '1') === '1').length}
+                                            </p>
+                                            <p className="text-xs text-green-600">Active schedules</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-lg p-4 border border-orange-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-orange-500 rounded-lg">
+                                            <FaCalendarAlt className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div>
+                                            <p className="text-orange-800 font-semibold">2nd Semester</p>
+                                            <p className="text-2xl font-bold text-orange-900">
+                                                {filteredSchedules.filter(s => (s.semester?.toString() || s.subject?.semester?.toString() || '1') === '2').length}
+                                            </p>
+                                            <p className="text-xs text-orange-600">Active schedules</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-blue-500 rounded-lg">
+                                            <FaUsers className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div>
+                                            <p className="text-blue-800 font-semibold">Currently Viewing</p>
+                                            <p className="text-2xl font-bold text-blue-900">
+                                                {semesterFilteredSchedules.length}
+                                            </p>
+                                            <p className="text-xs text-blue-600">
+                                                {activeSemesterTab === 'all' ? 'All semesters' : `${activeSemesterTab === '1' ? '1st' : '2nd'} semester only`}
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1837,29 +2018,84 @@ export default function ScheduleManagement() {
                                                 <option value="1">1st Semester Only</option>
                                                 <option value="2">2nd Semester Only</option>
                                             </select>
-                                            <p className="text-purple-600 text-xs mt-1">💡 Filter subjects by semester to easily identify which subjects belong to which semester</p>
+                                            <p className="text-purple-600 text-xs mt-1">
+                                                💡 <strong>Important:</strong> Filter by semester to avoid scheduling conflicts between different semester subjects.
+                                            </p>
                                         </div>
 
-                                        {/* Subject Selection - Step 2 */}
-                                        <div className={`${formData.section_id && formData.grade_level ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
-                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level ? 'text-green-800' : 'text-gray-500'}`}>
-                                                <span className={`${formData.section_id && formData.grade_level ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2</span>
-                                                Subject {formData.section_id && formData.grade_level ? '(Filtered by Section and Grade Level)' : '(Select Section and Grade Level First)'}
+                                        {/* Semester Selection - Step 2A */}
+                                        <div className={`${formData.section_id && formData.grade_level ? 'bg-orange-50/80 backdrop-blur-sm border-2 border-orange-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
+                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level ? 'text-orange-800' : 'text-gray-500'}`}>
+                                                <span className={`${formData.section_id && formData.grade_level ? 'bg-orange-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2A</span>
+                                                📅 Semester Selection {formData.section_id && formData.grade_level ? '(Required for Subject Filtering)' : '(Select Section and Grade Level First)'}
+                                            </label>
+                                            <select
+                                                value={formData.semester_filter || ''}
+                                                onChange={(e) => {
+                                                    setFormData({ 
+                                                        ...formData, 
+                                                        semester_filter: e.target.value,
+                                                        subject_id: '', // Reset subject when semester changes
+                                                        semester: e.target.value === '1' ? '1st Semester' : '2nd Semester'
+                                                    });
+                                                    // Also update the global semester filter
+                                                    setSemesterFilter(e.target.value);
+                                                }}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level ? 'border-orange-300/50 focus:ring-orange-500 focus:border-orange-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                disabled={!(formData.section_id && formData.grade_level)}
+                                                required
+                                            >
+                                                <option value="">Choose Semester</option>
+                                                <option value="1">🟢 1st Semester</option>
+                                                <option value="2">🟠 2nd Semester</option>
+                                            </select>
+                                            <div className="mt-2 bg-orange-100/50 rounded-lg p-3">
+                                                <p className="text-xs text-orange-700 font-medium">
+                                                    ⚠️ <strong>Important:</strong> Select the semester first to filter subjects correctly. 
+                                                    This prevents scheduling conflicts between different semester subjects.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Subject Selection - Step 2B */}
+                                        <div className={`${formData.section_id && formData.grade_level && formData.semester_filter ? 'bg-green-50/80 backdrop-blur-sm border-2 border-green-200/50' : 'bg-gray-50/80 backdrop-blur-sm border-2 border-gray-200/50'} rounded-lg p-4`}>
+                                            <label className={`block text-sm font-semibold mb-2 flex items-center gap-2 ${formData.section_id && formData.grade_level && formData.semester_filter ? 'text-green-800' : 'text-gray-500'}`}>
+                                                <span className={`${formData.section_id && formData.grade_level && formData.semester_filter ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'} rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold`}>2B</span>
+                                                Subject 
+                                                {formData.semester_filter && (
+                                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                                        {formData.semester_filter === '1' ? '1st Sem Only' : '2nd Sem Only'}
+                                                    </span>
+                                                )}
                                             </label>
                                             <select
                                                 value={formData.subject_id}
                                                 onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })}
-                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
-                                                disabled={!(formData.section_id && formData.grade_level)}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 backdrop-blur-sm ${formData.section_id && formData.grade_level && formData.semester_filter ? 'border-green-300/50 focus:ring-green-500 focus:border-green-500 bg-white/90' : 'border-gray-300/50 bg-gray-100/60 cursor-not-allowed'}`}
+                                                disabled={!(formData.section_id && formData.grade_level && formData.semester_filter)}
                                                 required
                                             >
-                                                <option value="">Select Subject</option>
-                                                {availableSubjects.map((subject) => (
+                                                <option value="">
+                                                    {!formData.semester_filter ? 'Select Semester First' : 'Select Subject'}
+                                                </option>
+                                                {formData.semester_filter && availableSubjects
+                                                    .filter(subject => subject.semester?.toString() === formData.semester_filter)
+                                                    .map((subject) => (
                                                     <option key={subject.id} value={subject.id} disabled={subject.isDisabled}>
-                                                        [{subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}] {subject.code} - {subject.name} {subject.disabledReason ? `(${subject.disabledReason})` : ''}
+                                                        {subject.code} - {subject.name} {subject.disabledReason ? `(${subject.disabledReason})` : ''}
                                                     </option>
                                                 ))}
                                             </select>
+                                            {!formData.semester_filter && (
+                                                <p className="text-xs text-red-500 mt-2 flex items-center gap-1">
+                                                    <span>⚠️</span> Please select a semester first to see available subjects
+                                                </p>
+                                            )}
+                                            {formData.semester_filter && (
+                                                <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
+                                                    <span>✅</span> Showing only {formData.semester_filter === '1' ? '1st semester' : '2nd semester'} subjects
+                                                </p>
+                                            )}
                                         </div>
 
                                         {/* Faculty Selection - Step 2 */}
@@ -2210,7 +2446,7 @@ export default function ScheduleManagement() {
                                                                 </div>
                                                             )}
 
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                                             {/* Section */}
                                                             <div>
                                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Section</label>
@@ -2250,23 +2486,65 @@ export default function ScheduleManagement() {
                                                                 </select>
                                                             </div>
 
+                                                            {/* Semester Filter - NEW */}
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                                    <span className="flex items-center gap-1">
+                                                                        📅 Semester
+                                                                        <span className="text-red-500">*</span>
+                                                                    </span>
+                                                                </label>
+                                                                <select
+                                                                    value={assignment.semester_filter || ''}
+                                                                    onChange={(e) => {
+                                                                        updateBulkAssignment(assignment.id, 'semester_filter', e.target.value);
+                                                                        updateBulkAssignment(assignment.id, 'subject_id', ''); // Reset subject when semester changes
+                                                                        // Also update the semester field for the assignment
+                                                                        updateBulkAssignment(assignment.id, 'semester', e.target.value === '1' ? '1st Semester' : '2nd Semester');
+                                                                    }}
+                                                                    className="w-full px-3 py-2 border-2 border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-orange-50"
+                                                                    required
+                                                                >
+                                                                    <option value="">Choose Semester</option>
+                                                                    <option value="1">🟢 1st Semester</option>
+                                                                    <option value="2">🟠 2nd Semester</option>
+                                                                </select>
+                                                                <p className="text-xs text-orange-600 mt-1 font-medium">
+                                                                    ⚠️ Required: Filters subjects by semester
+                                                                </p>
+                                                            </div>
+
                                                             {/* Subject */}
                                                             <div>
-                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                                    Subject
+                                                                    {assignment.semester_filter && (
+                                                                        <span className="text-xs text-blue-600 ml-1">
+                                                                            ({assignment.semester_filter === '1' ? '1st Sem' : '2nd Sem'} only)
+                                                                        </span>
+                                                                    )}
+                                                                </label>
                                                                 <select
                                                                     value={assignment.subject_id}
                                                                     onChange={(e) => updateBulkAssignment(assignment.id, 'subject_id', e.target.value)}
                                                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                                    disabled={!assignment.section_id || !assignment.grade_level}
+                                                                    disabled={!assignment.section_id || !assignment.grade_level || !assignment.semester_filter}
                                                                     required
                                                                 >
-                                                                    <option value="">Select Subject</option>
-                                                                    {getBulkFilteredSubjects(assignment.section_id, assignment.grade_level, assignment.id).map((subject) => (
+                                                                    <option value="">
+                                                                        {!assignment.semester_filter ? 'Select Semester First' : 'Select Subject'}
+                                                                    </option>
+                                                                    {assignment.semester_filter && getBulkFilteredSubjects(assignment.section_id, assignment.grade_level, assignment.id)
+                                                                        .filter(subject => subject.semester?.toString() === assignment.semester_filter)
+                                                                        .map((subject) => (
                                                                         <option key={subject.id} value={subject.id}>
-                                                                            [{subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}] {subject.code} - {subject.name}
+                                                                            {subject.code} - {subject.name}
                                                                         </option>
                                                                     ))}
                                                                 </select>
+                                                                {!assignment.semester_filter && (
+                                                                    <p className="text-xs text-red-500 mt-1">Please select semester first</p>
+                                                                )}
                                                             </div>
 
                                                             {/* Day */}
@@ -2489,6 +2767,16 @@ export default function ScheduleManagement() {
                                                                                                         <div className="text-center mb-2">
                                                                                                             <div className="text-sm font-bold text-gray-800 leading-tight mb-1">
                                                                                                                 {abbreviateSubjectName(schedule.subject?.name || subjects.find(s => s.id === schedule.subject_id)?.name || 'No Subject')}
+                                                                                                            </div>
+                                                                                                            {/* Semester Indicator */}
+                                                                                                            <div className="flex items-center justify-center gap-2 mb-1">
+                                                                                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${
+                                                                                                                    (schedule.semester?.toString() || schedule.subject?.semester?.toString() || '1') === '1'
+                                                                                                                        ? 'bg-green-100 text-green-800'
+                                                                                                                        : 'bg-orange-100 text-orange-800'
+                                                                                                                }`}>
+                                                                                                                    {(schedule.semester?.toString() || schedule.subject?.semester?.toString() || '1') === '1' ? '1st' : '2nd'} Sem
+                                                                                                                </span>
                                                                                                             </div>
                                                                                                             <div className="text-xs text-gray-600 bg-white/70 rounded px-2 py-1">
                                                                                                                 {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)}

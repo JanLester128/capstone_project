@@ -14,6 +14,8 @@ import {
   FaChalkboardTeacher,
   FaUserGraduate,
   FaUserCheck,
+  FaUserPlus,
+  FaExchangeAlt,
   FaBars,
   FaTimes,
   FaInfoCircle,
@@ -40,6 +42,7 @@ export default function FacultySidebar({ onToggle }) {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [userInfo, setUserInfo] = useState({});
   const [theme, setTheme] = useState('');
+  const [expandedMenus, setExpandedMenus] = useState({});
 
   // Update current URL when page URL changes and store in AuthManager
   useEffect(() => {
@@ -63,6 +66,31 @@ export default function FacultySidebar({ onToggle }) {
     setIsCollapsed(newState);
     localStorage.setItem('faculty-sidebar-collapsed', JSON.stringify(newState));
     if (onToggle) onToggle(newState);
+  };
+
+  const toggleSubmenu = (itemName) => {
+    setExpandedMenus(prev => {
+      const newState = {
+        ...prev,
+        [itemName]: !prev[itemName]
+      };
+      
+      // Scroll the submenu into view after a short delay
+      if (newState[itemName]) {
+        setTimeout(() => {
+          const submenuElement = document.querySelector(`[data-submenu="${itemName}"]`);
+          if (submenuElement) {
+            submenuElement.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'nearest',
+              inline: 'nearest'
+            });
+          }
+        }, 100);
+      }
+      
+      return newState;
+    });
   };
 
   useEffect(() => {
@@ -217,10 +245,23 @@ export default function FacultySidebar({ onToggle }) {
     { name: "Grade Input", href: "/faculty/grades", icon: FaGraduationCap, description: "Input student grades" },
   ];
 
-  // Additional menu items for coordinators
+  // Additional menu items for coordinators with student type separation
   const coordinatorMenuItems = [
     { name: "Enrollment Management", href: "/faculty/enrollment", icon: FaUserGraduate, description: "Review student enrollments" },
-    { name: "Enrolled Students", href: "/faculty/students", icon: FaUserCheck, description: "View enrolled students by strand and section" },
+    { name: "Manual Enrollment", href: "/faculty/manual-enrollment", icon: FaUserPlus, description: "Enroll students manually (for those without internet/email)" },
+    { 
+      name: "Student Management", 
+      href: "/faculty/students", 
+      icon: FaUserCheck, 
+      description: "View enrolled students by type and section",
+      hasSubmenu: true,
+      submenu: [
+        { name: "All Students", href: "/faculty/students?type=all", icon: FaUsers, description: "View all enrolled students" },
+        { name: "New Students", href: "/faculty/students?type=new", icon: FaUserPlus, description: "First-time enrollees" },
+        { name: "Continuing Students", href: "/faculty/students?type=continuing", icon: FaUserCheck, description: "Grade 12 and returning students" },
+        { name: "Transferees", href: "/faculty/students?type=transferee", icon: FaExchangeAlt, description: "Students from other schools" }
+      ]
+    },
   ];
 
   // Combine menu items based on coordinator status
@@ -254,19 +295,19 @@ export default function FacultySidebar({ onToggle }) {
   };
 
   return (
-    <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 ${
+    <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 flex flex-col ${
       isCollapsed ? 'w-16' : 'w-64'
     }`}>
       {/* Header */}
-      <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-purple-500 to-blue-600`}>
+      <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-500 to-indigo-600`}>
         {!isCollapsed && (
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <FaSchool className="text-purple-600 text-lg" />
+              <FaSchool className="text-blue-600 text-lg" />
             </div>
             <div>
               <h1 className="text-white font-bold text-lg">ONSTS</h1>
-              <p className="text-purple-100 text-xs">Faculty Portal</p>
+              <p className="text-blue-100 text-xs">Faculty Portal</p>
             </div>
           </div>
         )}
@@ -280,64 +321,125 @@ export default function FacultySidebar({ onToggle }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4">
-        <div className="px-3 space-y-1">
-          {!isCollapsed && (
-            <div className="px-3 py-2 mb-4">
-              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">MAIN MENU</h2>
-            </div>
-          )}
+      <nav className="flex-1 overflow-hidden py-1">
+        <ul className="px-2 space-y-0">
           
           {menuItems.map((item, index) => {
             const isCurrentActive = isActive(item.href);
             const Icon = item.icon;
+            const hasSubmenu = item.hasSubmenu && item.submenu;
+            const isExpanded = expandedMenus[item.name];
             
             return (
-              <Link
-                key={index}
-                href={item.href}
-                className={`group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 ${
-                  isCurrentActive
-                    ? 'bg-gradient-to-r from-purple-500 to-blue-600 text-white shadow-lg'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                } ${isCollapsed ? 'justify-center' : ''}`}
-                onClick={() => {
-                  // Store the clicked URL using AuthManager
-                  AuthManager.storeCurrentPage(item.href);
-                  console.log('Sidebar: Storing clicked page via AuthManager:', item.href);
-                }}
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <Icon className={`text-lg flex-shrink-0 transition-transform duration-200 ${
-                    isCurrentActive ? 'text-white' : 'text-gray-500 group-hover:text-gray-700'
-                  }`} />
-                  
-                  {!isCollapsed && (
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className={`font-medium text-sm truncate ${
-                          isCurrentActive ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'
+              <li key={index} className="relative">
+                {/* Main Menu Item */}
+                {hasSubmenu ? (
+                  <button
+                    onClick={() => toggleSubmenu(item.name)}
+                    className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-lg transition-all duration-200 text-left ${
+                      isExpanded
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <Icon className={`text-lg flex-shrink-0 ${
+                      isExpanded ? 'text-blue-600' : 'text-gray-400'
+                    }`} />
+                    {!isCollapsed && (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-medium text-sm truncate ${
+                            isExpanded ? 'text-blue-700' : 'text-gray-700'
+                          }`}>
+                            {item.name}
+                          </div>
+                          <div className={`text-xs truncate ${
+                            isExpanded ? 'text-blue-600' : 'text-gray-500'
+                          }`}>
+                            {item.description}
+                          </div>
+                        </div>
+                        {isExpanded ? (
+                          <FaChevronUp className="text-sm text-blue-600" />
+                        ) : (
+                          <FaChevronDown className="text-sm text-gray-400" />
+                        )}
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <Link
+                    href={item.href}
+                    className={`flex items-center gap-3 px-3 py-1.5 rounded-lg transition-all duration-200 ${
+                      isCurrentActive
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                    onClick={() => {
+                      AuthManager.storeCurrentPage(item.href);
+                      console.log('Sidebar: Storing clicked page via AuthManager:', item.href);
+                    }}
+                  >
+                    <Icon className={`text-lg flex-shrink-0 ${
+                      isCurrentActive ? 'text-blue-600' : 'text-gray-400'
+                    }`} />
+                    {!isCollapsed && (
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-medium text-sm truncate ${
+                          isCurrentActive ? 'text-blue-700' : 'text-gray-700'
                         }`}>
                           {item.name}
-                        </span>
+                        </div>
+                        <div className={`text-xs truncate ${
+                          isCurrentActive ? 'text-blue-600' : 'text-gray-500'
+                        }`}>
+                          {item.description}
+                        </div>
                       </div>
-                      <p className={`text-xs mt-0.5 truncate ${
-                        isCurrentActive ? 'text-purple-100' : 'text-gray-500 group-hover:text-gray-600'
-                      }`}>
-                        {item.description}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Active indicator for collapsed state */}
-                {isCollapsed && isCurrentActive && (
-                  <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-6 bg-purple-500 rounded-full shadow-sm"></div>
+                    )}
+                  </Link>
                 )}
-                
-                {/* Hover arrow */}
-                {!isCollapsed && !isCurrentActive && (
-                  <FaChevronRight className="ml-2 text-xs text-gray-400 transition-transform duration-200 group-hover:translate-x-1" />
+
+                {/* Submenu Items */}
+                {isExpanded && !isCollapsed && (
+                  <ul className="ml-6 mt-0.5 space-y-0" data-submenu={item.name}>
+                    {item.submenu.map((subItem, subIndex) => {
+                      const SubIcon = subItem.icon;
+                      const isSubActive = isActive(subItem.href);
+                      
+                      return (
+                        <li key={subIndex}>
+                          <Link
+                            href={subItem.href}
+                            className={`flex items-center gap-3 px-3 py-1 rounded-lg transition-all duration-200 ${
+                              isSubActive
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                            onClick={() => {
+                              AuthManager.storeCurrentPage(subItem.href);
+                            }}
+                          >
+                            <SubIcon className={`text-sm flex-shrink-0 ${
+                              isSubActive ? 'text-blue-600' : 'text-gray-400'
+                            }`} />
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-medium text-sm truncate ${
+                                isSubActive ? 'text-blue-700' : 'text-gray-700'
+                              }`}>
+                                {subItem.name}
+                              </div>
+                              <div className={`text-xs truncate ${
+                                isSubActive ? 'text-blue-600' : 'text-gray-500'
+                              }`}>
+                                {subItem.description}
+                              </div>
+                            </div>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
 
                 {/* Tooltip for collapsed state */}
@@ -348,14 +450,14 @@ export default function FacultySidebar({ onToggle }) {
                     <div className="absolute top-1/2 -left-1 transform -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
                   </div>
                 )}
-              </Link>
+              </li>
             );
           })}
-        </div>
+        </ul>
       </nav>
 
       {/* Modern Profile Section */}
-      <div className="relative p-4 border-t border-gray-200 bg-gray-50">
+      <div className="relative p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
         {!isCollapsed ? (
           <div className="relative">
             <button

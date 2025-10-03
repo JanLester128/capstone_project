@@ -90,6 +90,8 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
   const [yearEnd, setYearEnd] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [enrollmentStartDate, setEnrollmentStartDate] = useState("");
+  const [enrollmentEndDate, setEnrollmentEndDate] = useState("");
   const [customYearMode, setCustomYearMode] = useState(false);
   const [customStartYear, setCustomStartYear] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -118,19 +120,47 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
     return true;
   };
 
+  // Helper function to format date for HTML date input (YYYY-MM-DD)
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return "";
+    
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "";
+      
+      // Format as YYYY-MM-DD for HTML date input
+      return date.toISOString().split('T')[0];
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return "";
+    }
+  };
+
   useEffect(() => {
     if (semester) {
+      console.log('Editing semester:', {
+        semester: semester,
+        start_date_raw: semester.start_date,
+        end_date_raw: semester.end_date,
+        start_date_formatted: formatDateForInput(semester.start_date),
+        end_date_formatted: formatDateForInput(semester.end_date)
+      });
+      
       setSemesterName(semester.semester || "");
       setYearStart(semester.year_start || "");
       setYearEnd(semester.year_end || "");
-      setStartDate(semester.start_date || "");
-      setEndDate(semester.end_date || "");
+      setStartDate(formatDateForInput(semester.start_date));
+      setEndDate(formatDateForInput(semester.end_date));
+      setEnrollmentStartDate(formatDateForInput(semester.enrollment_start));
+      setEnrollmentEndDate(formatDateForInput(semester.enrollment_end));
     } else {
       setSemesterName("");
       setYearStart("");
       setYearEnd("");
       setStartDate("");
       setEndDate("");
+      setEnrollmentStartDate("");
+      setEnrollmentEndDate("");
     }
   }, [semester, isOpen]);
 
@@ -139,7 +169,20 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
     if (!semester && startDate && isOpen) {
       const start = new Date(startDate);
       const autoEndDate = new Date(start);
-      autoEndDate.setDate(start.getDate() + 7);
+      
+      // For Full Academic Year: Set to 10 months (Philippine SHS requirement)
+      // For regular semesters: Set to 1 week
+      if (semesterName === 'Full Academic Year') {
+        // Add 10 months and ensure we have enough days to guarantee 10+ months
+        autoEndDate.setFullYear(start.getFullYear() + 1);
+        autoEndDate.setMonth(start.getMonth() - 2); // 10 months forward = next year, 2 months back
+        autoEndDate.setDate(start.getDate());
+        
+        // Add a few extra days to ensure we exceed 10 months
+        autoEndDate.setDate(autoEndDate.getDate() + 5);
+      } else {
+        autoEndDate.setDate(start.getDate() + 7);
+      }
       
       // If end date falls on weekend, move to next Monday
       const endDay = autoEndDate.getDay();
@@ -152,13 +195,38 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
       const formattedEndDate = autoEndDate.toISOString().split('T')[0];
       setEndDate(formattedEndDate);
     }
+  }, [startDate, semester, isOpen, semesterName]);
+
+  // Auto-set enrollment dates when academic year start date changes
+  useEffect(() => {
+    if (!semester && startDate && isOpen) {
+      const start = new Date(startDate);
+      
+      // Enrollment starts same day as academic year
+      setEnrollmentStartDate(startDate);
+      
+      // Enrollment ends 1 week later (for both Full Academic Year and regular semesters)
+      const enrollmentEnd = new Date(start);
+      enrollmentEnd.setDate(start.getDate() + 7);
+      
+      // If enrollment end falls on weekend, move to next Monday
+      const endDay = enrollmentEnd.getDay();
+      if (endDay === 0) { // Sunday
+        enrollmentEnd.setDate(enrollmentEnd.getDate() + 1); // Move to Monday
+      } else if (endDay === 6) { // Saturday
+        enrollmentEnd.setDate(enrollmentEnd.getDate() + 2); // Move to Monday
+      }
+      
+      const formattedEnrollmentEnd = enrollmentEnd.toISOString().split('T')[0];
+      setEnrollmentEndDate(formattedEnrollmentEnd);
+    }
   }, [startDate, semester, isOpen]);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!semesterName.trim() || !String(yearStart).trim() || !String(yearEnd).trim() || !startDate.trim() || !endDate.trim()) return;
+    if (!semesterName.trim() || !String(yearStart).trim() || !String(yearEnd).trim() || !startDate.trim() || !endDate.trim() || !enrollmentStartDate.trim() || !enrollmentEndDate.trim()) return;
 
     // Validate dates
     const today = new Date();
@@ -230,7 +298,9 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
     }
 
     // Enrollment Window Validation (1 week minimum, 2 weeks maximum)
-    const diffTime = Math.abs(end - start);
+    const enrollmentStart = new Date(enrollmentStartDate);
+    const enrollmentEnd = new Date(enrollmentEndDate);
+    const diffTime = Math.abs(enrollmentEnd - enrollmentStart);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     if (diffDays < 7) {
@@ -269,17 +339,60 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
     
     // Philippine SHS System: Handle Full Academic Year creation
     if (semesterName === "Full Academic Year") {
+      // Validate 10-month duration for Full Academic Year
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const diffTime = Math.abs(end - start);
+      const diffMonths = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 30.44)); // Average days per month
+      
+      if (diffMonths < 10) {
+        Swal.fire({
+          title: 'Duration Too Short',
+          html: `
+            <div class="text-left">
+              <p class="mb-2">Full Academic Year must be at least <strong>10 months</strong> duration.</p>
+              <p class="text-sm text-gray-600">Current duration: <strong>${diffMonths} months</strong></p>
+              <p class="text-sm text-gray-600 mt-2">Please adjust the end date to meet the 10-month requirement for a complete academic year.</p>
+            </div>
+          `,
+          icon: 'warning',
+          confirmButtonColor: '#f59e0b'
+        });
+        setProcessing(false);
+        return;
+      }
+      
+      if (diffMonths > 11) {
+        Swal.fire({
+          title: 'Duration Too Long',
+          html: `
+            <div class="text-left">
+              <p class="mb-2">Full Academic Year cannot exceed <strong>11 months</strong> duration.</p>
+              <p class="text-sm text-gray-600">Current duration: <strong>${diffMonths} months</strong></p>
+              <p class="text-sm text-gray-600 mt-2">Please adjust the end date to stay within the 10-11 month range for a standard academic year.</p>
+            </div>
+          `,
+          icon: 'warning',
+          confirmButtonColor: '#f59e0b'
+        });
+        setProcessing(false);
+        return;
+      }
+
       const academicYearData = {
         year_start: parseInt(yearStart),
         year_end: parseInt(yearEnd),
         semester: semesterName.trim(),
         start_date: startDate,
         end_date: endDate,
+        enrollment_start: enrollmentStartDate,
+        enrollment_end: enrollmentEndDate,
         create_full_year: true, // Flag to indicate full year creation
         enrollment_open: true, // Enable enrollment by default
         is_current_academic_year: true, // Set as current academic year
         allow_grade_progression: false // Can be enabled later by registrar
       };
+
 
       router.post("/registrar/school-years/create-full-year", academicYearData, {
         onSuccess: (page) => {
@@ -327,6 +440,8 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
       semester: semesterName.trim(),
       start_date: startDate,
       end_date: endDate,
+      enrollment_start: enrollmentStartDate,
+      enrollment_end: enrollmentEndDate,
     };
 
     if (semester) {
@@ -412,6 +527,8 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
                   <div className="text-blue-500 mt-0.5">ℹ️</div>
                   <div className="text-xs text-blue-700">
                     <strong>Philippine SHS System:</strong> Creates a unified full academic year covering both 1st and 2nd semester periods with proper enrollment and schedule management for regular students.
+                    <br /><br />
+                    <strong>Duration Requirement:</strong> Must be exactly 10 months (minimum 10 months, maximum 11 months) to comply with DepEd standards for a complete academic year.
                   </div>
                 </div>
               </div>
@@ -513,11 +630,24 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
                   }
                   
                   setStartDate(e.target.value);
-                  // Auto-set end date to 1 week (7 days) from start date, avoiding weekends
+                  // Auto-set end date based on semester type
                   if (e.target.value) {
                     const start = new Date(e.target.value);
                     const autoEndDate = new Date(start);
-                    autoEndDate.setDate(start.getDate() + 7);
+                    
+                    // For Full Academic Year: Set to 10 months (Philippine SHS requirement)
+                    // For regular semesters: Set to 1 week
+                    if (semesterName === 'Full Academic Year') {
+                      // Add 10 months and ensure we have enough days to guarantee 10+ months
+                      autoEndDate.setFullYear(start.getFullYear() + 1);
+                      autoEndDate.setMonth(start.getMonth() - 2); // 10 months forward = next year, 2 months back
+                      autoEndDate.setDate(start.getDate());
+                      
+                      // Add a few extra days to ensure we exceed 10 months
+                      autoEndDate.setDate(autoEndDate.getDate() + 5);
+                    } else {
+                      autoEndDate.setDate(start.getDate() + 7);
+                    }
                     
                     // If end date falls on weekend, move to next Monday
                     const endDay = autoEndDate.getDay();
@@ -538,7 +668,9 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
               {!semester && (
                 <div className="mt-1 space-y-1">
                   <p className="text-xs text-gray-500">Cannot select past dates for new semesters</p>
-                  <p className="text-xs text-green-600">📅 End date will auto-set to 1 week from start date</p>
+                  <p className="text-xs text-green-600">
+                    📅 End date will auto-set to {semesterName === 'Full Academic Year' ? '10 months' : '1 week'} from start date
+                  </p>
                 </div>
               )}
             </div>
@@ -560,10 +692,60 @@ const SemesterModal = ({ isOpen, onClose, semester }) => {
                 required
               />
               <div className="mt-1 space-y-1">
-                <p className="text-xs text-gray-500">Auto-set to 1 week from start date (can be adjusted)</p>
+                <p className="text-xs text-gray-500">
+                  Auto-set to {semesterName === 'Full Academic Year' ? '10 months' : '1 week'} from start date (can be adjusted)
+                </p>
               </div>
             </div>
           </div>
+
+          {/* Enrollment Period Section */}
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-green-800 mb-3 flex items-center gap-2">
+              📝 Enrollment Period (When students can enroll)
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Enrollment Start Date *</label>
+                <input
+                  type="date"
+                  value={enrollmentStartDate}
+                  onChange={(e) => {
+                    if (!handleDateInput(e)) {
+                      setEnrollmentStartDate('');
+                      return;
+                    }
+                    setEnrollmentStartDate(e.target.value);
+                  }}
+                  min={startDate || (!semester ? getTodayDate() : undefined)}
+                  max={endDate}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Usually same as academic year start</p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Enrollment End Date *</label>
+                <input
+                  type="date"
+                  value={enrollmentEndDate}
+                  onChange={(e) => {
+                    if (!handleDateInput(e)) {
+                      setEnrollmentEndDate('');
+                      return;
+                    }
+                    setEnrollmentEndDate(e.target.value);
+                  }}
+                  min={enrollmentStartDate || startDate || (!semester ? getTodayDate() : undefined)}
+                  max={endDate}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Auto-set to 1 week from enrollment start</p>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-700 font-medium">📅 Requirements:</p>
             <div className="text-xs text-blue-600 space-y-0.5">
@@ -599,7 +781,17 @@ const RegistrarSemester = () => {
   useAuthMiddleware(['registrar']);
   
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { schoolYears = [], flash } = usePage().props;
+  const { 
+    schoolYears = [], 
+    semesters = [], 
+    activeSemester = null, 
+    inactiveSemesters = [], 
+    totalSemesters = 0,
+    activeSchoolYear = null,
+    allSchoolYears = [],
+    flash 
+  } = usePage().props;
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editSemester, setEditSemester] = useState(null);
 
@@ -733,8 +925,9 @@ const RegistrarSemester = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const activeSemester = schoolYears.find(s => s.is_active);
-  const inactiveSemesters = schoolYears.filter(s => !s.is_active);
+  // Use props data instead of calculating locally
+  const currentActiveSemester = activeSemester || schoolYears.find(s => s.is_active);
+  const currentInactiveSemesters = inactiveSemesters.length > 0 ? inactiveSemesters : schoolYears.filter(s => !s.is_active);
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
@@ -759,7 +952,7 @@ const RegistrarSemester = () => {
           {/* Header Section */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="space-y-2">
+              <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl shadow-lg">
                     <FaCalendarAlt className="text-white text-2xl" />
@@ -768,6 +961,59 @@ const RegistrarSemester = () => {
                     <h1 className="text-3xl font-bold text-gray-900">Semester Management</h1>
                     <p className="text-gray-600">Manage academic semesters and activation status</p>
                   </div>
+                </div>
+                
+                {/* Active School Year Dropdown */}
+                <div className="flex items-center gap-4 bg-gradient-to-r from-green-50 to-blue-50 p-4 rounded-xl border border-green-200">
+                  <div className="flex items-center gap-2">
+                    <FaGraduationCap className="text-green-600" />
+                    <span className="text-sm font-semibold text-gray-700">Active School Year:</span>
+                  </div>
+                  <select
+                    value={activeSchoolYear?.id || ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        router.post(`/registrar/activate-school-year/${e.target.value}`, {}, {
+                          preserveState: false,
+                          onSuccess: (page) => {
+                            Swal.fire({
+                              title: 'School Year Activated!',
+                              text: page.props.flash?.success || 'The selected school year is now active. Data has been prepared for the new academic year.',
+                              icon: 'success',
+                              confirmButtonColor: '#10b981'
+                            });
+                          },
+                          onError: (errors) => {
+                            console.error('Activation error:', errors);
+                            const errorMessage = errors.general || errors.error || Object.values(errors)[0] || 'Failed to activate school year. Please try again.';
+                            Swal.fire({
+                              title: 'Error!',
+                              text: errorMessage,
+                              icon: 'error',
+                              confirmButtonColor: '#dc2626'
+                            });
+                          }
+                        });
+                      }
+                    }}
+                    className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px]"
+                  >
+                    <option value="">Select School Year ({schoolYears.length} available)</option>
+                    {schoolYears.map((year) => (
+                      <option key={year.id} value={year.id}>
+                        {year.year_start}-{year.year_end} {year.semester}
+                        {year.is_active ? ' (Active)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {activeSchoolYear && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-sm text-green-700 font-medium">
+                        {activeSchoolYear.year_start}-{activeSchoolYear.year_end} {activeSchoolYear.semester}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
               <button
@@ -789,13 +1035,13 @@ const RegistrarSemester = () => {
           </div>
 
 
-          {/* Semester Cards Section */}
+          {/* School Year Summary Section */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-2 bg-gradient-to-br from-slate-500 to-gray-600 rounded-lg">
                 <FaList className="text-white text-lg" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">All Semesters</h2>
+              <h2 className="text-2xl font-bold text-gray-900">School Year Overview</h2>
             </div>
             
             {schoolYears.length === 0 ? (
@@ -814,128 +1060,92 @@ const RegistrarSemester = () => {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                {schoolYears.map((semester) => (
-                  <div key={semester.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
-                    {/* Header with icon and title */}
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="p-2 bg-gray-100 rounded-lg">
-                        <FaCalendarAlt className="text-gray-600 text-lg" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Summary Cards */}
+                <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl p-6 border border-green-200">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="p-2 bg-green-500 rounded-lg">
+                      <FaGraduationCap className="text-white text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-green-800">Total School Years</h3>
+                      <p className="text-2xl font-bold text-green-600">{schoolYears.length}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl p-6 border border-blue-200">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="p-2 bg-blue-500 rounded-lg">
+                      <FaToggleOn className="text-white text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-blue-800">Active School Year</h3>
+                      <p className="text-sm font-medium text-blue-600">
+                        {activeSchoolYear ? 
+                          `${activeSchoolYear.year_start}-${activeSchoolYear.year_end}` : 
+                          'None Active'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-50 to-violet-100 rounded-xl p-6 border border-purple-200">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="p-2 bg-purple-500 rounded-lg">
+                      <FaCalendarAlt className="text-white text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-purple-800">Management</h3>
+                      <p className="text-sm text-purple-600">Use dropdown above to switch active year</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* School Years List */}
+            {schoolYears.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Available School Years</h3>
+                <div className="space-y-3">
+                  {schoolYears.map((year) => (
+                    <div key={year.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-3 h-3 rounded-full ${year.is_active ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {year.year_start}-{year.year_end} {year.semester}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {year.start_date && year.end_date ? (
+                              `${new Date(year.start_date).toLocaleDateString()} - ${new Date(year.end_date).toLocaleDateString()}`
+                            ) : (
+                              'Dates not set'
+                            )}
+                          </p>
+                        </div>
                       </div>
-                      <h3 className="text-xl font-bold text-gray-900">{semester.semester}</h3>
-                    </div>
-                    
-                    {/* School Year */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <FaGraduationCap className="text-gray-400 text-sm" />
-                      <span className="text-sm text-gray-600 font-medium">School Year:</span>
-                      <span className="text-sm font-semibold text-gray-800">{semester.year_start}-{semester.year_end}</span>
-                    </div>
-                    
-                    {/* Semester Duration */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <FaClock className="text-gray-400 text-sm" />
-                      <span className="text-sm text-gray-600 font-medium">Duration:</span>
-                      <span className="text-sm font-semibold text-gray-800">
-                        {semester.start_date && semester.end_date ? (
-                          `${new Date(semester.start_date).toLocaleDateString()} - ${new Date(semester.end_date).toLocaleDateString()}`
-                        ) : (
-                          <span className="text-red-500 italic">Dates not set</span>
+                      <div className="flex items-center gap-2">
+                        {year.is_active && (
+                          <span className="px-2 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">
+                            Active
+                          </span>
                         )}
-                      </span>
-                    </div>
-
-                    {/* Countdown Timer */}
-                    <CountdownTimer
-                      endDate={semester.end_date}
-                      isActive={semester.is_active}
-                      semesterId={semester.id}
-                      onExpired={() => handleToggleActive(semester.id, semester.is_active)}
-                    />
-
-                    {/* Status and Actions */}
-                    <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                      {/* Status with slide toggle */}
-                      <div className="flex items-center gap-3">
-                        {/* Slide Toggle Switch */}
                         <button
-                          onClick={() => handleToggleActive(semester.id, semester.is_active)}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
-                            semester.is_active ? 'bg-emerald-500' : 'bg-gray-300'
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                              semester.is_active ? 'translate-x-6' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                      
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => openEditModal(semester)}
-                          className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all duration-200"
-                          title="Edit Semester"
+                          onClick={() => openEditModal(year)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Edit"
                         >
                           <FaEdit className="text-sm" />
                         </button>
-                        <button
-                          onClick={() => handleDeleteSemester(semester.id)}
-                          className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all duration-200"
-                          title="Delete Semester"
-                        >
-                          <FaTrash className="text-sm" />
-                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
-          </div>
-
-          {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Semesters</p>
-                  <p className="text-3xl font-bold text-gray-900">{schoolYears.length}</p>
-                  <p className="text-xs text-gray-400">Academic periods</p>
-                </div>
-                <div className="p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-2xl">
-                  <FaCalendarAlt className="text-purple-600 text-2xl" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wide">Active Semester</p>
-                  <p className="text-3xl font-bold text-emerald-600">{schoolYears.filter(s => s.is_active).length}</p>
-                  <p className="text-xs text-gray-400">Currently running</p>
-                </div>
-                <div className="p-4 bg-gradient-to-br from-emerald-100 to-green-100 rounded-2xl">
-                  <FaToggleOn className="text-emerald-600 text-2xl" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wide">Inactive Semesters</p>
-                  <p className="text-3xl font-bold text-gray-600">{schoolYears.filter(s => !s.is_active).length}</p>
-                  <p className="text-xs text-gray-400">Not currently active</p>
-                </div>
-                <div className="p-4 bg-gradient-to-br from-gray-100 to-slate-100 rounded-2xl">
-                  <FaToggleOff className="text-gray-600 text-2xl" />
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </main>

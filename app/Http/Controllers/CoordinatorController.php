@@ -33,6 +33,8 @@ class CoordinatorController extends Controller
 
     /**
      * Display pending enrollments for coordinator review (Page render)
+     * Following HCI Principle 4: Consistency and Standards - Separate student types for better organization
+     * Following HCI Principle 6: Recognition rather than recall - Clear categorization reduces cognitive load
      */
     public function enrollmentPage()
     {
@@ -42,61 +44,126 @@ class CoordinatorController extends Controller
             
             if (!$activeSchoolYear) {
                 return Inertia::render('Faculty/Faculty_Enrollment', [
-                    'pendingStudents' => [],
+                    'newStudents' => [],
+                    'continuingStudents' => [],
+                    'transfereeStudents' => [],
                     'rejectedStudents' => [],
                     'activeSchoolYear' => null,
                     'allowFacultyCorPrint' => true
                 ]);
             }
 
-        // Helper to process a student (attach preferences and address)
-        $processStudent = function ($student) {
-            $preferences = \App\Models\StudentStrandPreference::with('strand')
-                ->where('student_id', $student->user_id) // use users.id for strand preferences
-                ->orderBy('preference_order')
-                ->get();
+            // Helper to process a student (attach preferences and address)
+            $processStudent = function ($student) {
+                $preferences = \App\Models\StudentStrandPreference::with('strand')
+                    ->where('student_id', $student->user_id) // use users.id for strand preferences
+                    ->orderBy('preference_order')
+                    ->get();
 
-            $codes = $preferences->map(fn($p) => $p->strand?->code)->filter()->values();
-            $names = $preferences->map(fn($p) => $p->strand?->name)->filter()->values();
-            $student->strand_preferences = $codes->isNotEmpty() ? $codes->toArray() : ($names->isNotEmpty() ? $names->toArray() : ['No preferences specified']);
-            $student->address = $student->address ?: 'No address provided';
-            return $student;
-        };
+                $codes = $preferences->map(fn($p) => $p->strand?->code)->filter()->values();
+                $names = $preferences->map(fn($p) => $p->strand?->name)->filter()->values();
+                $student->strand_preferences = $codes->isNotEmpty() ? $codes->toArray() : ($names->isNotEmpty() ? $names->toArray() : ['No preferences specified']);
+                $student->address = $student->address ?: 'No address provided';
+                
+                // Add transferee data if applicable (check both fields)
+                $isTransferee = ($student->user && $student->user->student_type === 'transferee') || 
+                               ($student->student_status === 'Transferee');
+                               
+                if ($isTransferee) {
+                    // Ensure user is marked as transferee in users table
+                    if ($student->user && $student->user->student_type !== 'transferee') {
+                        $student->user->update(['student_type' => 'transferee']);
+                        $student->user->refresh();
+                    }
+                    
+                    $student->previous_schools = $student->user->transfereePreviousSchools ?? collect();
+                    $student->credited_subjects = $student->user->transfereeCreditedSubjects ?? collect();
+                    
+                    // Get credited subject IDs for filtering
+                    $student->credited_subject_ids = $student->credited_subjects->pluck('subject_id')->toArray();
+                }
+                
+                // Ensure student_status is available in frontend
+                $student->student_status = $student->student_status;
+                
+                return $student;
+            };
 
-        // Build lists by deriving status from enrollments (active school year)
-        // Only show students that are NOT yet enrolled (pending/rejected only)
-        $studentsAll = Student::with(['user', 'strand', 'section'])->get();
-        
-        $pendingStudents = collect();
-        $rejectedStudents = collect();
-
-        foreach ($studentsAll as $student) {
-            $latest = DB::table('enrollments')
-                ->where('student_id', $student->id) // enrollments.student_id references student_personal_info.id
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->orderByDesc('id')
-                ->first();
+            // Build lists by deriving status from enrollments AND student type (active school year)
+            $studentsAll = Student::with(['user', 'strand', 'section'])->get();
             
-            // Skip students who haven't submitted any enrollment application
-            if (!$latest) {
-                continue; // Don't show students without enrollment records
+            // Separate by student type following HCI principles
+            $newStudents = collect();
+            $continuingStudents = collect();
+            $transfereeStudents = collect();
+            $rejectedStudents = collect();
+
+            foreach ($studentsAll as $student) {
+                $latest = DB::table('enrollments')
+                    ->where('student_id', $student->id) // enrollments.student_id references student_personal_info.id
+                    ->where('school_year_id', $activeSchoolYear->id)
+                    ->orderByDesc('id')
+                    ->first();
+                
+                // Skip students who haven't submitted any enrollment application
+                if (!$latest) {
+                    continue; // Don't show students without enrollment records
+                }
+                
+                $status = $latest->status;
+                $processed = $processStudent($student);
+                
+                // Get student type from student record (check both fields for compatibility)
+                $studentType = $student->user->student_type ?? 
+                              $student->student_status ?? 
+                              'new';
+                
+                // Debug logging to help identify the issue
+                Log::info('Student Type Debug', [
+                    'student_id' => $student->id,
+                    'student_name' => $student->user->firstname . ' ' . $student->user->lastname,
+                    'user_student_type' => $student->user->student_type ?? 'null',
+                    'student_status' => $student->student_status ?? 'null',
+                    'resolved_type' => $studentType,
+                    'final_category' => $studentType === 'transferee' ? 'transfereeStudents' : 
+                                       ($studentType === 'continuing' ? 'continuingStudents' : 'newStudents')
+                ]);
+                
+                // Normalize the student type values
+                if (strtolower($studentType) === 'transferee') {
+                    $studentType = 'transferee';
+                } elseif (strtolower($studentType) === 'continuing') {
+                    $studentType = 'continuing';
+                } else {
+                    $studentType = 'new';
+                }
+                
+                // Only include students who have submitted enrollment applications
+                if ($status === 'rejected') {
+                    $rejectedStudents->push($processed);
+                } elseif ($status === 'pending' || $status === 'approved') {
+                    // Separate by student type for better organization (HCI Principle 4: Consistency)
+                    switch ($studentType) {
+                        case 'new':
+                            $newStudents->push($processed);
+                            break;
+                        case 'continuing':
+                            $continuingStudents->push($processed);
+                            break;
+                        case 'transferee':
+                            $transfereeStudents->push($processed);
+                            break;
+                        default:
+                            $newStudents->push($processed); // Default to new if type is unclear
+                    }
+                }
+                // Skip students with 'enrolled' status - they belong in Student Assignment
             }
-            
-            $status = $latest->status;
-            $processed = $processStudent($student);
-            
-            // Only include students who have submitted enrollment applications
-            if ($status === 'rejected') {
-                $rejectedStudents->push($processed);
-            } elseif ($status === 'pending' || $status === 'approved') {
-                // Include both pending and approved (not yet enrolled) students
-                $pendingStudents->push($processed);
-            }
-            // Skip students with 'enrolled' status - they belong in Student Assignment
-        }
 
             return Inertia::render('Faculty/Faculty_Enrollment', [
-                'pendingStudents' => $pendingStudents,
+                'newStudents' => $newStudents,
+                'continuingStudents' => $continuingStudents,
+                'transfereeStudents' => $transfereeStudents,
                 'rejectedStudents' => $rejectedStudents,
                 'activeSchoolYear' => $activeSchoolYear,
                 'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
@@ -107,7 +174,9 @@ class CoordinatorController extends Controller
         } catch (\Exception $e) {
             Log::error('Error in enrollmentPage: ' . $e->getMessage());
             return Inertia::render('Faculty/Faculty_Enrollment', [
-                'pendingStudents' => [],
+                'newStudents' => [],
+                'continuingStudents' => [],
+                'transfereeStudents' => [],
                 'rejectedStudents' => [],
                 'activeSchoolYear' => null,
                 'allowFacultyCorPrint' => true,
@@ -401,7 +470,9 @@ class CoordinatorController extends Controller
 
                 if ($existing) {
                     DB::table('enrollments')->where('id', $existing->id)->update([
-                        'status' => 'approved',
+                        'status' => 'enrolled',
+                        'strand_id' => $strand->id,
+                        'assigned_section_id' => $validated['section_id'],
                         'coordinator_id' => Auth::id(),
                         // prefer reviewed_at if exists, else date_enrolled
                         (Schema::hasColumn('enrollments', 'reviewed_at') ? 'reviewed_at' : (Schema::hasColumn('enrollments', 'date_enrolled') ? 'date_enrolled' : 'updated_at')) => now(),
@@ -412,7 +483,9 @@ class CoordinatorController extends Controller
                     $insert = [
                         'student_id' => $student->user_id,
                         'school_year_id' => $activeSchoolYear->id,
-                        'status' => 'approved',
+                        'strand_id' => $strand->id,
+                        'assigned_section_id' => $validated['section_id'],
+                        'status' => 'enrolled',
                         'coordinator_id' => Auth::id(),
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -827,12 +900,15 @@ class CoordinatorController extends Controller
                 'school_year_id' => $activeSY->id,
             ];
             $enrollmentData = [
-                'status' => 'approved',
+                'status' => 'enrolled',
                 'coordinator_id' => Auth::id(),
                 'updated_at' => now(),
             ];
             if (Schema::hasColumn('enrollments', 'strand_id')) {
                 $enrollmentData['strand_id'] = $strand->id;
+            }
+            if (Schema::hasColumn('enrollments', 'assigned_section_id')) {
+                $enrollmentData['assigned_section_id'] = $validated['section_id'];
             }
             if (Schema::hasColumn('enrollments', 'date_enrolled')) {
                 $enrollmentData['date_enrolled'] = now();
@@ -891,6 +967,9 @@ class CoordinatorController extends Controller
                 ...(Schema::hasColumn('enrollments', 'date_enrolled') ? ['date_enrolled' => now()] : []),
                 'updated_at' => now(),
             ]);
+
+            // Create class_details records for all classes in the student's section and strand
+            $this->createClassDetailsForEnrolledStudent($enrollmentId, $student->section_id, $strand->id, $activeSY->id);
 
             return redirect()->back()->with('success', 'Student enrolled successfully!');
             
@@ -1070,6 +1149,131 @@ class CoordinatorController extends Controller
             ]);
             
             return redirect()->back()->with('error', 'Failed to finalize student enrollment.');
+        }
+    }
+
+    /**
+     * Create class_details records for an enrolled student
+     */
+    private function createClassDetailsForEnrolledStudent($enrollmentId, $sectionId, $strandId, $schoolYearId)
+    {
+        try {
+            // Get all class schedules for the student's section and strand
+            $classSchedules = DB::table('class')
+                ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                ->where('class.section_id', $sectionId)
+                ->where('class.school_year_id', $schoolYearId)
+                ->where('subjects.strand_id', $strandId)
+                ->where('class.is_active', true)
+                ->select('class.id as class_id')
+                ->get();
+
+            Log::info('Creating class_details for enrolled student', [
+                'enrollment_id' => $enrollmentId,
+                'section_id' => $sectionId,
+                'strand_id' => $strandId,
+                'school_year_id' => $schoolYearId,
+                'found_classes' => $classSchedules->count()
+            ]);
+
+            // Create class_details record for each class
+            foreach ($classSchedules as $class) {
+                DB::table('class_details')->updateOrInsert(
+                    [
+                        'class_id' => $class->class_id,
+                        'enrollment_id' => $enrollmentId
+                    ],
+                    [
+                        'section_id' => $sectionId,
+                        'is_enrolled' => true,
+                        'enrolled_at' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]
+                );
+            }
+
+            Log::info('Successfully created class_details records', [
+                'enrollment_id' => $enrollmentId,
+                'records_created' => $classSchedules->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error creating class_details for enrolled student: ' . $e->getMessage(), [
+                'enrollment_id' => $enrollmentId,
+                'section_id' => $sectionId,
+                'strand_id' => $strandId,
+                'school_year_id' => $schoolYearId
+            ]);
+        }
+    }
+
+    /**
+     * Fix existing enrollments with NULL assigned_section_id
+     */
+    public function fixEnrollmentSections()
+    {
+        try {
+            // Get enrollments with NULL assigned_section_id but have status 'enrolled'
+            $brokenEnrollments = DB::table('enrollments')
+                ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
+                ->where('enrollments.status', 'enrolled')
+                ->whereNull('enrollments.assigned_section_id')
+                ->select([
+                    'enrollments.id as enrollment_id',
+                    'enrollments.strand_id',
+                    'student_personal_info.id as student_id',
+                    'student_personal_info.section_id as student_section_id'
+                ])
+                ->get();
+
+            Log::info('Found enrollments with NULL assigned_section_id', [
+                'count' => $brokenEnrollments->count(),
+                'enrollments' => $brokenEnrollments->toArray()
+            ]);
+
+            $fixedCount = 0;
+            foreach ($brokenEnrollments as $enrollment) {
+                // Use the section from student_personal_info if available
+                $sectionId = $enrollment->student_section_id;
+                
+                // If no section in student_personal_info, assign default section based on strand
+                if (!$sectionId && $enrollment->strand_id) {
+                    $defaultSection = DB::table('sections')
+                        ->where('strand_id', $enrollment->strand_id)
+                        ->first();
+                    $sectionId = $defaultSection ? $defaultSection->id : null;
+                }
+
+                if ($sectionId) {
+                    DB::table('enrollments')
+                        ->where('id', $enrollment->enrollment_id)
+                        ->update([
+                            'assigned_section_id' => $sectionId,
+                            'updated_at' => now()
+                        ]);
+                    
+                    $fixedCount++;
+                    Log::info('Fixed enrollment section assignment', [
+                        'enrollment_id' => $enrollment->enrollment_id,
+                        'assigned_section_id' => $sectionId
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Fixed {$fixedCount} enrollment section assignments",
+                'fixed_count' => $fixedCount,
+                'total_found' => $brokenEnrollments->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fixing enrollment sections: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fix enrollment sections: ' . $e->getMessage()
+            ], 500);
         }
     }
 }

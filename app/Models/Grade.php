@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Models\Student;
 
 class Grade extends Model
 {
@@ -16,34 +15,23 @@ class Grade extends Model
         'faculty_id',
         'class_id',
         'school_year_id',
-        'first_quarter',
-        'second_quarter',
-        'third_quarter',
-        'fourth_quarter',
-        'semester_grade',
-        'semester',
+        'semester',           // Critical: '1st' or '2nd'
+        'first_quarter',      // Q1 (1st sem) or Q3 (2nd sem)
+        'second_quarter',     // Q2 (1st sem) or Q4 (2nd sem)
+        'semester_grade',     // Average of the 2 quarters above
         'status',
-        'remarks',
-        'approval_status',
-        'approved_by',
-        'approved_at',
-        'approval_notes',
-        'submitted_for_approval_at'
+        'remarks'
     ];
 
     protected $casts = [
         'first_quarter' => 'decimal:2',
         'second_quarter' => 'decimal:2',
-        'third_quarter' => 'decimal:2',
-        'fourth_quarter' => 'decimal:2',
         'semester_grade' => 'decimal:2',
-        'approved_at' => 'datetime',
-        'submitted_for_approval_at' => 'datetime',
     ];
 
     // Relationships
     public function student() {
-        return $this->belongsTo(Student::class, 'student_id');
+        return $this->belongsTo(User::class, 'student_id');
     }
 
     public function subject() {
@@ -69,15 +57,15 @@ class Grade extends Model
     // Helper methods for Philippine SHS grading system
     
     /**
-     * Calculate semester grade (average of 4 quarters)
+     * Calculate semester grade (average of 2 quarters for this semester)
+     * 1st Semester: Q1 + Q2 average
+     * 2nd Semester: Q3 + Q4 average (stored as first_quarter + second_quarter)
      */
     public function calculateSemesterGrade()
     {
         $quarters = collect([
             $this->first_quarter,
-            $this->second_quarter,
-            $this->third_quarter,
-            $this->fourth_quarter
+            $this->second_quarter
         ])->filter()->values();
 
         if ($quarters->count() === 0) {
@@ -85,6 +73,25 @@ class Grade extends Model
         }
 
         return round($quarters->avg(), 2);
+    }
+
+    /**
+     * Get the actual quarter numbers for display
+     * Returns array with quarter numbers and values
+     */
+    public function getQuarterDetails()
+    {
+        if ($this->semester === '1st') {
+            return [
+                'q1' => ['number' => 1, 'value' => $this->first_quarter],
+                'q2' => ['number' => 2, 'value' => $this->second_quarter]
+            ];
+        } else {
+            return [
+                'q3' => ['number' => 3, 'value' => $this->first_quarter],
+                'q4' => ['number' => 4, 'value' => $this->second_quarter]
+            ];
+        }
     }
 
     /**
@@ -162,93 +169,58 @@ class Grade extends Model
         return $query->where('student_id', $studentId);
     }
 
-    // Approval System Methods
-    
     /**
-     * Submit grade for approval
+     * Static method to create or update grade record
      */
-    public function submitForApproval()
+    public static function createOrUpdateGrade($data)
     {
-        $this->update([
-            'approval_status' => 'pending_approval',
-            'submitted_for_approval_at' => now()
-        ]);
-        return $this;
+        return self::updateOrCreate(
+            [
+                'student_id' => $data['student_id'],
+                'subject_id' => $data['subject_id'],
+                'semester' => $data['semester'],
+                'school_year_id' => $data['school_year_id']
+            ],
+            $data
+        );
     }
 
     /**
-     * Approve the grade
+     * Get all grades for a student in a specific school year
      */
-    public function approve($approverId, $notes = null)
+    public static function getStudentGrades($studentId, $schoolYearId)
     {
-        $this->update([
-            'approval_status' => 'approved',
-            'approved_by' => $approverId,
-            'approved_at' => now(),
-            'approval_notes' => $notes
-        ]);
-        return $this;
+        return self::with(['subject', 'faculty'])
+            ->where('student_id', $studentId)
+            ->where('school_year_id', $schoolYearId)
+            ->orderBy('semester')
+            ->orderBy('subject_id')
+            ->get();
     }
 
     /**
-     * Reject the grade
+     * Get semester summary for a student
      */
-    public function reject($approverId, $notes = null)
+    public static function getSemesterSummary($studentId, $semester, $schoolYearId)
     {
-        $this->update([
-            'approval_status' => 'rejected',
-            'approved_by' => $approverId,
-            'approved_at' => now(),
-            'approval_notes' => $notes
-        ]);
-        return $this;
-    }
+        $grades = self::with('subject')
+            ->where('student_id', $studentId)
+            ->where('semester', $semester)
+            ->where('school_year_id', $schoolYearId)
+            ->get();
 
-    /**
-     * Check if grade is approved
-     */
-    public function isApproved()
-    {
-        return $this->approval_status === 'approved';
-    }
+        $totalGrades = $grades->where('semester_grade', '!=', null);
+        $averageGrade = $totalGrades->avg('semester_grade');
+        $passedSubjects = $totalGrades->where('semester_grade', '>=', 75)->count();
+        $failedSubjects = $totalGrades->where('semester_grade', '<', 75)->count();
 
-    /**
-     * Check if grade is pending approval
-     */
-    public function isPendingApproval()
-    {
-        return $this->approval_status === 'pending_approval';
-    }
-
-    /**
-     * Check if grade is rejected
-     */
-    public function isRejected()
-    {
-        return $this->approval_status === 'rejected';
-    }
-
-    /**
-     * Scope for approved grades only
-     */
-    public function scopeApproved($query)
-    {
-        return $query->where('approval_status', 'approved');
-    }
-
-    /**
-     * Scope for pending approval grades
-     */
-    public function scopePendingApproval($query)
-    {
-        return $query->where('approval_status', 'pending_approval');
-    }
-
-    /**
-     * Scope for rejected grades
-     */
-    public function scopeRejected($query)
-    {
-        return $query->where('approval_status', 'rejected');
+        return [
+            'total_subjects' => $grades->count(),
+            'completed_subjects' => $totalGrades->count(),
+            'average_grade' => $averageGrade ? round($averageGrade, 2) : null,
+            'passed_subjects' => $passedSubjects,
+            'failed_subjects' => $failedSubjects,
+            'grades' => $grades
+        ];
     }
 }

@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Head, router } from '@inertiajs/react';
 import { FaPlus, FaEdit, FaTrash, FaUsers, FaChalkboardTeacher, FaGraduationCap, FaSearch, FaFilter, FaExclamationTriangle, FaTimes } from 'react-icons/fa';
 import Sidebar from '../layouts/Sidebar';
+import SchoolYearWarning from '../../Components/SchoolYearWarning';
 import Swal from 'sweetalert2';
 
-const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = {}, strands = [], flash }) => {
+const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = {}, strands = [], flash, hasActiveSchoolYear = false }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -75,6 +76,15 @@ const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = 
       
       <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} p-8 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
+          {/* School Year Warning */}
+          <SchoolYearWarning 
+            show={!hasActiveSchoolYear}
+            title="No Active School Year Found"
+            message="You need to create and activate a school year before creating or managing sections. Sections must be associated with an active academic year."
+            actionText="Create School Year"
+            actionLink="/registrar/school-years"
+          />
+
           {/* Header Section */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-6">
             <div className="space-y-2">
@@ -91,7 +101,13 @@ const RegistrarSections = ({ sections = [], faculties = [], facultiesByStrand = 
             
             <button
               onClick={openAddModal}
-              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg transition-all duration-200 flex items-center gap-3 hover:shadow-xl transform hover:-translate-y-0.5"
+              disabled={!hasActiveSchoolYear}
+              className={`font-semibold px-6 py-3 rounded-xl shadow-lg transition-all duration-200 flex items-center gap-3 ${
+                hasActiveSchoolYear 
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white hover:shadow-xl transform hover:-translate-y-0.5' 
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              title={!hasActiveSchoolYear ? 'Create an active school year first' : 'Add new section'}
             >
               <FaPlus className="text-lg" />
               Add New Section

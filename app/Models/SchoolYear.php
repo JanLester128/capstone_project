@@ -24,7 +24,8 @@ class SchoolYear extends Model
         'enrollment_end',
         'is_current_academic_year',
         'allow_grade_progression',
-        'allow_faculty_cor_print'
+        'allow_faculty_cor_print',
+        'allow_coordinator_cor_print'
     ];
 
     protected $casts = [
@@ -33,6 +34,7 @@ class SchoolYear extends Model
         'is_current_academic_year' => 'boolean',
         'allow_grade_progression' => 'boolean',
         'allow_faculty_cor_print' => 'boolean',
+        'allow_coordinator_cor_print' => 'boolean',
         'start_date' => 'date',
         'end_date' => 'date',
         'enrollment_start' => 'datetime',

@@ -11,22 +11,15 @@ class ClassDetail extends Model
 
     protected $fillable = [
         'class_id',
-        'student_id',
-        'strand_id',
+        'enrollment_id',
         'section_id',
-        'school_year_id',
-        'coordinator_notes',
-        'enrollment_status',
-        'approved_by',
-        'approved_at',
         'is_enrolled',
         'enrolled_at'
     ];
 
     protected $casts = [
         'is_enrolled' => 'boolean',
-        'enrolled_at' => 'datetime',
-        'approved_at' => 'datetime'
+        'enrolled_at' => 'datetime'
     ];
 
     // Relationships
@@ -35,14 +28,9 @@ class ClassDetail extends Model
         return $this->belongsTo(ClassSchedule::class, 'class_id');
     }
 
-    public function student()
+    public function enrollment()
     {
-        return $this->belongsTo(User::class, 'student_id');
-    }
-
-    public function strand()
-    {
-        return $this->belongsTo(Strand::class);
+        return $this->belongsTo(Enrollment::class);
     }
 
     public function section()
@@ -50,14 +38,17 @@ class ClassDetail extends Model
         return $this->belongsTo(Section::class);
     }
 
-    public function schoolYear()
+    // Access student through enrollment relationship
+    public function student()
     {
-        return $this->belongsTo(SchoolYear::class);
-    }
-
-    public function approvedBy()
-    {
-        return $this->belongsTo(User::class, 'approved_by');
+        return $this->hasOneThrough(
+            User::class,
+            Enrollment::class,
+            'id', // Foreign key on enrollments table
+            'id', // Foreign key on users table
+            'enrollment_id', // Local key on class_details table
+            'student_id' // Local key on enrollments table
+        );
     }
 
     // Scopes
@@ -76,19 +67,9 @@ class ClassDetail extends Model
         return $query->where('class_id', $classId);
     }
 
-    public function scopeForStrand($query, $strandId)
+    public function scopeForEnrollment($query, $enrollmentId)
     {
-        return $query->where('strand_id', $strandId);
-    }
-
-    public function scopeForSchoolYear($query, $schoolYearId)
-    {
-        return $query->where('school_year_id', $schoolYearId);
-    }
-
-    public function scopeByEnrollmentStatus($query, $status)
-    {
-        return $query->where('enrollment_status', $status);
+        return $query->where('enrollment_id', $enrollmentId);
     }
 
     // Helper methods
@@ -102,18 +83,8 @@ class ClassDetail extends Model
         return $this->classSchedule && $this->classSchedule->subject ? $this->classSchedule->subject->name : 'Unknown Subject';
     }
 
-    public function isPending()
+    public function getStrandNameAttribute()
     {
-        return $this->enrollment_status === 'pending';
-    }
-
-    public function isApproved()
-    {
-        return $this->enrollment_status === 'approved';
-    }
-
-    public function isRejected()
-    {
-        return $this->enrollment_status === 'rejected';
+        return $this->enrollment && $this->enrollment->strand ? $this->enrollment->strand->name : 'Unknown Strand';
     }
 }

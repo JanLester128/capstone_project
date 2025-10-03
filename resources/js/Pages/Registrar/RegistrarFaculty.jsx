@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { router } from "@inertiajs/react";
 import { usePage, Head } from "@inertiajs/react";
 import Sidebar from "../layouts/Sidebar";
+import SchoolYearWarning, { SchoolYearWarningCompact } from "../../Components/SchoolYearWarning";
 import Swal from "sweetalert2";
 import { 
   FaUserPlus, 
@@ -179,30 +180,25 @@ const EditModal = ({ isOpen, onClose, teacher }) => {
   );
 };
 
-const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], flash }) => {
+const RegistrarFaculty = ({ initialTeachers = [], strands = [], hasActiveSchoolYear = false, flash }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [teachers, setTeachers] = useState(initialTeachers);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showSchoolYearWarning, setShowSchoolYearWarning] = useState(!hasActiveSchoolYear);
   const [formData, setFormData] = useState({
     firstname: "",
     lastname: "",
     middlename: "",
     email: "",
-    assigned_strand_id: "",
+    assigned_strand_id: ""
   });
-  const [strands, setStrands] = useState(initialStrands);
+  const [addTeacherModalOpen, setAddTeacherModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
-  const [addTeacherModalOpen, setAddTeacherModalOpen] = useState(false);
-
-  // Use Inertia's page props for flash messages and updates
-  const { props } = usePage();
-
-  // Load strands from props instead of mock data
-  React.useEffect(() => {
-    if (initialStrands && initialStrands.length > 0) {
-      setStrands(initialStrands);
-    }
-  }, [initialStrands]);
 
   const handleChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -517,8 +513,8 @@ const RegistrarFaculty = ({ initialTeachers = [], strands: initialStrands = [], 
     }
   };
 
-  const flashSuccess = props.flash?.success || flash?.success;
-  const flashPassword = props.flash?.password || flash?.password;
+  const flashSuccess = flash?.success;
+  const flashPassword = flash?.password;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">

@@ -11,7 +11,16 @@ class Enrollment extends Model
 
     protected $fillable = [
         'student_id',
+        'user_id',
         'school_year_id',
+        'grade_level',
+        'lrn',
+        'strand_id',
+        'section_id',
+        'student_status',
+        'enrollment_date',
+        'student_type',
+        'previous_school',
         'first_strand_choice_id',
         'second_strand_choice_id',
         'third_strand_choice_id',
@@ -20,6 +29,9 @@ class Enrollment extends Model
         'status',
         'coordinator_id',
         'submitted_at',
+        // Manual enrollment fields
+        'enrolled_by',
+        'notes',
     ];
 
     protected $casts = [

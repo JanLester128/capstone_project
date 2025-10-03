@@ -28,6 +28,7 @@ use App\Models\Notification;
 use App\Models\Registrar;
 use App\Models\Coordinator;
 use App\Models\Semester;
+use App\Services\SchoolYearService;
 
 class RegistrarController extends Controller
 {
@@ -157,13 +158,43 @@ class RegistrarController extends Controller
         // Get all sections for class assignment
         $sections = Section::with(['strand', 'teacher'])->orderBy('section_name')->get();
 
-        // Get class schedules with relationships
+        // Debug: Check all schedules in database
+        $allSchedules = ClassSchedule::all();
+        $schedulesWithoutYear = $allSchedules->whereNull('school_year_id');
+        
+        Log::info('All schedules in database', [
+            'total_count' => $allSchedules->count(),
+            'schedules_with_school_year' => $allSchedules->whereNotNull('school_year_id')->count(),
+            'schedules_without_school_year' => $schedulesWithoutYear->count(),
+            'active_school_year_id' => $activeSchoolYear->id,
+            'schedules_by_year' => $allSchedules->groupBy('school_year_id')->map->count()->toArray()
+        ]);
+
+        // Fix orphaned schedules (schedules without school_year_id)
+        if ($schedulesWithoutYear->count() > 0) {
+            Log::info('Found orphaned schedules, these need manual assignment', [
+                'orphaned_count' => $schedulesWithoutYear->count(),
+                'active_year_id' => $activeSchoolYear->id,
+                'orphaned_schedule_ids' => $schedulesWithoutYear->pluck('id')->toArray()
+            ]);
+            
+            // Don't auto-assign orphaned schedules to avoid data confusion
+            // Instead, log them for manual review
+        }
+
+        // Get class schedules with relationships - only for active school year
         $classSchedules = ClassSchedule::with(['subject.strand', 'faculty', 'section'])
             ->where('school_year_id', $activeSchoolYear->id)
             ->orderBy('day_of_week')
             ->orderBy('start_time')
-            ->get()
-            ->map(function ($schedule) {
+            ->get();
+
+        Log::info('Filtered schedules for active year', [
+            'active_year_schedules' => $classSchedules->count(),
+            'active_school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end
+        ]);
+
+        $classSchedules = $classSchedules->map(function ($schedule) {
                 return [
                     'id' => $schedule->id,
                     'subject_name' => $schedule->subject ? $schedule->subject->name : 'No Subject',
@@ -174,7 +205,6 @@ class RegistrarController extends Controller
                     'day_of_week' => $schedule->day_of_week,
                     'start_time' => $schedule->start_time,
                     'end_time' => $schedule->end_time,
-                    'room' => $schedule->room,
                     'semester' => $schedule->semester,
                     'is_active' => $schedule->is_active
                 ];
@@ -185,7 +215,8 @@ class RegistrarController extends Controller
             'faculties' => $faculties,
             'sections' => $sections,
             'classSchedules' => $classSchedules,
-            'activeSchoolYear' => $activeSchoolYear
+            'activeSchoolYear' => $activeSchoolYear,
+            'facultiesByStrand' => $facultiesByStrand
         ]);
     }
 
@@ -197,7 +228,30 @@ class RegistrarController extends Controller
             'semester' => 'required|in:Full Academic Year,Summer',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after:start_date',
+            'enrollment_start' => 'nullable|date',
+            'enrollment_end' => 'nullable|date|after:enrollment_start',
         ]);
+
+        // Validate 10-month duration for Full Academic Year
+        if ($validated['semester'] === 'Full Academic Year') {
+            $startDate = \Carbon\Carbon::parse($validated['start_date']);
+            $endDate = \Carbon\Carbon::parse($validated['end_date']);
+            
+            // Calculate duration in months
+            $durationInMonths = $startDate->diffInMonths($endDate);
+            
+            if ($durationInMonths < 10) {
+                return redirect()->back()->withErrors([
+                    'end_date' => 'Full Academic Year must be at least 10 months duration. Current duration: ' . $durationInMonths . ' months.'
+                ]);
+            }
+            
+            if ($durationInMonths > 11) {
+                return redirect()->back()->withErrors([
+                    'end_date' => 'Full Academic Year cannot exceed 11 months duration. Current duration: ' . $durationInMonths . ' months.'
+                ]);
+            }
+        }
 
         // Weekend Validation (Saturday = 6, Sunday = 0)
         $startDate = \Carbon\Carbon::parse($validated['start_date']);
@@ -253,6 +307,8 @@ class RegistrarController extends Controller
             'year_end' => 'required|integer|min:2020|max:2050',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after:start_date',
+            'enrollment_start' => 'nullable|date',
+            'enrollment_end' => 'nullable|date|after:enrollment_start',
         ]);
 
         // Weekend Validation (Saturday = 6, Sunday = 0)
@@ -306,8 +362,8 @@ class RegistrarController extends Controller
                 'end_date' => $validated['end_date'],
                 'is_active' => false,
                 'enrollment_open' => false, // Summer enrollment is managed separately
-                'enrollment_start' => $validated['start_date'],
-                'enrollment_end' => $validated['end_date'],
+                'enrollment_start' => $validated['enrollment_start'] ?? $validated['start_date'],
+                'enrollment_end' => $validated['enrollment_end'] ?? $validated['end_date'],
                 'is_current_academic_year' => false, // Summer is not part of regular academic year
                 'allow_grade_progression' => false, // No grade progression in summer
             ];
@@ -347,15 +403,344 @@ class RegistrarController extends Controller
 
     public function activateSchoolYear($id)
     {
-        $schoolYear = SchoolYear::findOrFail($id);
+        try {
+            DB::beginTransaction();
+            
+            $schoolYear = SchoolYear::findOrFail($id);
+            $previousActiveYear = SchoolYear::where('is_active', true)->first();
 
-        // Deactivate all other school years
-        SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
+            Log::info('Activating school year', [
+                'school_year_id' => $id,
+                'previous_active' => $previousActiveYear ? $previousActiveYear->id : 'none',
+                'new_year' => $schoolYear->year_start . '-' . $schoolYear->year_end
+            ]);
 
-        // Activate the selected school year
-        $schoolYear->update(['is_active' => true]);
+            // Deactivate all other school years
+            SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
 
-        return redirect()->back()->with('success', 'School year activated successfully');
+            // Activate the selected school year
+            $schoolYear->update(['is_active' => true]);
+
+            // If this is a new school year activation, handle data reset and progression
+            if ($previousActiveYear && $previousActiveYear->id !== $id) {
+                try {
+                    $this->handleSchoolYearTransition($previousActiveYear, $schoolYear);
+                } catch (\Exception $transitionError) {
+                    Log::error('Error in school year transition: ' . $transitionError->getMessage(), [
+                        'trace' => $transitionError->getTraceAsString()
+                    ]);
+                    // Continue without transition - just activate the year
+                }
+            }
+
+            DB::commit();
+            
+            Log::info('School year activated successfully', ['school_year_id' => $id]);
+            
+            return redirect()->back()->with('success', 'School year activated successfully. Data has been prepared for the new academic year.');
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error activating school year: ' . $e->getMessage(), [
+                'school_year_id' => $id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            return redirect()->back()->withErrors(['general' => 'Failed to activate school year: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Handle the transition between school years
+     */
+    private function handleSchoolYearTransition($previousYear, $newYear)
+    {
+        Log::info('Handling school year transition', [
+            'previous_year' => $previousYear->year_start . '-' . $previousYear->year_end,
+            'new_year' => $newYear->year_start . '-' . $newYear->year_end
+        ]);
+
+        // 1. Auto-create Grade 12 pending enrollments for current Grade 11 students
+        $this->createGrade12PendingEnrollments($previousYear, $newYear);
+
+        // 2. Reset class schedules (but preserve faculty accounts)
+        $this->resetClassSchedules($newYear);
+
+        // 3. Create default sections for new school year if they don't exist
+        $this->createDefaultSections($newYear);
+    }
+
+    /**
+     * Create Grade 12 pending enrollments for Grade 11 students
+     */
+    private function createGrade12PendingEnrollments($previousYear, $newYear)
+    {
+        try {
+            // Get all Grade 11 students who were enrolled in the previous year
+            $grade11Students = DB::table('enrollments')
+                ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
+                ->where('enrollments.school_year_id', $previousYear->id)
+                ->where('student_personal_info.grade_level', '11')
+                ->where('enrollments.status', 'enrolled')
+                ->select('student_personal_info.*', 'enrollments.assigned_section_id', 'enrollments.strand_id')
+                ->get();
+
+            Log::info('Found Grade 11 students for progression', [
+                'count' => $grade11Students->count(),
+                'previous_year_id' => $previousYear->id,
+                'new_year_id' => $newYear->id,
+                'students' => $grade11Students->pluck('id')->toArray()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching Grade 11 students: ' . $e->getMessage());
+            return; // Skip this step if it fails
+        }
+
+        $createdCount = 0;
+        $skippedCount = 0;
+        
+        foreach ($grade11Students as $student) {
+            // Check if student already has enrollment for new year
+            $existingEnrollment = DB::table('enrollments')
+                ->where('student_id', $student->id)
+                ->where('school_year_id', $newYear->id)
+                ->first();
+
+            if (!$existingEnrollment) {
+                // Create pending Grade 12 enrollment
+                DB::table('enrollments')->insert([
+                    'student_id' => $student->id,
+                    'school_year_id' => $newYear->id,
+                    'assigned_section_id' => null, // Will be assigned later
+                    'strand_id' => $student->strand_id,
+                    'status' => 'pending',
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+
+                // Update student to Grade 12
+                DB::table('student_personal_info')
+                    ->where('id', $student->id)
+                    ->update([
+                        'grade_level' => '12',
+                        'updated_at' => now()
+                    ]);
+                
+                $createdCount++;
+                
+                Log::info('Created Grade 12 pending enrollment', [
+                    'student_id' => $student->id,
+                    'user_id' => $student->user_id,
+                    'new_school_year_id' => $newYear->id,
+                    'strand_id' => $student->strand_id
+                ]);
+            } else {
+                $skippedCount++;
+                Log::info('Skipped student - already has enrollment', [
+                    'student_id' => $student->id,
+                    'existing_status' => $existingEnrollment->status
+                ]);
+            }
+        }
+
+        Log::info('Grade 12 pending enrollments summary', [
+            'total_grade11_students' => $grade11Students->count(),
+            'created_enrollments' => $createdCount,
+            'skipped_existing' => $skippedCount
+        ]);
+    }
+
+    /**
+     * Reset class schedules for new school year
+     */
+    private function resetClassSchedules($newYear)
+    {
+        try {
+            // Note: We don't delete faculty accounts, just reset their class assignments
+            // Faculty accounts (users table) remain intact
+            
+            // Clear schedules for the NEW year to ensure clean slate
+            $deletedSchedules = DB::table('class_schedules')->where('school_year_id', $newYear->id)->delete();
+            $deletedClasses = DB::table('class')->where('school_year_id', $newYear->id)->delete();
+            
+            // Also clear any orphaned schedules (without school_year_id) to prevent confusion
+            $deletedOrphans = DB::table('class_schedules')->whereNull('school_year_id')->delete();
+            $deletedOrphanClasses = DB::table('class')->whereNull('school_year_id')->delete();
+            
+            Log::info('Reset class schedules for new school year', [
+                'school_year_id' => $newYear->id,
+                'year' => $newYear->year_start . '-' . $newYear->year_end,
+                'deleted_schedules' => $deletedSchedules,
+                'deleted_classes' => $deletedClasses,
+                'deleted_orphan_schedules' => $deletedOrphans,
+                'deleted_orphan_classes' => $deletedOrphanClasses
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error resetting class schedules: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Create default sections for new school year
+     */
+    private function createDefaultSections($newYear)
+    {
+        $strands = Strand::all();
+        
+        foreach ($strands as $strand) {
+            // Create Grade 11 and Grade 12 sections for each strand
+            foreach ([11, 12] as $gradeLevel) {
+                $sectionName = $strand->code . '-A-G' . $gradeLevel;
+                
+                // Check if section already exists
+                $existingSection = Section::where('section_name', $sectionName)
+                    ->where('strand_id', $strand->id)
+                    ->where('grade_level', $gradeLevel)
+                    ->first();
+                
+                if (!$existingSection) {
+                    Section::create([
+                        'section_name' => $sectionName,
+                        'strand_id' => $strand->id,
+                        'grade_level' => $gradeLevel,
+                        'max_students' => 40,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+        }
+        
+        Log::info('Created default sections for new school year');
+    }
+
+    /**
+     * Check and fix data integrity for school year schedules
+     */
+    public function checkScheduleIntegrity()
+    {
+        try {
+            $allSchedules = ClassSchedule::all();
+            $allSchoolYears = SchoolYear::all();
+            
+            $report = [
+                'total_schedules' => $allSchedules->count(),
+                'total_school_years' => $allSchoolYears->count(),
+                'schedules_without_year' => $allSchedules->whereNull('school_year_id')->count(),
+                'schedules_by_year' => $allSchedules->groupBy('school_year_id')->map->count()->toArray(),
+                'school_years' => $allSchoolYears->map(function($year) {
+                    return [
+                        'id' => $year->id,
+                        'year' => $year->year_start . '-' . $year->year_end,
+                        'is_active' => $year->is_active,
+                        'schedule_count' => ClassSchedule::where('school_year_id', $year->id)->count()
+                    ];
+                })->toArray()
+            ];
+            
+            Log::info('Schedule integrity report', $report);
+            
+            return response()->json([
+                'success' => true,
+                'report' => $report
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error checking schedule integrity: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Manually clear schedules for active school year
+     */
+    public function clearActiveYearSchedules()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No active school year found'
+                ], 404);
+            }
+
+            // Clear schedules for active year
+            $deletedSchedules = DB::table('class_schedules')->where('school_year_id', $activeSchoolYear->id)->delete();
+            $deletedClasses = DB::table('class')->where('school_year_id', $activeSchoolYear->id)->delete();
+            
+            // Also clear orphaned schedules
+            $deletedOrphans = DB::table('class_schedules')->whereNull('school_year_id')->delete();
+            $deletedOrphanClasses = DB::table('class')->whereNull('school_year_id')->delete();
+            
+            Log::info('Manually cleared schedules for active school year', [
+                'school_year_id' => $activeSchoolYear->id,
+                'year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
+                'deleted_schedules' => $deletedSchedules,
+                'deleted_classes' => $deletedClasses,
+                'deleted_orphan_schedules' => $deletedOrphans,
+                'deleted_orphan_classes' => $deletedOrphanClasses
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Successfully cleared schedules for active school year',
+                'deleted' => [
+                    'schedules' => $deletedSchedules,
+                    'classes' => $deletedClasses,
+                    'orphan_schedules' => $deletedOrphans,
+                    'orphan_classes' => $deletedOrphanClasses
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error clearing active year schedules: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to clear schedules: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Manually trigger Grade 12 progression for all eligible Grade 11 students
+     */
+    public function triggerGrade12Progression()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            $previousSchoolYear = SchoolYear::where('is_active', false)
+                ->orderBy('year_start', 'desc')
+                ->first();
+            
+            if (!$activeSchoolYear || !$previousSchoolYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Could not find active and previous school years'
+                ], 404);
+            }
+
+            // Trigger the Grade 12 progression
+            $this->createGrade12PendingEnrollments($previousSchoolYear, $activeSchoolYear);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Grade 12 progression triggered successfully',
+                'active_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
+                'previous_year' => $previousSchoolYear->year_start . '-' . $previousSchoolYear->year_end
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error triggering Grade 12 progression: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to trigger Grade 12 progression: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function switchSemester(Request $request)
@@ -619,7 +1004,8 @@ class RegistrarController extends Controller
             'strands' => $strands,
             'faculties' => $faculties,
             'facultiesByStrand' => $facultiesByStrand,
-            'activeSchoolYear' => $activeSchoolYear
+            'activeSchoolYear' => $activeSchoolYear,
+            'hasActiveSchoolYear' => $activeSchoolYear !== null
         ]);
     }
 
@@ -665,8 +1051,11 @@ class RegistrarController extends Controller
             'sample_faculty' => $faculties->first() ? $faculties->first()->toArray() : null
         ]);
 
-        // Get all subjects with their strand and faculty information (show all subjects regardless of school_year_id)
+        // Get all subjects with their strand and faculty information, grouped by semester
         $subjects = Subject::with(['strand', 'faculty'])
+            ->orderBy('semester')
+            ->orderBy('year_level')
+            ->orderBy('name')
             ->get()
             ->map(function ($subject) use ($activeSchoolYear) {
                 return [
@@ -674,6 +1063,7 @@ class RegistrarController extends Controller
                     'name' => $subject->name,
                     'code' => $subject->code,
                     'semester' => $subject->semester,
+                    'semester_display' => $subject->semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)',
                     'year_level' => $subject->year_level,
                     'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
                     'strand_id' => $subject->strand_id,
@@ -681,7 +1071,8 @@ class RegistrarController extends Controller
                     'faculty_id' => $subject->faculty_id,
                     'school_year_id' => $subject->school_year_id,
                     'school_year' => $activeSchoolYear ? $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end : 'Not Assigned',
-                    'current_semester' => $activeSchoolYear ? $activeSchoolYear->current_semester ?? 1 : 1
+                    'current_semester' => $activeSchoolYear ? $activeSchoolYear->current_semester ?? 1 : 1,
+                    'full_display' => "[" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . "] " . $subject->code . " - " . $subject->name
                 ];
             });
 
@@ -690,7 +1081,10 @@ class RegistrarController extends Controller
             'strands' => $strands,
             'faculties' => $faculties,
             'facultiesByStrand' => $facultiesByStrand,
-            'activeSchoolYear' => $activeSchoolYear
+            'activeSchoolYear' => $activeSchoolYear,
+            'hasActiveSchoolYear' => $activeSchoolYear !== null,
+            'firstSemesterSubjects' => $subjects->where('semester', 1)->values(),
+            'secondSemesterSubjects' => $subjects->where('semester', 2)->values()
         ]);
     }
 
@@ -728,8 +1122,35 @@ class RegistrarController extends Controller
                 ->orderBy('semester')
                 ->get();
 
+            // Get active school year
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
+            // Prepare semester data for display
+            $semesters = $schoolYears->map(function ($schoolYear) {
+                return [
+                    'id' => $schoolYear->id,
+                    'year_start' => $schoolYear->year_start,
+                    'year_end' => $schoolYear->year_end,
+                    'semester' => $schoolYear->semester,
+                    'start_date' => $schoolYear->start_date,
+                    'end_date' => $schoolYear->end_date,
+                    'is_active' => $schoolYear->is_active,
+                    'display_name' => $schoolYear->year_start . '-' . $schoolYear->year_end . ' ' . $schoolYear->semester
+                ];
+            });
+
+            $activeSemester = $semesters->where('is_active', true)->first();
+            $inactiveSemesters = $semesters->where('is_active', false);
+            $totalSemesters = $semesters->count();
+
             return Inertia::render('Registrar/RegistrarSemester', [
                 'schoolYears' => $schoolYears,
+                'semesters' => $semesters,
+                'activeSemester' => $activeSemester,
+                'inactiveSemesters' => $inactiveSemesters,
+                'totalSemesters' => $totalSemesters,
+                'activeSchoolYear' => $activeSchoolYear,
+                'allSchoolYears' => $schoolYears // For dropdown
             ]);
 
         } catch (\Exception $e) {
@@ -737,6 +1158,12 @@ class RegistrarController extends Controller
             
             return Inertia::render('Registrar/RegistrarSemester', [
                 'schoolYears' => [],
+                'semesters' => [],
+                'activeSemester' => null,
+                'inactiveSemesters' => collect([]),
+                'totalSemesters' => 0,
+                'activeSchoolYear' => null,
+                'allSchoolYears' => [],
                 'error' => 'Failed to load semesters. Please try again.'
             ]);
         }
@@ -1374,9 +1801,13 @@ class RegistrarController extends Controller
         // Get all strands for assignment
         $strands = Strand::select('id', 'name', 'code')->orderBy('name')->get();
 
+        // Get active school year status
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
         return Inertia::render('Registrar/RegistrarFaculty', [
             'initialTeachers' => $teachers,
-            'strands' => $strands
+            'strands' => $strands,
+            'hasActiveSchoolYear' => $activeSchoolYear !== null
         ]);
     }
 
@@ -1537,6 +1968,50 @@ class RegistrarController extends Controller
             return redirect()->back()->with('success', 'Faculty deleted successfully');
         } catch (\Exception $e) {
             return redirect()->back()->withErrors(['general' => 'Failed to delete faculty: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Get subjects filtered by semester for schedule creation
+     */
+    public function getSubjectsBySemester($semester)
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            $subjects = Subject::with(['strand', 'faculty'])
+                ->where('semester', $semester)
+                ->orderBy('year_level')
+                ->orderBy('name')
+                ->get()
+                ->map(function ($subject) use ($activeSchoolYear) {
+                    return [
+                        'id' => $subject->id,
+                        'name' => $subject->name,
+                        'code' => $subject->code,
+                        'semester' => $subject->semester,
+                        'semester_display' => $subject->semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)',
+                        'year_level' => $subject->year_level,
+                        'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
+                        'strand_id' => $subject->strand_id,
+                        'faculty_name' => $subject->faculty ? $subject->faculty->firstname . ' ' . $subject->faculty->lastname : 'Unassigned',
+                        'faculty_id' => $subject->faculty_id,
+                        'full_display' => "[" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . "] " . $subject->code . " - " . $subject->name,
+                        'schedule_display' => $subject->code . " - " . $subject->name . " (" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . ")"
+                    ];
+                });
+
+            return response()->json([
+                'success' => true,
+                'subjects' => $subjects,
+                'semester' => $semester,
+                'semester_display' => $semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching subjects: ' . $e->getMessage()
+            ], 500);
         }
     }
 
@@ -1750,16 +2225,51 @@ class RegistrarController extends Controller
      */
     public function createFullAcademicYear(Request $request)
     {
+        
         $request->validate([
             'year_start' => 'required|integer|min:2020|max:2050',
             'year_end' => 'required|integer|min:2020|max:2050',
             'start_date' => 'required|date',
-            'end_date' => 'required|date|after:start_date'
+            'end_date' => 'required|date|after:start_date',
+            'enrollment_start' => 'required|date',
+            'enrollment_end' => 'required|date|after:enrollment_start'
         ]);
 
-        // Weekend Validation (Saturday = 6, Sunday = 0)
+        // Parse dates
         $startDate = \Carbon\Carbon::parse($request->start_date);
         $endDate = \Carbon\Carbon::parse($request->end_date);
+        $enrollmentStart = \Carbon\Carbon::parse($request->enrollment_start);
+        $enrollmentEnd = \Carbon\Carbon::parse($request->enrollment_end);
+        
+        // Validate 10-month duration for Full Academic Year
+        $durationInMonths = $startDate->diffInMonths($endDate);
+        
+        if ($durationInMonths < 10) {
+            return redirect()->back()->withErrors([
+                'end_date' => 'Full Academic Year must be at least 10 months duration. Current duration: ' . $durationInMonths . ' months.'
+            ]);
+        }
+        
+        if ($durationInMonths > 11) {
+            return redirect()->back()->withErrors([
+                'end_date' => 'Full Academic Year cannot exceed 11 months duration. Current duration: ' . $durationInMonths . ' months.'
+            ]);
+        }
+
+        // Validate enrollment period (1-2 weeks)
+        $enrollmentDays = $enrollmentStart->diffInDays($enrollmentEnd);
+        
+        if ($enrollmentDays < 7) {
+            return redirect()->back()->withErrors([
+                'enrollment_end' => 'Enrollment period must be at least 1 week (7 days). Current period: ' . $enrollmentDays . ' days.'
+            ]);
+        }
+        
+        if ($enrollmentDays > 14) {
+            return redirect()->back()->withErrors([
+                'enrollment_end' => 'Enrollment period cannot exceed 2 weeks (14 days). Current period: ' . $enrollmentDays . ' days.'
+            ]);
+        }
         
         if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
             return redirect()->back()->withErrors([
@@ -1773,23 +2283,40 @@ class RegistrarController extends Controller
             ]);
         }
 
-        // Validate enrollment window (1 week minimum, 2 weeks maximum)
-        $diffDays = $startDate->diffInDays($endDate);
-
-        if ($diffDays < 7) {
+        // Validate weekend restrictions for enrollment dates
+        if ($enrollmentStart->dayOfWeek === 0 || $enrollmentStart->dayOfWeek === 6) {
             return redirect()->back()->withErrors([
-                'end_date' => "Full Academic Year enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
+                'enrollment_start' => 'Enrollment start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
             ]);
         }
-
-        if ($diffDays > 14) {
+        
+        if ($enrollmentEnd->dayOfWeek === 0 || $enrollmentEnd->dayOfWeek === 6) {
             return redirect()->back()->withErrors([
-                'end_date' => "Full Academic Year enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
+                'enrollment_end' => 'Enrollment end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
             ]);
         }
 
         try {
             DB::beginTransaction();
+
+            // Check if school year already exists
+            $existingSchoolYear = SchoolYear::where('year_start', $request->year_start)
+                ->where('year_end', $request->year_end)
+                ->where('semester', 'Full Academic Year')
+                ->first();
+
+            if ($existingSchoolYear) {
+                DB::rollBack();
+                return redirect()->back()->withErrors([
+                    'error' => "Full Academic Year {$request->year_start}-{$request->year_end} already exists. Please use a different year range or update the existing school year."
+                ]);
+            }
+
+            // Deactivate all other school years first
+            SchoolYear::where('is_active', true)->update([
+                'is_active' => false,
+                'is_current_academic_year' => false
+            ]);
 
             // Create single Full Academic Year entry
             $academicYear = SchoolYear::create([
@@ -1800,8 +2327,8 @@ class RegistrarController extends Controller
                 'end_date' => $request->end_date,
                 'is_active' => true,
                 'enrollment_open' => true,
-                'enrollment_start' => $request->start_date,
-                'enrollment_end' => $request->end_date,
+                'enrollment_start' => $request->enrollment_start,
+                'enrollment_end' => $request->enrollment_end,
                 'is_current_academic_year' => true,
                 'allow_grade_progression' => true
             ]);
@@ -1956,4 +2483,118 @@ class RegistrarController extends Controller
             return back()->withErrors(['error' => 'Failed to approve grades.']);
         }
     }
+
+    /**
+     * Display settings page
+     */
+    public function settingsPage()
+    {
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get enrollment settings from active school year
+        $enrollmentSettings = [
+            'enrollment_open' => $activeSchoolYear ? $activeSchoolYear->enrollment_open : false,
+            'enrollment_start' => $activeSchoolYear ? $activeSchoolYear->enrollment_start : null,
+            'enrollment_end' => $activeSchoolYear ? $activeSchoolYear->enrollment_end : null,
+        ];
+
+        return Inertia::render('Registrar/RegistrarSettings', [
+            'activeSchoolYear' => $activeSchoolYear,
+            'enrollmentSettings' => $enrollmentSettings
+        ]);
+    }
+
+    /**
+     * Toggle enrollment open/close status
+     */
+    public function toggleEnrollment()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return redirect()->back()->withErrors([
+                    'general' => 'No active school year found. Please activate a school year first.'
+                ]);
+            }
+
+            // Toggle the enrollment_open status
+            $newStatus = !$activeSchoolYear->enrollment_open;
+            $activeSchoolYear->update(['enrollment_open' => $newStatus]);
+
+            Log::info('Enrollment status toggled', [
+                'school_year_id' => $activeSchoolYear->id,
+                'year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
+                'old_status' => !$newStatus,
+                'new_status' => $newStatus,
+                'toggled_by' => Auth::id()
+            ]);
+
+            $message = $newStatus 
+                ? 'Enrollment has been opened for new Grade 11 students.' 
+                : 'Enrollment has been closed for new Grade 11 students.';
+
+            return redirect()->back()->with('success', $message);
+
+        } catch (\Exception $e) {
+            Log::error('Error toggling enrollment status: ' . $e->getMessage());
+            return redirect()->back()->withErrors([
+                'general' => 'Failed to update enrollment status: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Toggle coordinator COR printing permission
+     */
+    public function toggleCoordinatorCorPrint()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return redirect()->back()->withErrors([
+                    'general' => 'No active school year found. Please activate a school year first.'
+                ]);
+            }
+
+            // Get current status before toggle
+            $oldStatus = $activeSchoolYear->allow_coordinator_cor_print;
+            
+            // Toggle the allow_coordinator_cor_print status
+            $newStatus = !$oldStatus;
+            
+            Log::info('BEFORE Toggle - Coordinator COR printing status', [
+                'school_year_id' => $activeSchoolYear->id,
+                'current_status' => $oldStatus,
+                'will_change_to' => $newStatus
+            ]);
+            
+            $activeSchoolYear->update(['allow_coordinator_cor_print' => $newStatus]);
+            
+            // Refresh the model to get the updated value
+            $activeSchoolYear->refresh();
+            
+            Log::info('AFTER Toggle - Coordinator COR printing status', [
+                'school_year_id' => $activeSchoolYear->id,
+                'database_status' => $activeSchoolYear->allow_coordinator_cor_print,
+                'expected_status' => $newStatus,
+                'toggle_successful' => $activeSchoolYear->allow_coordinator_cor_print === $newStatus,
+                'toggled_by' => Auth::id()
+            ]);
+
+            $message = $newStatus 
+                ? 'Coordinator COR printing has been enabled.' 
+                : 'Coordinator COR printing has been disabled.';
+
+            return redirect()->back()->with('success', $message);
+
+        } catch (\Exception $e) {
+            Log::error('Error toggling coordinator COR printing permission: ' . $e->getMessage());
+            return redirect()->back()->withErrors([
+                'general' => 'Failed to update coordinator COR printing permission: ' . $e->getMessage()
+            ]);
+        }
+    }
+
 }

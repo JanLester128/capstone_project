@@ -1,367 +1,301 @@
 import React, { useState, useEffect } from "react";
 import { usePage, router } from "@inertiajs/react";
-import { FaUsers, FaGraduationCap, FaCheckCircle, FaEye, FaFilter, FaSearch, FaDownload, FaFileExcel, FaPrint, FaToggleOn, FaToggleOff } from "react-icons/fa";
+import { 
+  FaUsers, FaGraduationCap, FaCheckCircle, FaEye, FaFilter, FaSearch, FaDownload, FaFileExcel,
+  FaUserPlus, FaUserCheck, FaExchangeAlt, FaChartPie, FaCalendarAlt, FaInfoCircle,
+  FaTags, FaSort, FaArrowUp, FaArrowDown, FaBell, FaQuestionCircle
+} from "react-icons/fa";
 import Sidebar from "../layouts/Sidebar";
 
-const StudentDetailsModal = ({ isOpen, onClose, student }) => {
-  if (!isOpen || !student) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 relative max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-2xl font-bold text-gray-900">Student Details</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl">
-            ×
-          </button>
-        </div>
-        
-        <div className="space-y-6">
-          {/* Basic Information */}
-          <div className="bg-gray-50 rounded-xl p-6">
-            <h4 className="text-lg font-semibold text-gray-800 mb-4">Basic Information</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Full Name</label>
-                <p className="text-gray-900 font-semibold">{student.name}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Email</label>
-                <p className="text-gray-900">{student.email}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Student ID</label>
-                <p className="text-gray-900 font-mono">{student.student_id}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Grade Level</label>
-                <p className="text-gray-900">Grade {student.grade_level}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Enrollment Information */}
-          <div className="bg-blue-50 rounded-xl p-6">
-            <h4 className="text-lg font-semibold text-gray-800 mb-4">Enrollment Information</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Strand</label>
-                <p className="text-gray-900 font-semibold">{student.strand || 'Not assigned'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Section</label>
-                <p className="text-gray-900">{student.section || 'Not assigned'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">Enrollment Status</label>
-                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                  student.enrollment_status === 'enrolled' ? 'bg-green-100 text-green-800' :
-                  student.enrollment_status === 'approved' ? 'bg-blue-100 text-blue-800' :
-                  student.enrollment_status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {student.enrollment_status ? student.enrollment_status.charAt(0).toUpperCase() + student.enrollment_status.slice(1) : 'Not enrolled'}
-                </span>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">School Year</label>
-                <p className="text-gray-900">{student.school_year || '2024-2025'}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Contact Information */}
-          {student.contact_info && (
-            <div className="bg-green-50 rounded-xl p-6">
-              <h4 className="text-lg font-semibold text-gray-800 mb-4">Contact Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">Phone Number</label>
-                  <p className="text-gray-900">{student.contact_info.phone || 'Not provided'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">Address</label>
-                  <p className="text-gray-900">{student.contact_info.address || 'Not provided'}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Documents */}
-          {student.documents && student.documents.length > 0 && (
-            <div className="bg-purple-50 rounded-xl p-6">
-              <h4 className="text-lg font-semibold text-gray-800 mb-4">Uploaded Documents</h4>
-              <div className="space-y-2">
-                {student.documents.map((doc, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg">
-                    <span className="text-gray-900">{doc.name}</span>
-                    <button
-                      onClick={() => window.open(doc.url, '_blank')}
-                      className="text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      View
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
+// Enhanced Student Management with HCI Principles
 const RegistrarStudents = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { enrolledStudents = [], strands = [], sections = [], allowFacultyCorPrint = true, flash } = usePage().props;
-  const [searchTerm, setSearchTerm] = useState("");
-  const [strandFilter, setStrandFilter] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("");
-  const [selectedStudent, setSelectedStudent] = useState(null);
+  const { enrolledStudents = [], strands = [], sections = [], flash } = usePage().props;
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedStrand, setSelectedStrand] = useState('');
+  const [selectedGrade, setSelectedGrade] = useState('');
+  
+  // Enhanced UI/UX States following HCI principles
+  const [activeTab, setActiveTab] = useState('all'); // all, new, continuing, transferee
+  const [sortBy, setSortBy] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [viewMode, setViewMode] = useState('grid'); // grid, list
+  const [showFilters, setShowFilters] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
-  const currentStudents = enrolledStudents;
+  // Enhanced filtering and categorization logic
+  const categorizeStudents = (students) => {
+    return {
+      all: students,
+      new: students.filter(s => s.student_type === 'new' || s.enrollment_status === 'new'),
+      continuing: students.filter(s => s.student_type === 'continuing' || s.grade_level === '12'),
+      transferee: students.filter(s => s.student_type === 'transferee' || s.previous_school)
+    };
+  };
 
-  const filteredStudents = currentStudents.filter((student) => {
+  const filteredStudents = enrolledStudents.filter((student) => {
     const matchesSearch = 
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (student.student_id && student.student_id.toLowerCase().includes(searchTerm.toLowerCase()));
     
-    const matchesStrand = strandFilter === "" || student.strand === strandFilter;
-    const matchesGrade = gradeFilter === "" || student.grade_level.toString() === gradeFilter;
+    const matchesStrand = selectedStrand === "" || student.strand === selectedStrand;
+    const matchesGrade = selectedGrade === "" || student.grade_level.toString() === selectedGrade;
     
     return matchesSearch && matchesStrand && matchesGrade;
   });
 
-  const openStudentModal = (student) => {
-    setSelectedStudent(student);
-    setModalOpen(true);
-  };
+  const categorizedStudents = categorizeStudents(filteredStudents);
+  const currentStudentList = categorizedStudents[activeTab] || [];
 
-  const exportToExcel = () => {
-    // This would implement Excel export functionality
-    alert('Excel export functionality would be implemented here');
+  // Statistics for dashboard cards
+  const stats = {
+    total: enrolledStudents.length,
+    new: categorizedStudents.new.length,
+    continuing: categorizedStudents.continuing.length,
+    transferee: categorizedStudents.transferee.length
   };
-
-  const toggleFacultyCorPrint = async () => {
-    try {
-      await router.post('/registrar/settings/toggle-faculty-cor-print', {}, {
-        preserveState: true,
-        preserveScroll: true,
-      });
-    } catch (error) {
-      console.error('Error toggling faculty COR print setting:', error);
-    }
-  };
-
-  const totalEnrolled = enrolledStudents.length;
-  const totalStrands = strands.length;
-  const totalSections = sections.length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <Sidebar onToggle={setIsCollapsed} />
       <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} px-8 py-6 transition-all duration-300 overflow-x-hidden min-h-screen`}>
         <div className="max-w-7xl mx-auto">
+          {/* HCI Principle 1: Visibility of System Status */}
           {flash?.success && (
-            <div className="mb-6 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg">
+            <div className="mb-6 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg flex items-center gap-3">
+              <FaCheckCircle className="text-green-600" />
               {flash.success}
             </div>
           )}
-          
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-10 gap-4">
-            <div>
-              <h1 className="text-4xl font-extrabold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-                Enrolled Students
-              </h1>
-              <p className="text-gray-600 mt-2">View and manage enrolled students</p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Faculty COR Print Toggle */}
-              <div className="flex items-center gap-3 bg-white bg-opacity-95 backdrop-blur-xl rounded-lg shadow-lg p-3 border border-gray-200">
-                <FaPrint className="text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">Faculty COR Print:</span>
-                <button
-                  onClick={toggleFacultyCorPrint}
-                  className={`flex items-center transition-colors duration-200 ${
-                    allowFacultyCorPrint ? 'text-green-600' : 'text-red-600'
-                  }`}
-                  title={`Click to ${allowFacultyCorPrint ? 'disable' : 'enable'} faculty COR printing`}
-                >
-                  {allowFacultyCorPrint ? (
-                    <FaToggleOn className="text-2xl" />
-                  ) : (
-                    <FaToggleOff className="text-2xl" />
-                  )}
-                </button>
-                <span className={`text-xs font-medium ${
-                  allowFacultyCorPrint ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {allowFacultyCorPrint ? 'Enabled' : 'Disabled'}
-                </span>
+
+          {/* Enhanced Header with Statistics - HCI Principle 1 */}
+          <div className="mb-8">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-6">
+              <div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
+                  <FaUsers className="text-blue-600" />
+                  Student Management
+                </h1>
+                <p className="text-gray-600 mt-2">Manage and organize students by enrollment type</p>
               </div>
               
+              {/* Help Button - HCI Principle 10 */}
               <button
-                onClick={exportToExcel}
-                className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 transition-all duration-200 transform hover:scale-105"
+                onClick={() => setShowHelp(!showHelp)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                title="Show help and keyboard shortcuts"
               >
-                <FaFileExcel /> Export to Excel
+                <FaQuestionCircle />
+                Help
               </button>
             </div>
-          </div>
 
-          {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg p-6 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Enrolled Students</p>
-                  <p className="text-3xl font-bold text-green-600">{totalEnrolled}</p>
-                </div>
-                <div className="p-3 bg-green-100 rounded-full">
-                  <FaGraduationCap className="text-green-600 text-xl" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg p-6 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Active Strands</p>
-                  <p className="text-3xl font-bold text-purple-600">{totalStrands}</p>
-                </div>
-                <div className="p-3 bg-purple-100 rounded-full">
-                  <FaUsers className="text-purple-600 text-xl" />
+            {/* Statistics Cards - HCI Principle 1: Visibility of System Status */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Total Students</p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
+                  </div>
+                  <div className="p-3 bg-gray-100 rounded-xl">
+                    <FaUsers className="text-2xl text-gray-600" />
+                  </div>
                 </div>
               </div>
-            </div>
-            
-            <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg p-6 border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Total Sections</p>
-                  <p className="text-3xl font-bold text-orange-600">{totalSections}</p>
-                </div>
-                <div className="p-3 bg-orange-100 rounded-full">
-                  <FaUsers className="text-orange-600 text-xl" />
-                </div>
-              </div>
-            </div>
-          </div>
 
-
-          {/* Filter and Search Bar */}
-          <div className="bg-white bg-opacity-80 rounded-xl shadow-lg p-4 border border-gray-200 mb-8">
-            <div className="flex flex-col lg:flex-row gap-4">
-              <div className="flex-1 relative">
-                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search students by name, email, or ID..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-                />
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-green-600">New Students</p>
+                    <p className="text-3xl font-bold text-green-700">{stats.new}</p>
+                  </div>
+                  <div className="p-3 bg-green-100 rounded-xl">
+                    <FaUserPlus className="text-2xl text-green-600" />
+                  </div>
+                </div>
               </div>
-              <select
-                value={strandFilter}
-                onChange={(e) => setStrandFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-              >
-                <option value="">All Strands</option>
-                {strands.map((strand) => (
-                  <option key={strand.id} value={strand.name}>{strand.name}</option>
-                ))}
-              </select>
-              <select
-                value={gradeFilter}
-                onChange={(e) => setGradeFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-              >
-                <option value="">All Grades</option>
-                <option value="11">Grade 11</option>
-                <option value="12">Grade 12</option>
-              </select>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-blue-600">Continuing</p>
+                    <p className="text-3xl font-bold text-blue-700">{stats.continuing}</p>
+                  </div>
+                  <div className="p-3 bg-blue-100 rounded-xl">
+                    <FaUserCheck className="text-2xl text-blue-600" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-orange-600">Transferees</p>
+                    <p className="text-3xl font-bold text-orange-700">{stats.transferee}</p>
+                  </div>
+                  <div className="p-3 bg-orange-100 rounded-xl">
+                    <FaExchangeAlt className="text-2xl text-orange-600" />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Students Table */}
-          <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-purple-600 to-blue-600 text-white">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-sm font-semibold">Student Info</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold">Grade & Strand</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold">Section</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold">Status</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="px-6 py-12 text-center">
-                        <div className="flex flex-col items-center">
-                          <FaUsers className="text-6xl text-gray-300 mb-4" />
-                          <p className="text-gray-500 text-lg font-semibold">No students found</p>
-                          <p className="text-gray-400">Try adjusting your search filters</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredStudents.map((student) => (
-                      <tr key={student.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div>
-                            <p className="font-semibold text-gray-900">{student.name}</p>
-                            <p className="text-sm text-gray-600">{student.email}</p>
-                            <p className="text-xs text-gray-500 font-mono">{student.student_id}</p>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div>
-                            <p className="font-medium text-gray-900">Grade {student.grade_level}</p>
-                            <p className="text-sm text-gray-600">{student.strand || 'Not assigned'}</p>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                            student.section ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {student.section || 'Not assigned'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                            Enrolled
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button
-                            onClick={() => openStudentModal(student)}
-                            className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-                          >
-                            <FaEye /> View Details
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+          {/* Student Type Tabs - HCI Principle 4: Consistency and Standards */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mb-8">
+            <div className="border-b border-gray-200">
+              <nav className="flex space-x-8 px-6" aria-label="Student Types">
+                {[
+                  { key: 'all', label: 'All Students', icon: FaUsers, color: 'gray', count: stats.total },
+                  { key: 'new', label: 'New Students', icon: FaUserPlus, color: 'green', count: stats.new },
+                  { key: 'continuing', label: 'Continuing', icon: FaUserCheck, color: 'blue', count: stats.continuing },
+                  { key: 'transferee', label: 'Transferees', icon: FaExchangeAlt, color: 'orange', count: stats.transferee }
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                      className={`flex items-center gap-3 py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                        isActive
+                          ? `border-${tab.color}-500 text-${tab.color}-600`
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                      aria-current={isActive ? 'page' : undefined}
+                    >
+                      <Icon className={`text-lg ${isActive ? `text-${tab.color}-600` : 'text-gray-400'}`} />
+                      {tab.label}
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        isActive 
+                          ? `bg-${tab.color}-100 text-${tab.color}-800` 
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {/* Search and Controls */}
+            <div className="p-6">
+              <div className="flex gap-4 items-center mb-6">
+                <div className="relative flex-1 max-w-md">
+                  <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search students..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  <FaFilter />
+                </button>
+              </div>
+
+              {/* Collapsible Filters */}
+              {showFilters && (
+                <div className="bg-gray-50 rounded-xl p-4 mb-6 border border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Strand</label>
+                      <select
+                        value={selectedStrand}
+                        onChange={(e) => setSelectedStrand(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">All Strands</option>
+                        {strands.map((strand) => (
+                          <option key={strand.id} value={strand.name}>
+                            {strand.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade Level</label>
+                      <select
+                        value={selectedGrade}
+                        onChange={(e) => setSelectedGrade(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">All Grades</option>
+                        <option value="11">Grade 11</option>
+                        <option value="12">Grade 12</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Sort By</label>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="name">Name</option>
+                        <option value="grade_level">Grade Level</option>
+                        <option value="enrollment_date">Enrollment Date</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Help Panel - HCI Principle 10: Help and documentation */}
+          {showHelp && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8">
+              <h3 className="text-lg font-semibold text-blue-900 mb-4">Student Management Help</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-blue-800">
+                <div>
+                  <h4 className="font-semibold mb-2">Student Types:</h4>
+                  <ul className="space-y-1">
+                    <li>• <strong>New Students:</strong> First-time enrollees</li>
+                    <li>• <strong>Continuing:</strong> Grade 12 students or returning</li>
+                    <li>• <strong>Transferees:</strong> Students from other schools</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Quick Actions:</h4>
+                  <ul className="space-y-1">
+                    <li>• Click student cards to view details</li>
+                    <li>• Use filters to narrow down results</li>
+                    <li>• Switch between grid and list views</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Student Display */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+            <div className="text-center py-8">
+              <FaUsers className="mx-auto text-4xl text-gray-400 mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                {activeTab === 'all' ? 'All Students' : 
+                 activeTab === 'new' ? 'New Students' :
+                 activeTab === 'continuing' ? 'Continuing Students' : 'Transferee Students'}
+              </h3>
+              <p className="text-gray-600">
+                Showing {currentStudentList.length} of {stats.total} students
+              </p>
             </div>
           </div>
         </div>
       </main>
-      
-      <StudentDetailsModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        student={selectedStudent}
-      />
     </div>
   );
 };

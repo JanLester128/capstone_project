@@ -15,6 +15,8 @@ import {
   FaFilter,
   FaUsers,
   FaUserCheck,
+  FaUserPlus,
+  FaExchangeAlt,
   FaSpinner,
   FaTimes,
   FaChevronDown,
@@ -30,7 +32,9 @@ import {
   FaFileExport,
   FaArrowUp,
   FaLevelUpAlt,
-  FaCheckCircle
+  FaCheckCircle,
+  FaQuestionCircle,
+  FaInfoCircle
 } from "react-icons/fa";
 
 export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrint = true, auth }) {
@@ -57,10 +61,26 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
   const [loading, setLoading] = useState(false);
   const [sortField, setSortField] = useState('lastname');
   const [sortDirection, setSortDirection] = useState('asc');
+  
+  // Enhanced UI/UX States following HCI principles
+  const [activeTab, setActiveTab] = useState('all'); // all, new, continuing, transferee
+  const [showFilters, setShowFilters] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [viewMode, setViewMode] = useState('grid'); // grid, list
 
 
   const printModalContent = () => {
     window.print();
+  };
+
+  // Enhanced filtering and categorization logic
+  const categorizeStudents = (students) => {
+    return {
+      all: students,
+      new: students.filter(s => s.student_type === 'new' || s.enrollment_status === 'new' || s.grade_level === '11'),
+      continuing: students.filter(s => s.student_type === 'continuing' || s.grade_level === '12'),
+      transferee: students.filter(s => s.student_type === 'transferee' || s.previous_school)
+    };
   };
 
   const handleViewStudent = (student) => {
@@ -72,7 +92,7 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
   };
 
   const getFilteredStudents = () => {
-    return (enrolledStudents || []).filter(student => {
+    const baseFiltered = (enrolledStudents || []).filter(student => {
       const matchesSearch = !searchTerm ||
         `${student.firstname} ${student.lastname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -84,6 +104,9 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
 
       return matchesSearch && matchesStrand && matchesSection && matchesGrade;
     });
+
+    const categorized = categorizeStudents(baseFiltered);
+    return categorized[activeTab] || [];
   };
 
   const getSortedStudents = (studentsToSort) => {
@@ -177,37 +200,231 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
         <main className={`transition-all duration-300 ${isCollapsed ? 'ml-16' : 'ml-64'} min-h-screen overflow-hidden`}>
           <div className="p-4 sm:p-6 lg:p-8">
             <div className="max-w-full">
-              {/* Header */}
-              <div className="mb-6 lg:mb-8">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Enrolled Students</h1>
-                    <p className="text-gray-600 text-sm sm:text-base">View and manage enrolled student records and certificates</p>
+              {/* Enhanced Header with Statistics - HCI Principle 1 */}
+              <div className="mb-8">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-6">
+                  <div>
+                    <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
+                      <FaUsers className="text-blue-600" />
+                      Student Management
+                    </h1>
+                    <p className="text-gray-600 mt-2">View and manage enrolled students by type and section</p>
                   </div>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                    <div className="bg-white rounded-lg px-3 sm:px-4 py-2 shadow-sm border">
-                      <div className="flex items-center space-x-2">
-                        <FaUsers className="text-blue-600 text-sm" />
-                        <span className="text-xs sm:text-sm font-medium text-gray-700">Total:</span>
-                        <span className="text-sm sm:text-lg font-bold text-blue-600">{(enrolledStudents || []).length}</span>
-                      </div>
-                    </div>
-
-                    {/* Populate Class Details Button */}
+                  
+                  {/* Help Button - HCI Principle 10 */}
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowHelp(!showHelp)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                      title="Show help and keyboard shortcuts"
+                    >
+                      <FaQuestionCircle />
+                      Help
+                    </button>
+                    
                     <button
                       onClick={handlePopulateClassDetails}
-                      className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors duration-200 text-sm"
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors duration-200"
                       title="Populate class_details table with existing enrollment data"
                     >
-                      <FaCheckCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <FaCheckCircle />
                       <span>Populate Data</span>
                     </button>
                   </div>
                 </div>
+
+                {/* Statistics Cards - HCI Principle 1: Visibility of System Status */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                  {(() => {
+                    const allStudents = enrolledStudents || [];
+                    const categorized = categorizeStudents(allStudents);
+                    const stats = {
+                      total: allStudents.length,
+                      new: categorized.new.length,
+                      continuing: categorized.continuing.length,
+                      transferee: categorized.transferee.length
+                    };
+
+                    return [
+                      { key: 'total', label: 'Total Students', count: stats.total, color: 'gray', icon: FaUsers },
+                      { key: 'new', label: 'New Students', count: stats.new, color: 'green', icon: FaUserPlus },
+                      { key: 'continuing', label: 'Continuing', count: stats.continuing, color: 'blue', icon: FaUserCheck },
+                      { key: 'transferee', label: 'Transferees', count: stats.transferee, color: 'orange', icon: FaExchangeAlt }
+                    ].map((stat) => {
+                      const Icon = stat.icon;
+                      return (
+                        <div key={stat.key} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className={`text-sm font-medium text-${stat.color}-600`}>{stat.label}</p>
+                              <p className={`text-3xl font-bold text-${stat.color}-700`}>{stat.count}</p>
+                            </div>
+                            <div className={`p-3 bg-${stat.color}-100 rounded-xl`}>
+                              <Icon className={`text-2xl text-${stat.color}-600`} />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
 
-              {/* Filters */}
-              <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
+              {/* Student Type Tabs - HCI Principle 4: Consistency and Standards */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mb-8">
+                <div className="border-b border-gray-200">
+                  <nav className="flex space-x-8 px-6" aria-label="Student Types">
+                    {(() => {
+                      const allStudents = enrolledStudents || [];
+                      const categorized = categorizeStudents(allStudents);
+                      const stats = {
+                        total: allStudents.length,
+                        new: categorized.new.length,
+                        continuing: categorized.continuing.length,
+                        transferee: categorized.transferee.length
+                      };
+
+                      return [
+                        { key: 'all', label: 'All Students', icon: FaUsers, color: 'gray', count: stats.total },
+                        { key: 'new', label: 'New Students', icon: FaUserPlus, color: 'green', count: stats.new },
+                        { key: 'continuing', label: 'Continuing', icon: FaUserCheck, color: 'blue', count: stats.continuing },
+                        { key: 'transferee', label: 'Transferees', icon: FaExchangeAlt, color: 'orange', count: stats.transferee }
+                      ].map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeTab === tab.key;
+                        return (
+                          <button
+                            key={tab.key}
+                            onClick={() => setActiveTab(tab.key)}
+                            className={`flex items-center gap-3 py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                              isActive
+                                ? `border-${tab.color}-500 text-${tab.color}-600`
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                            }`}
+                            aria-current={isActive ? 'page' : undefined}
+                          >
+                            <Icon className={`text-lg ${isActive ? `text-${tab.color}-600` : 'text-gray-400'}`} />
+                            {tab.label}
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              isActive 
+                                ? `bg-${tab.color}-100 text-${tab.color}-800` 
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {tab.count}
+                            </span>
+                          </button>
+                        );
+                      });
+                    })()}
+                  </nav>
+                </div>
+
+                {/* Enhanced Search and Filter Controls - HCI Principle 6: Recognition rather than recall */}
+                <div className="p-6">
+                  <div className="flex flex-col lg:flex-row gap-4 items-center justify-between mb-6">
+                    {/* Search Bar */}
+                    <div className="relative flex-1 max-w-md">
+                      <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search students by name, email, or LRN..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {/* Filter Toggle */}
+                    <button
+                      onClick={() => setShowFilters(!showFilters)}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      <FaFilter />
+                      Filters
+                    </button>
+                  </div>
+
+                  {/* Collapsible Filters - HCI Principle 3: User control and freedom */}
+                  {showFilters && (
+                    <div className="bg-gray-50 rounded-xl p-4 mb-6 border border-gray-200">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Strand</label>
+                          <select
+                            value={filterStrand}
+                            onChange={(e) => setFilterStrand(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="all">All Strands</option>
+                            {getUniqueValues('strand_name').map((strand) => (
+                              <option key={strand} value={strand}>
+                                {strand}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Section</label>
+                          <select
+                            value={filterSection}
+                            onChange={(e) => setFilterSection(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="all">All Sections</option>
+                            {getUniqueValues('section_name').map((section) => (
+                              <option key={section} value={section}>
+                                {section}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Grade Level</label>
+                          <select
+                            value={filterGrade}
+                            onChange={(e) => setFilterGrade(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="all">All Grades</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Help Panel - HCI Principle 10: Help and documentation */}
+              {showHelp && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8">
+                  <h3 className="text-lg font-semibold text-blue-900 mb-4">Student Management Help</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-blue-800">
+                    <div>
+                      <h4 className="font-semibold mb-2">Student Types:</h4>
+                      <ul className="space-y-1">
+                        <li>• <strong>New Students:</strong> First-time enrollees (Grade 11)</li>
+                        <li>• <strong>Continuing:</strong> Grade 12 students or returning</li>
+                        <li>• <strong>Transferees:</strong> Students from other schools</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-2">Quick Actions:</h4>
+                      <ul className="space-y-1">
+                        <li>• Click "View" to see student details and COR</li>
+                        <li>• Use filters to narrow down results</li>
+                        <li>• Sort by clicking column headers</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Legacy Filters for backward compatibility */}
+              <div className="hidden">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Search Students</label>
@@ -397,7 +614,7 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
         {/* Enhanced Student COR Modal */}
         {showModal && selectedStudent && (
           <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-7xl w-full h-[90vh] flex flex-col cor-printable overflow-hidden">
+            <div className="bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[95vh] flex flex-col cor-printable">
               {/* COR Header */}
               <div className="bg-white border-b flex-shrink-0">
                 <div className="text-center py-4 bg-gray-50">
@@ -411,8 +628,8 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
                 </div>
               </div>
 
-              {/* Main Content - No Scroll */}
-              <div className="flex-1 overflow-hidden">
+              {/* Main Content - Scrollable */}
+              <div className="flex-1 overflow-y-auto">
                 {/* Student Information */}
                 <div className="p-3 border-b">
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -551,17 +768,66 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
               left: 0 !important; 
               top: 0 !important; 
               width: 100% !important; 
+              height: auto !important;
+              max-height: none !important;
               background: white !important;
               margin: 0 !important;
               padding: 20px !important;
+              overflow: visible !important;
+            }
+            
+            /* Ensure content is visible */
+            .cor-printable .overflow-y-auto {
+              overflow: visible !important;
+              height: auto !important;
+              max-height: none !important;
+            }
+            
+            /* Hide modal buttons during print */
+            .cor-printable .border-t.bg-gray-50 {
+              display: none !important;
             }
             
             /* Clean styling */
             .print\\:hidden { display: none !important; }
             .shadow-xl { box-shadow: none !important; }
-            .border { border: 1px solid black !important; }
-            table { border-collapse: collapse !important; }
-            th, td { border: 1px solid black !important; padding: 8px !important; }
+            .rounded-lg { border-radius: 0 !important; }
+            
+            /* Table styling */
+            table { 
+              border-collapse: collapse !important; 
+              width: 100% !important;
+              font-size: 12px !important;
+            }
+            th, td { 
+              border: 1px solid black !important; 
+              padding: 6px 4px !important; 
+              text-align: center !important;
+            }
+            
+            /* Ensure all text is black */
+            .cor-printable * {
+              color: black !important;
+            }
+            
+            /* Page breaks */
+            .cor-printable {
+              page-break-inside: avoid;
+            }
+          }
+          
+          /* Screen styles for better modal visibility */
+          @media screen {
+            .cor-printable {
+              display: flex;
+              flex-direction: column;
+              height: 100%;
+            }
+            
+            .cor-printable .overflow-y-auto {
+              flex: 1;
+              min-height: 0;
+            }
           }
         `}</style>
       </div>

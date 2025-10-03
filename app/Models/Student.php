@@ -97,6 +97,23 @@ class Student extends Model
         'age' => 'integer',
     ];
 
+    // Accessor to determine student type from multiple sources
+    public function getStudentTypeAttribute()
+    {
+        // First check if user has student_type set
+        if ($this->user && $this->user->student_type) {
+            return $this->user->student_type;
+        }
+        
+        // Fallback to student_status field
+        if ($this->student_status) {
+            return strtolower($this->student_status);
+        }
+        
+        // Default to 'new' if nothing is set
+        return 'new';
+    }
+
     public function scopeByEnrollmentStatus($query, $status)
     {
         return $query->where('enrollment_status', $status);

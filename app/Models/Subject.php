@@ -71,4 +71,26 @@ class Subject extends Model
         
         return Subject::whereIn('code', $this->corequisites)->get();
     }
+
+    // Transferee relationship
+    public function transfereeCreditedSubjects()
+    {
+        return $this->hasMany(TransfereeCreditedSubject::class);
+    }
+
+    // Helper methods for transferee functionality
+    public function getTransfereeCreditsCount()
+    {
+        return $this->transfereeCreditedSubjects()->count();
+    }
+
+    public function getAverageCreditedGrade()
+    {
+        return $this->transfereeCreditedSubjects()->avg('grade');
+    }
+
+    public function hasTransfereeCredits()
+    {
+        return $this->transfereeCreditedSubjects()->exists();
+    }
 }

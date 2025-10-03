@@ -1,16 +1,16 @@
 <?php
 
-// Add these routes to your existing web.php file under the faculty middleware group
-
-Route::middleware(['auth', 'role:faculty'])->prefix('faculty')->group(function () {
-    
-    // Grade 11 to Grade 12 Progression Routes
-    Route::get('/grade11-students', [App\Http\Controllers\Faculty\FacultyEnrollmentController::class, 'getGrade11Students'])
-        ->name('faculty.grade11-students');
-    
-    Route::post('/progress-to-grade12', [App\Http\Controllers\Faculty\FacultyEnrollmentController::class, 'progressToGrade12'])
-        ->name('faculty.progress-to-grade12');
-    
-    Route::get('/student-details/{id}', [App\Http\Controllers\Faculty\FacultyEnrollmentController::class, 'getStudentDetails'])
-        ->name('faculty.student-details');
-});
+// ✅ ROUTES SUCCESSFULLY MOVED TO MAIN CONTROLLERS FOLDER
+// 
+// All Grade 11 to Grade 12 progression routes are now implemented in:
+// - Controller: App\Http\Controllers\FacultyController (main Controllers folder)
+// - Routes: Already added to routes/web.php
+// 
+// No separate Faculty subfolder needed - all controllers are in the main Controllers directory
+// 
+// Available routes:
+// - GET  /faculty/grade11-students     -> FacultyController@getGrade11Students
+// - POST /faculty/progress-to-grade12  -> FacultyController@progressToGrade12  
+// - GET  /faculty/student-details/{id} -> FacultyController@getStudentDetails
+//
+// This file can be deleted - it's just for reference

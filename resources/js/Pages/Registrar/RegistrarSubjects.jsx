@@ -332,6 +332,7 @@ export default function RegistrarSubjects({ subjects = [], strands = [], faculty
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">Semester</th>
                         <th className="text-left py-3 px-4 font-medium text-gray-700">Code</th>
                         <th className="text-left py-3 px-4 font-medium text-gray-700">Subject Name</th>
                         <th className="text-left py-3 px-4 font-medium text-gray-700">Strand</th>
@@ -343,12 +344,24 @@ export default function RegistrarSubjects({ subjects = [], strands = [], faculty
                       {filteredSubjects.map(subject => (
                         <tr key={subject.id} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="py-3 px-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              subject.semester === 1 || subject.semester === '1' 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {subject.semester === 1 || subject.semester === '1' ? '1st Sem' : '2nd Sem'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
                             <span className="font-mono text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">
                               {subject.code}
                             </span>
                           </td>
                           <td className="py-3 px-4">
                             <div className="font-medium text-gray-900">{subject.name}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {subject.semester === 1 || subject.semester === '1' ? 'August - December' : 'January - May'}
+                            </div>
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-sm text-gray-600">{getStrandName(subject.strand_id)}</span>

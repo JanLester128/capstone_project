@@ -22,7 +22,7 @@ import {
 } from 'react-icons/fa';
 
 export default function StudentEnroll({ auth, user, availableStrands = [], activeSchoolYear = null }) {
-  const { enrollmentStatus, flash } = usePage().props;
+  const { enrollmentStatus, enrollmentOpen, flash } = usePage().props;
   const [showEnrollmentForm, setShowEnrollmentForm] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     // Get initial state from localStorage
@@ -78,6 +78,20 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
           status: "Enrolled"
         };
       default:
+        // Check if enrollment is closed
+        if (!enrollmentOpen && activeSchoolYear) {
+          return {
+            icon: <FaClock className="w-12 h-12 text-red-500" />,
+            title: "Enrollment Period Closed",
+            message: "The enrollment period for this academic year has been closed by the registrar. Please contact the registrar's office for assistance or wait for the next enrollment period.",
+            bgColor: "bg-gradient-to-br from-red-50 to-pink-50",
+            borderColor: "border-red-300",
+            textColor: "text-red-800",
+            actionColor: "bg-red-100 text-red-800",
+            status: "Closed"
+          };
+        }
+        
         return {
           icon: <FaUserGraduate className="w-12 h-12 text-blue-500" />,
           title: "Ready to Begin Enrollment",
@@ -93,9 +107,36 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
 
   const statusInfo = getEnrollmentStatusInfo();
 
+  // Check if enrollment is actually available based on dates
+  const isEnrollmentDateActive = () => {
+    if (!activeSchoolYear?.enrollment_start_date || !activeSchoolYear?.enrollment_end_date) {
+      return false;
+    }
+    
+    const now = new Date();
+    const startDate = new Date(activeSchoolYear.enrollment_start_date);
+    const endDate = new Date(activeSchoolYear.enrollment_end_date);
+    
+    return now >= startDate && now <= endDate;
+  };
+
   // HCI Principle 5: Error prevention - Check prerequisites
   const canEnroll = () => {
-    return activeSchoolYear && availableStrands.length > 0 && !enrollmentStatus?.status;
+    // Check for enrollment period errors in flash messages
+    const hasEnrollmentError = flash?.error && (
+      flash.error.includes('Enrollment has not started') ||
+      flash.error.includes('enrollment period') ||
+      flash.error.includes('Enrollment period')
+    );
+    
+    const isDateActive = isEnrollmentDateActive();
+    
+    return activeSchoolYear && 
+           availableStrands.length > 0 && 
+           !enrollmentStatus?.status && 
+           enrollmentOpen && 
+           isDateActive &&
+           !hasEnrollmentError;
   };
 
   const handleSidebarToggle = (collapsed) => {
@@ -154,6 +195,17 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
             </div>
             <div className="max-w-4xl mx-auto space-y-6">
 
+              {/* Flash Error Messages */}
+              {flash?.error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
+                  <FaExclamationTriangle className="text-red-500 flex-shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-medium text-red-800">Enrollment Error</h3>
+                    <p className="text-sm text-red-700 mt-1">{flash.error}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Flash Messages - HCI Principle 1: Visibility of system status */}
               {flash?.success && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center space-x-3">
@@ -203,6 +255,50 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                         Start Enrollment Process
                         <FaArrowRight className="ml-3" />
                       </button>
+                    )}
+
+                    {/* Enrollment Closed - Show closed message */}
+                    {!enrollmentStatus?.status && activeSchoolYear && (!enrollmentOpen || !isEnrollmentDateActive() || (flash?.error && (flash.error.includes('Enrollment has not started') || flash.error.includes('enrollment period') || flash.error.includes('Enrollment period')))) && (
+                      <div className="text-center space-y-4">
+                        <div className="flex items-center justify-center px-8 py-4 bg-gradient-to-r from-red-100 to-pink-100 border-2 border-red-300 text-red-800 font-bold rounded-lg shadow-lg">
+                          <FaClock className="mr-3 text-2xl text-red-600" />
+                          <span className="text-xl">ENROLLMENT CLOSED</span>
+                          <FaClock className="ml-3 text-2xl text-red-600" />
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
+                          <div className="flex items-start space-x-3">
+                            <FaInfoCircle className="text-yellow-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm text-yellow-800 font-medium">
+                                {!isEnrollmentDateActive() ? 'Enrollment Period Not Active' : 'Enrollment Closed'}
+                              </p>
+                              <p className="text-sm text-yellow-700 mt-1">
+                                {!isEnrollmentDateActive() ? (
+                                  <>
+                                    {activeSchoolYear?.enrollment_start_date && activeSchoolYear?.enrollment_end_date ? (
+                                      <>
+                                        Enrollment is only available from{' '}
+                                        <span className="font-semibold">
+                                          {new Date(activeSchoolYear.enrollment_start_date).toLocaleDateString()}
+                                        </span>{' '}
+                                        to{' '}
+                                        <span className="font-semibold">
+                                          {new Date(activeSchoolYear.enrollment_end_date).toLocaleDateString()}
+                                        </span>.
+                                        Please wait for the enrollment period to begin.
+                                      </>
+                                    ) : (
+                                      'Enrollment period dates are not yet configured. Please contact the registrar\'s office for information about when enrollment will be available.'
+                                    )}
+                                  </>
+                                ) : (
+                                  'The enrollment has been closed by the registrar. Please contact the registrar\'s office for assistance.'
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
 
                     {/* Pending status - Show disabled button */}
@@ -311,20 +407,18 @@ export default function StudentEnroll({ auth, user, availableStrands = [], activ
                     <div>
                       <h3 className="font-semibold text-gray-900">Student ID</h3>
                       <p className="text-sm text-gray-600">
-                        {user?.id ? `STU-${String(user.id).padStart(6, '0')}` : 'Not Assigned'}
+                        Your unique student identifier
                       </p>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Requirements Checklist - HCI Principle 10: Help and documentation */}
+            {/* Grade 12 Progression Requirements - HCI Principle 10: Help and documentation */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <FaClipboardCheck className="mr-2 text-indigo-600" />
                   Enrollment Requirements
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[
                     'Student Photo (2x2 ID Picture)',
                     'Previous Academic Records (if transferring)',

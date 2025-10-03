@@ -7,7 +7,6 @@ use App\Models\Strand;
 use App\Models\SchoolYear;
 use App\Models\Enrollment;
 use App\Models\ClassDetail;
-use App\Models\EnrollmentSubject;
 use App\Models\Subject;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -136,6 +135,35 @@ class StudentController extends Controller
         try {
             $user = $request->user();
 
+            // Check if enrollment is currently open
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return redirect()->back()->withErrors([
+                    'general' => 'No active school year found. Please contact the registrar.'
+                ]);
+            }
+
+            if (!$activeSchoolYear->enrollment_open) {
+                return redirect()->back()->withErrors([
+                    'general' => 'Enrollment is currently closed. Please contact the registrar\'s office for assistance.'
+                ]);
+            }
+
+            // Check if enrollment period is within the allowed dates
+            $now = now();
+            if ($activeSchoolYear->enrollment_start && $now->isBefore($activeSchoolYear->enrollment_start)) {
+                return redirect()->back()->withErrors([
+                    'general' => 'Enrollment has not started yet. Please wait for the enrollment period to begin.'
+                ]);
+            }
+
+            if ($activeSchoolYear->enrollment_end && $now->isAfter($activeSchoolYear->enrollment_end)) {
+                return redirect()->back()->withErrors([
+                    'general' => 'Enrollment period has ended. Please contact the registrar\'s office for assistance.'
+                ]);
+            }
+
             // Find or create the student record for the authenticated user
             $student = Student::where('user_id', $user->id)->first();
 
@@ -168,6 +196,10 @@ class StudentController extends Controller
                 'pwdId' => 'nullable|string|max:50',
                 'guardianName' => 'required|string|max:255',
                 'guardianContact' => 'required|string|max:20',
+                'guardianRelationship' => 'required|string|max:50',
+                'emergencyContactName' => 'nullable|string|max:255',
+                'emergencyContactNumber' => 'nullable|string|max:20',
+                'emergencyContactRelationship' => 'nullable|string|max:50',
                 'lastSchool' => 'nullable|string|max:255',
                 'lastGrade' => 'required|string|max:50',
                 'lastSY' => 'required|string|max:20',
@@ -243,6 +275,10 @@ class StudentController extends Controller
                     'report_card' => $filePaths['reportCard'] ?? null,
                     'guardian_name' => $validated['guardianName'] ?? null,
                     'guardian_contact' => $validated['guardianContact'] ?? null,
+                    'guardian_relationship' => $validated['guardianRelationship'] ?? null,
+                    'emergency_contact_name' => $validated['emergencyContactName'] ?? null,
+                    'emergency_contact_number' => $validated['emergencyContactNumber'] ?? null,
+                    'emergency_contact_relationship' => $validated['emergencyContactRelationship'] ?? null,
                     'last_school' => $validated['lastSchool'] ?? null,
                 ];
 
@@ -434,10 +470,8 @@ class StudentController extends Controller
                     // Determine grade level (default to 11 for new SHS students)
                     $gradeLevel = $validated['gradeLevel'] ?? 11;
                     
-                    // Auto-enroll in all subjects for the strand and grade level
-                    EnrollmentSubject::autoEnrollFullYear($enrollmentId, $strand->id, $gradeLevel);
-                    
-                    Log::info('Philippine SHS: Auto-enrolled in full year subjects', [
+                    // Note: Subject enrollment is now handled through class_details when coordinator approves
+                    Log::info('Philippine SHS: Enrollment submitted, awaiting coordinator approval', [
                         'enrollment_id' => $enrollmentId,
                         'strand_id' => $strand->id,
                         'grade_level' => $gradeLevel
@@ -747,13 +781,26 @@ class StudentController extends Controller
                     }
                 }
 
+                // Get credited subject IDs for transferee students
+                $creditedSubjectIds = [];
+                if ($studentPersonalInfo && $studentPersonalInfo->student_status === 'Transferee') {
+                    $creditedSubjectIds = DB::table('transferee_credited_subjects')
+                        ->where('student_id', $user->id)
+                        ->pluck('subject_id')
+                        ->toArray();
+                }
+
                 // Show only classes for the student's assigned section and their enrollment school year
+                // Exclude credited subjects for transferee students
                 $schedules = DB::table('class')
                     ->join('subjects', 'class.subject_id', '=', 'subjects.id')
                     ->join('users', 'class.faculty_id', '=', 'users.id')
                     ->where('class.school_year_id', $enrollment->school_year_id)
                     ->where('class.section_id', $assignedSectionId)
                     ->where('class.is_active', true)
+                    ->when(!empty($creditedSubjectIds), function ($query) use ($creditedSubjectIds) {
+                        return $query->whereNotIn('class.subject_id', $creditedSubjectIds);
+                    })
                     ->select([
                         'class.id',
                         'subjects.name as subject_name',
@@ -839,12 +886,25 @@ class StudentController extends Controller
                 ]);
             }
 
+            // Get credited subject IDs for transferee students (fallback query)
+            $creditedSubjectIds = [];
+            if ($studentPersonalInfo && $studentPersonalInfo->student_status === 'Transferee') {
+                $creditedSubjectIds = DB::table('transferee_credited_subjects')
+                    ->where('student_id', $user->id)
+                    ->pluck('subject_id')
+                    ->toArray();
+            }
+
             // Show all available classes (not student-specific) until schema is fixed
+            // Exclude credited subjects for transferee students
             $schedules = DB::table('class')
                 ->join('subjects', 'class.subject_id', '=', 'subjects.id')
                 ->join('users', 'class.faculty_id', '=', 'users.id')
                 ->where('class.school_year_id', $currentSchoolYear->id)
                 ->where('class.is_active', true)
+                ->when(!empty($creditedSubjectIds), function ($query) use ($creditedSubjectIds) {
+                    return $query->whereNotIn('class.subject_id', $creditedSubjectIds);
+                })
                 ->select([
                     'class.id',
                     'subjects.name as subject_name',
@@ -1036,14 +1096,80 @@ class StudentController extends Controller
                     'user_id' => $user->id,
                     'student_personal_info_id' => $studentPersonalInfo->id,
                     'enrollment_status' => $enrollment->status,
-                    'enrollment_id' => $enrollment->id
+                    'enrollment_id' => $enrollment->id,
+                    'school_year_id' => $enrollment->school_year_id,
+                    'active_school_year_id' => $activeSchoolYear->id
                 ]);
             } else {
-                Log::info('No enrollment found for student', [
+                Log::info('No enrollment found for student in active year', [
                     'user_id' => $user->id,
                     'student_personal_info_id' => $studentPersonalInfo->id,
-                    'school_year_id' => $activeSchoolYear->id
+                    'active_school_year_id' => $activeSchoolYear->id
                 ]);
+                
+                // Check if student has enrollments in other years
+                $allEnrollments = DB::table('enrollments')
+                    ->where('student_id', $studentPersonalInfo->id)
+                    ->get();
+                    
+                Log::info('All enrollments for this student', [
+                    'user_id' => $user->id,
+                    'student_id' => $studentPersonalInfo->id,
+                    'all_enrollments' => $allEnrollments->toArray()
+                ]);
+                
+                // Check if this is a Grade 11 student who should have Grade 12 pending enrollment
+                if ($studentPersonalInfo->grade_level == '11') {
+                    // Find previous school year where student was enrolled
+                    $previousEnrollment = DB::table('enrollments')
+                        ->join('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
+                        ->where('enrollments.student_id', $studentPersonalInfo->id)
+                        ->where('enrollments.status', 'enrolled')
+                        ->where('school_years.is_active', false)
+                        ->orderBy('school_years.year_start', 'desc')
+                        ->first();
+                        
+                    if ($previousEnrollment) {
+                        Log::info('Grade 11 student missing Grade 12 pending enrollment, creating it', [
+                            'user_id' => $user->id,
+                            'student_id' => $studentPersonalInfo->id,
+                            'previous_enrollment_id' => $previousEnrollment->id
+                        ]);
+                        
+                        // Create pending Grade 12 enrollment
+                        $newEnrollmentId = DB::table('enrollments')->insertGetId([
+                            'student_id' => $studentPersonalInfo->id,
+                            'school_year_id' => $activeSchoolYear->id,
+                            'assigned_section_id' => null,
+                            'strand_id' => $previousEnrollment->strand_id,
+                            'status' => 'pending',
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                        
+                        // Update student to Grade 12
+                        DB::table('student_personal_info')
+                            ->where('id', $studentPersonalInfo->id)
+                            ->update([
+                                'grade_level' => '12',
+                                'updated_at' => now()
+                            ]);
+                        
+                        // Set enrollment status for display
+                        $enrollmentStatus = [
+                            'status' => 'pending',
+                            'date_enrolled' => now(),
+                            'strand_id' => $previousEnrollment->strand_id,
+                            'section_id' => null
+                        ];
+                        
+                        Log::info('Created Grade 12 pending enrollment', [
+                            'user_id' => $user->id,
+                            'student_id' => $studentPersonalInfo->id,
+                            'new_enrollment_id' => $newEnrollmentId
+                        ]);
+                    }
+                }
             }
         } else {
             Log::info('Student enrollment check failed', [
@@ -1053,6 +1179,9 @@ class StudentController extends Controller
             ]);
         }
 
+        // Check if enrollment is open for new Grade 11 students
+        $enrollmentOpen = $activeSchoolYear ? $activeSchoolYear->enrollment_open : false;
+        
         return Inertia::render('Student/Student_Enroll', [
             'auth' => [
                 'user' => $user
@@ -1062,6 +1191,7 @@ class StudentController extends Controller
             'activeSchoolYear' => $activeSchoolYear,
             'availableStrands' => $availableStrands,
             'enrollmentStatus' => $enrollmentStatus,
+            'enrollmentOpen' => $enrollmentOpen,
             'flash' => session()->get('flash', [])
         ]);
     }
@@ -1110,47 +1240,67 @@ class StudentController extends Controller
                 ]);
             }
 
-            // Get only APPROVED grades for this student
-            $approvedGrades = \App\Models\Grade::with([
+            // Get all grades for this student - NEW STRUCTURE
+            $studentGrades = \App\Models\Grade::with([
                 'subject',
                 'faculty',
                 'class.section',
                 'schoolYear'
             ])
-            ->where('student_id', $student->id)
+            ->where('student_id', $user->id)  // Direct reference to users.id
             ->where('school_year_id', $activeSchoolYear->id)
-            ->where('approval_status', 'approved') // Only show approved grades
+            ->orderBy('semester')  // Order by semester first
             ->orderBy('subject_id')
             ->get();
 
-            // Group grades by subject and semester
-            $groupedGrades = $approvedGrades->groupBy(['subject.name', 'semester']);
+            // Group grades by subject and semester for display
+            $groupedGrades = $studentGrades->groupBy('subject.name');
 
-            // Format grades for frontend
+            // Format grades for frontend - NEW STRUCTURE
             $formattedGrades = [];
-            foreach ($groupedGrades as $subjectName => $semesters) {
+            foreach ($groupedGrades as $subjectName => $subjectGrades) {
                 $subjectData = [
                     'subject_name' => $subjectName,
                     'semesters' => []
                 ];
 
-                foreach ($semesters as $semester => $grades) {
-                    $grade = $grades->first(); // Get the grade record
+                // Group by semester within each subject
+                $semesterGroups = $subjectGrades->groupBy('semester');
+                
+                foreach ($semesterGroups as $semester => $grades) {
+                    $grade = $grades->first(); // Should only be one grade per subject per semester
+                    
+                    // Get quarter details for proper display
+                    $quarterDetails = $grade->getQuarterDetails();
                     
                     $semesterData = [
                         'semester' => $semester,
+                        'semester_display' => $semester === '1st' ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)',
+                        
+                        // Quarter grades with proper labeling
+                        'quarters' => $quarterDetails,
+                        
+                        // Raw values for calculations
                         'first_quarter' => $grade->first_quarter,
                         'second_quarter' => $grade->second_quarter,
-                        'third_quarter' => $grade->third_quarter,
-                        'fourth_quarter' => $grade->fourth_quarter,
+                        
+                        // Semester summary
                         'semester_grade' => $grade->semester_grade,
+                        'letter_grade' => $grade->getLetterGrade(),
+                        'is_passed' => $grade->isPassed(),
                         'status' => $grade->status,
                         'remarks' => $grade->remarks,
+                        
+                        // Faculty info
                         'faculty_name' => $grade->faculty ? 
                             $grade->faculty->firstname . ' ' . $grade->faculty->lastname : 'N/A',
-                        'approved_at' => $grade->approved_at,
-                        'approved_by' => $grade->approver ? 
-                            $grade->approver->firstname . ' ' . $grade->approver->lastname : 'N/A'
+                        
+                        // Progress info
+                        'quarters_completed' => collect([$grade->first_quarter, $grade->second_quarter])->filter()->count(),
+                        'is_completed' => $grade->status === 'completed',
+                        
+                        // Updated timestamp
+                        'last_updated' => $grade->updated_at
                     ];
                     
                     $subjectData['semesters'][] = $semesterData;
@@ -1159,23 +1309,55 @@ class StudentController extends Controller
                 $formattedGrades[] = $subjectData;
             }
 
-            Log::info('Student grades fetched', [
-                'student_id' => $student->id,
-                'approved_grades_count' => $approvedGrades->count(),
-                'school_year_id' => $activeSchoolYear->id
+            // Calculate overall statistics
+            $totalSubjects = $studentGrades->count();
+            $completedGrades = $studentGrades->where('status', 'completed');
+            $averageGrade = $completedGrades->avg('semester_grade');
+            $passedSubjects = $completedGrades->where('semester_grade', '>=', 75)->count();
+            $failedSubjects = $completedGrades->where('semester_grade', '<', 75)->count();
+
+            // Semester-specific statistics
+            $firstSemesterGrades = $studentGrades->where('semester', '1st');
+            $secondSemesterGrades = $studentGrades->where('semester', '2nd');
+            
+            $statistics = [
+                'overall' => [
+                    'total_subjects' => $totalSubjects,
+                    'completed_subjects' => $completedGrades->count(),
+                    'average_grade' => $averageGrade ? round($averageGrade, 2) : null,
+                    'passed_subjects' => $passedSubjects,
+                    'failed_subjects' => $failedSubjects
+                ],
+                'first_semester' => [
+                    'total_subjects' => $firstSemesterGrades->count(),
+                    'completed_subjects' => $firstSemesterGrades->where('status', 'completed')->count(),
+                    'average_grade' => $firstSemesterGrades->where('status', 'completed')->avg('semester_grade'),
+                    'passed_subjects' => $firstSemesterGrades->where('semester_grade', '>=', 75)->count()
+                ],
+                'second_semester' => [
+                    'total_subjects' => $secondSemesterGrades->count(),
+                    'completed_subjects' => $secondSemesterGrades->where('status', 'completed')->count(),
+                    'average_grade' => $secondSemesterGrades->where('status', 'completed')->avg('semester_grade'),
+                    'passed_subjects' => $secondSemesterGrades->where('semester_grade', '>=', 75)->count()
+                ]
+            ];
+
+            Log::info('Student grades fetched - NEW STRUCTURE', [
+                'student_id' => $user->id,
+                'total_grades' => $totalSubjects,
+                'first_semester_count' => $firstSemesterGrades->count(),
+                'second_semester_count' => $secondSemesterGrades->count()
             ]);
 
             return Inertia::render('Student/Student_Grades', [
                 'grades' => $formattedGrades,
+                'statistics' => $statistics,
+                'activeSchoolYear' => $activeSchoolYear,
                 'studentInfo' => [
-                    'id' => $student->id,
+                    'id' => $user->id,
                     'name' => $user->firstname . ' ' . $user->lastname,
-                    'email' => $user->email,
-                    'lrn' => $student->lrn,
-                    'grade_level' => $student->grade_level
+                    'email' => $user->email
                 ],
-                'schoolYear' => $activeSchoolYear,
-                'totalApprovedGrades' => $approvedGrades->count(),
                 'auth' => ['user' => $user]
             ]);
 

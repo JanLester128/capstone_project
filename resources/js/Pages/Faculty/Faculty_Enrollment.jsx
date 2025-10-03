@@ -23,17 +23,22 @@ import {
   FaPrint,
   FaCheckCircle,
   FaArrowRight,
-  FaUserGraduate
+  FaUserGraduate,
+  FaUserPlus,
+  FaExchangeAlt,
+  FaSchool
 } from "react-icons/fa";
 
-export default function Faculty_Enrollment({ pendingStudents: initialPendingStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, allowFacultyCorPrint = true, auth }) {
+export default function Faculty_Enrollment({ newStudents: initialNewStudents = [], continuingStudents: initialContinuingStudents = [], transfereeStudents: initialTransfereeStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, allowFacultyCorPrint = true, auth }) {
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
   
-  const [pendingStudents, setPendingStudents] = useState(initialPendingStudents);
+  const [newStudents, setNewStudents] = useState(initialNewStudents);
+  const [continuingStudents, setContinuingStudents] = useState(initialContinuingStudents);
+  const [transfereeStudents, setTransfereeStudents] = useState(initialTransfereeStudents);
   const [rejectedStudents, setRejectedStudents] = useState(initialRejectedStudents);
   const [selectedStudentForCOR, setSelectedStudentForCOR] = useState(null);
   const [showCORModal, setShowCORModal] = useState(false);
@@ -50,8 +55,8 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterStrand, setFilterStrand] = useState("all");
-  const [currentTab, setCurrentTab] = useState("pending");
-  const [activeTab, setActiveTab] = useState("pending");
+  const [currentTab, setCurrentTab] = useState("new");
+  const [activeTab, setActiveTab] = useState("new");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // COR Modal states (already declared above)
@@ -64,6 +69,13 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [subjects, setSubjects] = useState([]);
   const [isStudentEnrolled, setIsStudentEnrolled] = useState(false);
+  
+  // Transferee credit management states
+  const [creditedSubjects, setCreditedSubjects] = useState([]);
+  const [subjectGrades, setSubjectGrades] = useState({});
+  const [previousSchoolData, setPreviousSchoolData] = useState({
+    last_school: ''
+  });
   
   // Image viewing state
   const [showImageModal, setShowImageModal] = useState(false);
@@ -80,6 +92,139 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
     setSelectedImage(null);
   };
 
+  // Handle transferee subject credit toggle
+  const handleSubjectCreditToggle = (subjectId, isChecked) => {
+    if (isChecked) {
+      setCreditedSubjects(prev => [...prev, subjectId]);
+      // Don't set automatic grade - let user input the actual grade
+    } else {
+      setCreditedSubjects(prev => prev.filter(id => id !== subjectId));
+      setSubjectGrades(prev => {
+        const newGrades = { ...prev };
+        delete newGrades[subjectId];
+        return newGrades;
+      });
+    }
+  };
+
+  // Handle grade input change for credited subjects
+  const handleGradeChange = (subjectId, grade) => {
+    setSubjectGrades(prev => ({
+      ...prev,
+      [subjectId]: parseFloat(grade) || 0
+    }));
+  };
+
+  // Save credited subjects for transferee student
+  const saveCreditedSubjects = async () => {
+    if (creditedSubjects.length === 0 && !previousSchoolData.last_school.trim()) {
+      return; // No credits or school info to save
+    }
+
+    try {
+      let schoolSaved = false;
+      
+      // Save previous school information first if provided
+      if (previousSchoolData.last_school.trim()) {
+        const schoolResponse = await fetch('/coordinator/transferee/previous-school', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            'Accept': 'application/json',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            student_id: selectedStudentForCOR.user.id,
+            last_school: previousSchoolData.last_school.trim()
+          })
+        });
+
+        if (!schoolResponse.ok) {
+          const errorData = await schoolResponse.json();
+          throw new Error(errorData.message || 'Failed to save previous school information');
+        }
+        
+        schoolSaved = true;
+        console.log('Previous school saved successfully');
+      }
+
+      // Save credited subjects if any
+      if (creditedSubjects.length > 0) {
+        // Validate that all credited subjects have grades
+        const missingGrades = creditedSubjects.filter(subjectId => 
+          !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
+        );
+        
+        if (missingGrades.length > 0) {
+          throw new Error('Please enter valid grades (75-100) for all credited subjects');
+        }
+        
+        const creditData = creditedSubjects.map(subjectId => {
+          const subject = subjects.find(s => s.id === subjectId);
+          return {
+            subject_id: subjectId,
+            grade: subjectGrades[subjectId],
+            semester: subject?.semester || '1st',
+            school_year: '2023-2024', // Previous school year
+            remarks: 'Credited from previous school'
+          };
+        });
+
+        const response = await fetch('/coordinator/transferee/credited-subjects', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+          },
+          body: JSON.stringify({
+            student_id: selectedStudentForCOR.user.id,
+            credited_subjects: creditData
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to save credits');
+        }
+      }
+
+      // Update the student's credited subject IDs for immediate UI filtering
+      if (creditedSubjects.length > 0) {
+        setSelectedStudentForCOR(prev => ({
+          ...prev,
+          credited_subject_ids: [...(prev.credited_subject_ids || []), ...creditedSubjects]
+        }));
+      }
+
+      // Show appropriate success message
+      let successMessage = '';
+      if (schoolSaved && creditedSubjects.length > 0) {
+        successMessage = `Successfully saved previous school information and ${creditedSubjects.length} subject credit(s).`;
+      } else if (schoolSaved) {
+        successMessage = 'Successfully saved previous school information.';
+      } else if (creditedSubjects.length > 0) {
+        successMessage = `Successfully saved ${creditedSubjects.length} subject credit(s).`;
+      }
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Transferee Information Saved!',
+        text: successMessage,
+        timer: 3000,
+        showConfirmButton: false
+      });
+    } catch (error) {
+      console.error('Error saving transferee information:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Failed to save transferee information. Please try again.',
+        confirmButtonColor: '#3b82f6'
+      });
+    }
+  };
+
 
   // Print handler - removes student from pending list after successful print
   const handlePrintCOR = () => {
@@ -88,8 +233,14 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
     
     // After printing, remove student from pending list and close modal
     setTimeout(() => {
-      // Move student from pending to enrolled (remove from current list)
-      setPendingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      // Move student from current list to enrolled (remove from current list)
+      if (activeTab === 'new') {
+        setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      } else if (activeTab === 'continuing') {
+        setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      } else if (activeTab === 'transferee') {
+        setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      }
       
       // Close modal and reset states
       setShowCORModal(false);
@@ -119,9 +270,11 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
   // existing: sync lists when props change
   useEffect(() => {
     // Update state when props change
-    setPendingStudents(initialPendingStudents);
+    setNewStudents(initialNewStudents);
+    setContinuingStudents(initialContinuingStudents);
+    setTransfereeStudents(initialTransfereeStudents);
     setRejectedStudents(initialRejectedStudents);
-  }, [initialPendingStudents, initialRejectedStudents]);
+  }, [initialNewStudents, initialContinuingStudents, initialTransfereeStudents, initialRejectedStudents]);
 
   // NEW: Auto-fetch subjects whenever the selected strand changes
   useEffect(() => {
@@ -130,6 +283,10 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
     } else {
       setSubjects([]);
     }
+    
+    // Clear credited subjects when strand changes (since available subjects change)
+    setCreditedSubjects([]);
+    setSubjectGrades({});
   }, [selectedStrand]);
   // Fetch sections and strands from API
   const fetchSectionsAndStrands = async (strandCode = null) => {
@@ -281,8 +438,26 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
   };
 
   const handleApproveStudent = (studentId) => {
-    const student = pendingStudents.find(s => s.id === studentId);
+    let student = null;
+    if (activeTab === 'new') {
+      student = newStudents.find(s => s.id === studentId);
+    } else if (activeTab === 'continuing') {
+      student = continuingStudents.find(s => s.id === studentId);
+    } else if (activeTab === 'transferee') {
+      student = transfereeStudents.find(s => s.id === studentId);
+    }
+    
     if (student) {
+      // Debug logging to see what student data we have
+      console.log('Selected student for COR:', {
+        id: student.id,
+        name: student.user?.firstname + ' ' + student.user?.lastname,
+        user_student_type: student.user?.student_type,
+        student_status: student.student_status,
+        student_type: student.student_type,
+        activeTab: activeTab
+      });
+      
       setSelectedStudentForCOR(student);
       setIsStudentEnrolled(false); // Reset enrollment status
       setShowCORModal(true);
@@ -303,10 +478,19 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
       router.post(`/coordinator/students/${studentId}/reject`, {}, {
         onSuccess: () => {
           Swal.fire('Rejected!', 'Student enrollment has been rejected.', 'success');
-          // Move student from pending to rejected
-          const student = pendingStudents.find(s => s.id === studentId);
+          // Move student from current tab to rejected
+          let student = null;
+          if (activeTab === 'new') {
+            student = newStudents.find(s => s.id === studentId);
+            setNewStudents(prev => prev.filter(s => s.id !== studentId));
+          } else if (activeTab === 'continuing') {
+            student = continuingStudents.find(s => s.id === studentId);
+            setContinuingStudents(prev => prev.filter(s => s.id !== studentId));
+          } else if (activeTab === 'transferee') {
+            student = transfereeStudents.find(s => s.id === studentId);
+            setTransfereeStudents(prev => prev.filter(s => s.id !== studentId));
+          }
           if (student) {
-            setPendingStudents(prev => prev.filter(s => s.id !== studentId));
             setRejectedStudents(prev => [...prev, student]);
           }
         },
@@ -653,6 +837,12 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
       });
       return;
     }
+
+    // For transferee students, save credits first if any are selected
+    if ((selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') && creditedSubjects.length > 0) {
+      await saveCreditedSubjects();
+    }
+
     try {
       setIsSubmitting(true);
 
@@ -660,7 +850,10 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
         strand: selectedStrand,
         section_id: selectedSection,
         // Include subjects only if selected; backend accepts nullable array
-        subjects: selectedSubjects && selectedSubjects.length > 0 ? selectedSubjects : undefined
+        subjects: selectedSubjects && selectedSubjects.length > 0 ? selectedSubjects : undefined,
+        // Include transferee credit information
+        student_type: selectedStudentForCOR.user?.student_type || selectedStudentForCOR.student_status,
+        credited_subjects: (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? creditedSubjects : []
       }, {
         onSuccess: () => {
           Swal.fire({
@@ -701,14 +894,20 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
   const getFilteredStudents = () => {
     let students = [];
     switch (activeTab) {
-      case 'pending':
-        students = pendingStudents;
+      case 'new':
+        students = newStudents;
+        break;
+      case 'continuing':
+        students = continuingStudents;
+        break;
+      case 'transferee':
+        students = transfereeStudents;
         break;
       case 'rejected':
         students = rejectedStudents;
         break;
       default:
-        students = pendingStudents;
+        students = newStudents;
     }
 
     return students.filter(student => {
@@ -723,8 +922,12 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
 
   const getTabCount = (tab) => {
     switch (tab) {
-      case 'pending':
-        return pendingStudents.length;
+      case 'new':
+        return newStudents.length;
+      case 'continuing':
+        return continuingStudents.length;
+      case 'transferee':
+        return transfereeStudents.length;
       case 'rejected':
         return rejectedStudents.length;
       default:
@@ -809,15 +1012,39 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Pending Review</p>
-                <p className="text-2xl font-bold text-orange-600">{pendingStudents.length}</p>
+                <p className="text-sm font-medium text-gray-600">New Students</p>
+                <p className="text-2xl font-bold text-blue-600">{newStudents.length}</p>
               </div>
-              <div className="p-3 bg-orange-100 rounded-full">
-                <FaClipboardList className="text-orange-600 text-xl" />
+              <div className="p-3 bg-blue-100 rounded-full">
+                <FaUserPlus className="text-blue-600 text-xl" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Continuing</p>
+                <p className="text-2xl font-bold text-green-600">{continuingStudents.length}</p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-full">
+                <FaUserCheck className="text-green-600 text-xl" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Transferees</p>
+                <p className="text-2xl font-bold text-purple-600">{transfereeStudents.length}</p>
+              </div>
+              <div className="p-3 bg-purple-100 rounded-full">
+                <FaUserGraduate className="text-purple-600 text-xl" />
               </div>
             </div>
           </div>
@@ -870,8 +1097,10 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
           <div className="border-b border-gray-200">
             <nav className="flex space-x-8 px-6">
               {[
-                { key: 'pending', label: 'Pending Review', color: 'orange' },
-                { key: 'rejected', label: 'Rejected', color: 'red' }
+                { key: 'new', label: 'New Students', color: 'blue', icon: 'FaUserPlus' },
+                { key: 'continuing', label: 'Continuing Students', color: 'green', icon: 'FaUserCheck' },
+                { key: 'transferee', label: 'Transferee Students', color: 'purple', icon: 'FaUserGraduate' },
+                { key: 'rejected', label: 'Rejected', color: 'red', icon: 'FaTimes' }
               ].map(tab => (
                 <button
                   key={tab.key}
@@ -927,7 +1156,7 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                           <FaEye className="text-sm" />
                           <span>View</span>
                         </button>
-                        {activeTab === 'pending' && (
+                        {(activeTab === 'new' || activeTab === 'continuing' || activeTab === 'transferee') && (
                           <>
                             <button
                               onClick={() => handleApproveStudent(student.id)}
@@ -1265,7 +1494,17 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                     <p><strong>Grade Level:</strong> {selectedStudentForCOR.grade_level || 'Grade 11'}</p>
                   </div>
                   <div>
-                    <p><strong>Student Status:</strong> <span className="ml-1 px-1 py-0.5 rounded text-xs bg-green-100 text-green-800">{selectedStudentForCOR.student_status || 'New Student'}</span></p>
+                    <p><strong>Student Type:</strong> <span className={`ml-1 px-2 py-1 rounded text-xs font-medium ${
+                      (selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New' || selectedStudentForCOR.student_type === 'New') ? 'bg-blue-100 text-blue-800' :
+                      (selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing' || selectedStudentForCOR.student_type === 'Continuing') ? 'bg-green-100 text-green-800' :
+                      (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee' || selectedStudentForCOR.student_type === 'Transferee') ? 'bg-purple-100 text-purple-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {(selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New' || selectedStudentForCOR.student_type === 'New') ? '🆕 New Student' :
+                       (selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing' || selectedStudentForCOR.student_type === 'Continuing') ? '🔄 Continuing Student' :
+                       (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee' || selectedStudentForCOR.student_type === 'Transferee') ? '🎓 Transferee Student' :
+                       'Student'}
+                    </span></p>
                     <p><strong>LRN:</strong> {selectedStudentForCOR.lrn || 'N/A'}</p>
                     <p><strong>Birthdate:</strong> {selectedStudentForCOR.birthdate ? new Date(selectedStudentForCOR.birthdate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A'}</p>
                   </div>
@@ -1338,9 +1577,195 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                   </div>
                 </div>
 
+                {/* Transferee Credit Management Section - Only show for transferee students */}
+                {(selectedStudentForCOR?.user?.student_type === 'transferee' || selectedStudentForCOR?.student_status === 'Transferee' || selectedStudentForCOR?.student_type === 'Transferee') && (
+                  <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg print:hidden">
+                    <h4 className="text-sm font-semibold mb-3 text-purple-800 flex items-center">
+                      <FaUserGraduate className="mr-2" />
+                      Transferee Credit Management
+                    </h4>
+                    {/* Previous School Information */}
+                    <div className="mb-4 p-3 bg-white border border-purple-200 rounded">
+                      <h5 className="text-sm font-medium text-purple-800 mb-2">Previous School Information</h5>
+                      
+                      {/* Show existing data if available */}
+                      {selectedStudentForCOR?.previous_schools && selectedStudentForCOR.previous_schools.length > 0 ? (
+                        <div className="text-sm text-gray-700 bg-gray-50 p-2 rounded mb-2">
+                          <strong>Last School:</strong> {selectedStudentForCOR.previous_schools[0].last_school}
+                        </div>
+                      ) : (
+                        /* Input form for new previous school info */
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Previous school name *"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
+                            value={previousSchoolData.last_school}
+                            onChange={(e) => setPreviousSchoolData(prev => ({...prev, last_school: e.target.value}))}
+                          />
+                          {previousSchoolData.last_school.trim() && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  console.log('Saving previous school for student:', selectedStudentForCOR.user.id);
+                                  console.log('School name:', previousSchoolData.last_school.trim());
+                                  
+                                  const response = await fetch('/coordinator/transferee/previous-school', {
+                                    method: 'POST',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                                      'Accept': 'application/json',
+                                    },
+                                    credentials: 'same-origin',
+                                    body: JSON.stringify({
+                                      student_id: selectedStudentForCOR.user.id,
+                                      last_school: previousSchoolData.last_school.trim()
+                                    })
+                                  });
+
+                                  console.log('Response status:', response.status);
+                                  const responseData = await response.json();
+                                  console.log('Response data:', responseData);
+
+                                  if (response.ok) {
+                                    Swal.fire({
+                                      icon: 'success',
+                                      title: 'Previous School Saved!',
+                                      text: 'Previous school information has been saved successfully.',
+                                      timer: 2000,
+                                      showConfirmButton: false
+                                    });
+                                    
+                                    // Clear the input after successful save
+                                    setPreviousSchoolData({last_school: ''});
+                                  } else {
+                                    throw new Error(responseData.message || 'Failed to save');
+                                  }
+                                } catch (error) {
+                                  console.error('Error saving previous school:', error);
+                                  Swal.fire({
+                                    icon: 'error',
+                                    title: 'Error',
+                                    text: error.message || 'Failed to save previous school information.',
+                                    confirmButtonColor: '#3b82f6'
+                                  });
+                                }
+                              }}
+                              className="px-3 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                            >
+                              Save School Info
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <p className="text-xs text-purple-700 mb-3">
+                      Check subjects from the <strong>{selectedStrand || 'selected strand'}</strong> curriculum that the transferee student has already completed at their previous school.
+                      These subjects will be credited and marked as completed.
+                    </p>
+                    
+                    {/* Subject Credits List - Only show subjects for selected strand */}
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {subjects.filter(subject => 
+                        !selectedStrand || subject.strand_code === selectedStrand || subject.strand_id === selectedStrand
+                      ).map(subject => {
+                        const isAlreadyCredited = selectedStudentForCOR?.credited_subject_ids?.includes(subject.id);
+                        return (
+                        <div key={subject.id} className={`flex items-center justify-between p-2 border rounded ${
+                          isAlreadyCredited ? 'bg-green-50 border-green-200' : 'bg-white border-purple-200'
+                        }`}>
+                          <div className="flex items-center space-x-3">
+                            <input
+                              type="checkbox"
+                              id={`credit-${subject.id}`}
+                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                              onChange={(e) => handleSubjectCreditToggle(subject.id, e.target.checked)}
+                              disabled={isAlreadyCredited}
+                              checked={isAlreadyCredited || creditedSubjects.includes(subject.id)}
+                            />
+                            <label htmlFor={`credit-${subject.id}`} className={`text-sm font-medium ${
+                              isAlreadyCredited ? 'text-green-700' : 'text-gray-700'
+                            }`}>
+                              {subject.name} ({subject.code})
+                              {isAlreadyCredited && <span className="ml-2 text-xs text-green-600">✓ Already Credited</span>}
+                            </label>
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                              {subject.semester} Semester
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="number"
+                              placeholder="Grade"
+                              min="75"
+                              max="100"
+                              step="0.01"
+                              value={subjectGrades[subject.id] || ''}
+                              onChange={(e) => handleGradeChange(subject.id, e.target.value)}
+                              className={`w-16 px-2 py-1 text-xs border rounded focus:ring-purple-500 focus:border-purple-500 ${
+                                creditedSubjects.includes(subject.id) && !subjectGrades[subject.id] 
+                                  ? 'border-red-300 bg-red-50' 
+                                  : 'border-gray-300'
+                              }`}
+                              id={`grade-${subject.id}`}
+                              disabled={isAlreadyCredited || !creditedSubjects.includes(subject.id)}
+                              required={creditedSubjects.includes(subject.id)}
+                            />
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                    
+                    {!selectedStrand ? (
+                      <div className="text-center py-4 text-gray-500">
+                        <p className="text-sm">Please select a strand first to view available subjects for credit</p>
+                      </div>
+                    ) : subjects.filter(subject => 
+                      subject.strand_code === selectedStrand || subject.strand_id === selectedStrand
+                    ).length === 0 ? (
+                      <div className="text-center py-4 text-gray-500">
+                        <p className="text-sm">No subjects available for the selected strand ({selectedStrand})</p>
+                        <p className="text-xs text-gray-400 mt-1">Subjects will appear here once the strand curriculum is loaded</p>
+                      </div>
+                    ) : null}
+                    
+                    {/* Save Credits Button */}
+                    {creditedSubjects.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-purple-200">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-purple-700">
+                            <strong>{creditedSubjects.length}</strong> subject(s) selected for credit
+                          </div>
+                          <button
+                            onClick={saveCreditedSubjects}
+                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
+                          >
+                            Save Credits
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Class Schedules Section - Always show for printing */}
                 <div className="mt-2">
                   <h4 className="text-xs font-semibold mb-1 text-gray-800">Class Schedule</h4>
+                  {/* Show note for transferee students about credited subjects */}
+                  {(selectedStudentForCOR?.user?.student_type === 'transferee' || 
+                    selectedStudentForCOR?.student_status === 'Transferee' || 
+                    selectedStudentForCOR?.student_type === 'Transferee') && 
+                   selectedStudentForCOR?.credited_subject_ids?.length > 0 && (
+                    <div className="mb-2 p-2 bg-green-50 border border-green-200 rounded text-xs">
+                      <p className="text-green-800">
+                        <strong>Note:</strong> {selectedStudentForCOR.credited_subject_ids.length} credited subject(s) from previous school are excluded from this schedule.
+                      </p>
+                    </div>
+                  )}
                   {!selectedStrand && (
                     <div className="text-center py-4 text-gray-500 border border-gray-300 rounded-lg print:hidden">
                       <p className="text-sm">Please select a strand to view class schedules</p>
@@ -1391,10 +1816,20 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                                   ) : (
                                     ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => {
                                       // Find all schedules that match this day and time slot
-                                      const schedules = classSchedules.filter(s =>
+                                      let schedules = classSchedules.filter(s =>
                                         s.day_of_week === day &&
                                         s.start_time === slot.start
                                       );
+                                      
+                                      // For transferee students, exclude credited subjects from COR display
+                                      if (selectedStudentForCOR?.credited_subject_ids && 
+                                          (selectedStudentForCOR?.user?.student_type === 'transferee' || 
+                                           selectedStudentForCOR?.student_status === 'Transferee' || 
+                                           selectedStudentForCOR?.student_type === 'Transferee')) {
+                                        schedules = schedules.filter(s => 
+                                          !selectedStudentForCOR.credited_subject_ids.includes(s.subject_id)
+                                        );
+                                      }
 
                                       return (
                                         <td key={day} className="border border-gray-400 px-1 py-0.5 text-xs text-center">
@@ -1407,7 +1842,7 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                                               </div>
                                             ))
                                           ) : (
-                                            <div className="text-gray-400 text-xs" style="color: black !important;">-</div>
+                                            <div className="text-gray-400 text-xs" style={{color: 'black'}}>-</div>
                                           )}
                                         </td>
                                       );
@@ -1463,8 +1898,14 @@ export default function Faculty_Enrollment({ pendingStudents: initialPendingStud
                           cancelButtonText: 'Stay Here'
                         }).then((result) => {
                           if (result.isConfirmed) {
-                            // Keep student enrolled and remove from pending list
-                            setPendingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            // Keep student enrolled and remove from current list
+                            if (activeTab === 'new') {
+                              setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            } else if (activeTab === 'continuing') {
+                              setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            } else if (activeTab === 'transferee') {
+                              setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            }
                             
                             // Close modal and reset states
                             setShowCORModal(false);

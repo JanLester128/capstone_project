@@ -143,8 +143,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
             return Inertia::render('Registrar/RegistrarDashboard');
         })->name('registrar.dashboard');
 
-        // Schedule Management Routes (New)
-        Route::prefix('schedules')->group(function () {
+        // Schedule Management Routes (Requires Active School Year)
+        Route::prefix('schedules')->middleware(['require.active.school.year'])->group(function () {
             Route::get('/', [ScheduleController::class, 'index'])->name('registrar.schedules.index');
             Route::post('/', [ScheduleController::class, 'store'])->name('registrar.schedules.store');
             Route::post('/bulk', [ScheduleController::class, 'bulkCreate'])->name('registrar.schedules.bulk');
@@ -168,10 +168,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/students/{id}', [RegistrarController::class, 'updateStudent'])->name('registrar.students.update');
         Route::delete('/students/{id}', [RegistrarController::class, 'deleteStudent'])->name('registrar.students.delete');
 
-        // Section Management
+        // Section Management (Requires Active School Year for creation/modification)
         Route::get('/sections', [RegistrarController::class, 'sectionsPage'])->name('registrar.sections');
-        Route::post('/sections', [RegistrarController::class, 'createSection'])->name('registrar.sections.create');
-        Route::put('/sections/{id}', [RegistrarController::class, 'updateSection'])->name('registrar.sections.update');
+        Route::post('/sections', [RegistrarController::class, 'createSection'])->middleware(['require.active.school.year'])->name('registrar.sections.create');
+        Route::put('/sections/{id}', [RegistrarController::class, 'updateSection'])->middleware(['require.active.school.year'])->name('registrar.sections.update');
         Route::delete('/sections/{id}', [RegistrarController::class, 'deleteSection'])->name('registrar.sections.delete');
 
         // Class/Subject Management
@@ -183,8 +183,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/strands', [RegistrarController::class, 'createStrand'])->name('registrar.strands.create');
         Route::put('/strands/{id}', [RegistrarController::class, 'updateStrand'])->name('registrar.strands.update');
         Route::delete('/strands/{id}', [RegistrarController::class, 'deleteStrand'])->name('registrar.strands.delete');
-        Route::post('/subjects', [RegistrarController::class, 'createSubject'])->name('registrar.subjects.create');
-        Route::put('/subjects/{id}', [RegistrarController::class, 'updateSubject'])->name('registrar.subjects.update');
+        Route::post('/subjects', [RegistrarController::class, 'createSubject'])->middleware(['require.active.school.year'])->name('registrar.subjects.create');
+        Route::put('/subjects/{id}', [RegistrarController::class, 'updateSubject'])->middleware(['require.active.school.year'])->name('registrar.subjects.update');
         Route::delete('/subjects/{id}', [RegistrarController::class, 'deleteSubject'])->name('registrar.subjects.delete');
 
         // Semester Management
@@ -195,16 +195,24 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // Profile Management
         Route::get('/profile', [RegistrarController::class, 'profilePage'])->name('registrar.profile');
+
+        // School Year Status API
+        Route::get('/api/school-year-status', function () {
+            return response()->json(\App\Services\SchoolYearService::getStatusForFrontend());
+        })->name('registrar.api.school-year-status');
         Route::put('/profile', [RegistrarController::class, 'updateProfile'])->name('registrar.profile.update');
 
-        // Grades Management
+        // Grades Management - Updated for Philippine SHS
         Route::get('/grades', [RegistrarController::class, 'gradesPage'])->name('registrar.grades');
         
-        // Grade Approval System
-        Route::get('/grades/pending', [RegistrarController::class, 'pendingGrades'])->name('registrar.grades.pending');
-        Route::post('/grades/{grade}/approve', [RegistrarController::class, 'approveGrade'])->name('registrar.grades.approve');
-        Route::post('/grades/{grade}/reject', [RegistrarController::class, 'rejectGrade'])->name('registrar.grades.reject');
-        Route::post('/grades/bulk-approve', [RegistrarController::class, 'bulkApproveGrades'])->name('registrar.grades.bulk-approve');
+        // NEW: Semester-based grade reports
+        Route::get('/grades/{semester}', [RegistrarController::class, 'getGradesBySemester'])->name('registrar.grades.semester');
+        Route::get('/grades/statistics/{schoolYearId?}', [RegistrarController::class, 'getGradeStatistics'])->name('registrar.grades.statistics');
+        Route::get('/grades/export/{semester}/{schoolYearId?}', [RegistrarController::class, 'exportGradesBySemester'])->name('registrar.grades.export.semester');
+        
+        // NEW: Semester-based subject filtering
+        Route::get('/subjects/semester/{semester}', [RegistrarController::class, 'getSubjectsBySemester'])
+            ->name('registrar.subjects.semester');
 
         // School Year Management Routes
         Route::get('/school-years', [RegistrarController::class, 'schoolYearsPage'])->name('registrar.school-years');
@@ -213,14 +221,23 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])->name('registrar.school-years.update');
         Route::delete('/school-years/{id}', [RegistrarController::class, 'deleteSchoolYear'])->name('registrar.school-years.delete');
         Route::put('/school-years/{id}/activate', [RegistrarController::class, 'activateSchoolYear'])->name('registrar.school-years.activate');
+        Route::post('/activate-school-year/{id}', [RegistrarController::class, 'activateSchoolYear'])->name('registrar.activate-school-year');
+        Route::get('/check-schedule-integrity', [RegistrarController::class, 'checkScheduleIntegrity'])->name('registrar.check-schedule-integrity');
+        Route::post('/clear-active-year-schedules', [RegistrarController::class, 'clearActiveYearSchedules'])->name('registrar.clear-active-year-schedules');
+        Route::post('/trigger-grade12-progression', [RegistrarController::class, 'triggerGrade12Progression'])->name('registrar.trigger-grade12-progression');
+        Route::get('/trigger-grade12-progression', [RegistrarController::class, 'triggerGrade12Progression'])->name('registrar.trigger-grade12-progression-get');
         Route::put('/school-years/{id}/toggle', [RegistrarController::class, 'toggleSchoolYear'])->name('registrar.school-years.toggle');
         Route::put('/school-years/deactivate-expired', [RegistrarController::class, 'deactivateExpired'])->name('registrar.school-years.deactivate-expired');
         Route::get('/school-years/status/{id?}', [RegistrarController::class, 'getSemesterStatus'])->name('registrar.school-years.status');
         Route::post('/school-years/auto-deactivate', [RegistrarController::class, 'autoDeactivateExpired'])->name('registrar.school-years.auto-deactivate');
 
-        // Settings: Toggle whether faculty can print COR
+        // Settings routes
+        Route::get('/settings', [RegistrarController::class, 'settingsPage'])->name('registrar.settings');
+        Route::post('/settings/toggle-enrollment', [RegistrarController::class, 'toggleEnrollment'])->name('registrar.settings.toggle-enrollment');
         Route::post('/settings/toggle-faculty-cor-print', [RegistrarController::class, 'toggleFacultyCorPrint'])
             ->name('registrar.settings.toggle-faculty-cor-print');
+        Route::post('/settings/toggle-coordinator-cor-print', [RegistrarController::class, 'toggleCoordinatorCorPrint'])
+            ->name('registrar.settings.toggle-coordinator-cor-print');
 
         // Data fetching routes for schedule management - REMOVED CONFLICTING ROUTES
         // These routes were conflicting with page routes and causing JSON responses
@@ -239,6 +256,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Student grade progression
         Route::post('/students/progress-grade', [FacultyController::class, 'progressStudentGrade'])
             ->name('api.students.progress-grade');
+        
+        
+        Route::get('/students/{studentId}/grades/summary', [FacultyController::class, 'getStudentGradesSummary'])
+            ->name('api.student.grades.summary');
+        
+        Route::post('/grades/validate', [FacultyController::class, 'validateGradeInput'])
+            ->name('api.grades.validate');
     });
 
     // Note: School Years routes are now handled within the registrar prefix above
@@ -265,30 +289,20 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     Route::prefix('student')->middleware(['hybrid.auth'])->group(function () {
 
-        // Student Grades Page - Only show approved grades
+        // Student Grades Page - Updated for Philippine SHS semester system
         Route::get('/grades', [App\Http\Controllers\StudentController::class, 'gradesPage'])
             ->name('student.grades');
+        
+        // NEW: Get grades for specific semester
+        Route::get('/grades/{semester}', [App\Http\Controllers\StudentController::class, 'getSemesterGrades'])
+            ->name('student.grades.semester');
+        
+        // NEW: Get complete academic record
+        Route::get('/academic-record', [App\Http\Controllers\StudentController::class, 'getAcademicRecord'])
+            ->name('student.academic.record');
 
         // Enroll Page - Philippine SHS System
-        Route::get('/enroll', function(Request $request) {
-            // Philippine SHS: Check enrollment window instead of just active school year
-            $enrollmentSchoolYear = \App\Models\SchoolYear::getEnrollmentOpen();
-            $strands = $enrollmentSchoolYear && $enrollmentSchoolYear->isEnrollmentOpen() ? 
-                \App\Models\Strand::orderBy('code')->get() : collect();
-            $user = $request->user();
-            
-            return Inertia::render('Student/Student_Enroll', [
-                'availableStrands' => $strands,
-                'activeSchoolYear' => $enrollmentSchoolYear, // Keep same prop name for compatibility
-                'enrollmentOpen' => $enrollmentSchoolYear ? $enrollmentSchoolYear->isEnrollmentOpen() : false,
-                'enrollmentMessage' => $enrollmentSchoolYear ? 
-                    ($enrollmentSchoolYear->isEnrollmentOpen() ? 
-                        'Enrollment is currently open for ' . $enrollmentSchoolYear->academic_year_display : 
-                        'Enrollment is currently closed') : 
-                    'No enrollment period is currently active',
-                'user' => $user
-            ]);
-        })->name('student.enroll');
+        Route::get('/enroll', [StudentController::class, 'enrollmentPage'])->name('student.enroll');
 
         // Enrollment endpoint
         Route::post('/enroll', [App\Http\Controllers\StudentController::class, 'enroll'])->name('student.enroll.store');
@@ -336,11 +350,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/student/{studentId}/profile', [App\Http\Controllers\FacultyController::class, 'viewStudentProfile'])
             ->name('faculty.student.profile');
         
-        // Input Grades
+        // Input Grades - Updated for semester-based grading
         Route::get('/classes/{classId}/student/{studentId}/grades', [App\Http\Controllers\FacultyController::class, 'inputStudentGrades'])
             ->name('faculty.student.grades');
         
-        // Save Grades
+        // Save Grades - Now requires semester parameter
         Route::post('/classes/{classId}/student/{studentId}/grades', [App\Http\Controllers\FacultyController::class, 'saveStudentGrades'])
             ->name('faculty.student.grades.save');
             
@@ -361,9 +375,25 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->name('faculty.classes.import');
         
 
-        // Faculty Grade Input
+        // Faculty Grade Management - Updated for Philippine SHS
         Route::get('/grades', [App\Http\Controllers\FacultyController::class, 'gradesPage'])
             ->name('faculty.grades');
+            
+        // Get section and subject grades (both semesters)
+        Route::get('/grades/section/{sectionId}/subject/{subjectId}', [App\Http\Controllers\FacultyController::class, 'getSectionSubjectGrades'])
+            ->name('faculty.grades.section.subject');
+            
+        // Save grades - Now requires semester parameter
+        Route::post('/grades/save', [App\Http\Controllers\FacultyController::class, 'saveGrades'])
+            ->name('faculty.grades.save');
+        
+        // NEW: Get grades by semester for a class
+        Route::get('/classes/{classId}/grades/{semester}', [App\Http\Controllers\FacultyController::class, 'getClassGradesBySemester'])
+            ->name('faculty.class.grades.semester');
+        
+        // NEW: Export grades by semester
+        Route::get('/classes/{classId}/export/{semester}', [App\Http\Controllers\FacultyController::class, 'exportClassGradesBySemester'])
+            ->name('faculty.class.export.semester');
 
         // Faculty Profile
         Route::get('/profile', [App\Http\Controllers\FacultyController::class, 'profilePage'])
@@ -384,6 +414,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Coordinator functionality within Faculty routes
         Route::get('/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])
             ->name('faculty.enrollment');
+        
+        // Manual Enrollment for Coordinators
+        Route::get('/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'manualEnrollmentPage'])
+            ->name('faculty.manual-enrollment');
+        Route::post('/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'processManualEnrollment'])
+            ->name('faculty.manual-enrollment.process');
+            
         Route::post('/students/{student}/reject', [App\Http\Controllers\CoordinatorController::class, 'rejectStudent'])
             ->name('coordinator.students.reject');
         Route::post('/students/{student}/finalize', [App\Http\Controllers\CoordinatorController::class, 'finalizeStudent'])
@@ -446,6 +483,75 @@ Route::middleware(['auth:sanctum'])->group(function () {
             ->name('coordinator.subjects-for-enrollment');
         Route::get('/students', [App\Http\Controllers\CoordinatorController::class, 'studentsPage'])
             ->name('coordinator.students');
+        
+        // Transferee management routes
+        Route::post('/transferee/previous-school', [App\Http\Controllers\TransfereeController::class, 'storePreviousSchool'])
+            ->name('coordinator.transferee.previous-school');
+        Route::post('/transferee/credited-subjects', [App\Http\Controllers\TransfereeController::class, 'storeCreditedSubjects'])
+            ->name('coordinator.transferee.credited-subjects');
+        Route::get('/transferee/{studentId}', [App\Http\Controllers\TransfereeController::class, 'getTransfereeData'])
+            ->name('coordinator.transferee.data');
+        Route::get('/transferee/subjects/available', [App\Http\Controllers\TransfereeController::class, 'getAvailableSubjects'])
+            ->name('coordinator.transferee.available-subjects');
+        Route::delete('/transferee/credited-subjects/{creditId}', [App\Http\Controllers\TransfereeController::class, 'removeCreditedSubject'])
+            ->name('coordinator.transferee.remove-credit');
+        
+        // Fix enrollment sections
+        Route::post('/fix-enrollment-sections', [App\Http\Controllers\CoordinatorController::class, 'fixEnrollmentSections'])
+            ->name('coordinator.fix-enrollment-sections');
+            
+        // Populate class details for enrolled students
+        Route::post('/populate-class-details', function() {
+            try {
+                // Get enrolled students
+                $enrolledStudents = DB::table('enrollments')
+                    ->where('status', 'enrolled')
+                    ->whereNotNull('assigned_section_id')
+                    ->get();
+                
+                $createdCount = 0;
+                foreach ($enrolledStudents as $enrollment) {
+                    // Get all classes for this section
+                    $classes = DB::table('class')
+                        ->where('section_id', $enrollment->assigned_section_id)
+                        ->where('school_year_id', $enrollment->school_year_id)
+                        ->get();
+                    
+                    foreach ($classes as $class) {
+                        // Check if class_details already exists
+                        $exists = DB::table('class_details')
+                            ->where('class_id', $class->id)
+                            ->where('enrollment_id', $enrollment->id)
+                            ->exists();
+                        
+                        if (!$exists) {
+                            DB::table('class_details')->insert([
+                                'class_id' => $class->id,
+                                'enrollment_id' => $enrollment->id,
+                                'section_id' => $enrollment->assigned_section_id,
+                                'is_enrolled' => true,
+                                'enrolled_at' => now(),
+                                'created_at' => now(),
+                                'updated_at' => now()
+                            ]);
+                            $createdCount++;
+                        }
+                    }
+                }
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => "Successfully created {$createdCount} class_details records",
+                    'enrolled_students' => $enrolledStudents->count(),
+                    'created_records' => $createdCount
+                ]);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to populate class details: ' . $e->getMessage()
+                ], 500);
+            }
+        })->name('coordinator.populate-class-details');
     });
 
     /*
@@ -483,6 +589,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
 // Student schedule routes
 Route::get('/student/{student}/schedule', [App\Http\Controllers\ScheduleController::class, 'getStudentSchedule']);
 
+// Test routes (can be removed in production)
+Route::get('/test-grades', function () {
+    return response()->json([
+        'message' => 'Test route working',
+        'timestamp' => now()
+    ]);
+});
+
+
 // Catch-all profile route for debugging
 Route::get('/profile', function() {
     return response()->json([
@@ -497,10 +612,10 @@ Route::get('/test-export', function() {
     try {
         \Illuminate\Support\Facades\Log::info('🔴 TEST EXPORT ROUTE HIT SUCCESSFULLY!');
         
-        $csvContent = "Student Name,1st Quarter,2nd Quarter,3rd Quarter,4th Quarter,Semester Grade,Remarks\n";
-        $csvContent .= "Test Student 1,85,88,90,87,87.5,Good performance\n";
-        $csvContent .= "Test Student 2,78,82,85,80,81.25,Satisfactory\n";
-        $csvContent .= "Test Student 3,92,95,89,93,92.25,Excellent\n";
+        $csvContent = "Student Name,Semester,1st Quarter,2nd Quarter,Semester Grade,Remarks\n";
+        $csvContent .= "Test Student 1,1st Semester,85,88,86.5,Good performance\n";
+        $csvContent .= "Test Student 1,2nd Semester,90,87,88.5,Excellent improvement\n";
+        $csvContent .= "Test Student 2,1st Semester,78,82,80.0,Satisfactory\n";
         
         \Illuminate\Support\Facades\Log::info('🔴 CSV Content prepared, sending response');
         

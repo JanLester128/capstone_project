@@ -102,6 +102,7 @@ class ScheduleController extends Controller
             'strands' => $strands,
             'currentSchoolYear' => $currentYear,
             'activeSchoolYear' => $currentAcademicYear,
+            'hasActiveSchoolYear' => $currentAcademicYear !== null,
             'swal' => session('swal')
         ]);
     }
@@ -122,13 +123,26 @@ class ScheduleController extends Controller
             'faculty_id' => 'nullable|exists:users,id', // Allow null faculty
             'grade_level' => 'required|string|in:11,12',
             'day_of_week' => 'required|string|in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday',
-            'start_time' => 'required|date_format:H:i',
-            'end_time' => 'required|date_format:H:i|after:start_time',
+            'start_time' => 'required|string',
+            'end_time' => 'required|string',
             'duration' => 'required|integer|in:60,90,120',
             'semester' => 'required|in:1st Semester,2nd Semester',
             'school_year' => 'required|string',
             'room' => 'nullable|string|max:255'
         ]);
+
+        // Normalize time formats to handle both datetime and time-only strings
+        $validated['start_time'] = $this->normalizeTimeFormat($validated['start_time']);
+        $validated['end_time'] = $this->normalizeTimeFormat($validated['end_time']);
+        
+        // Convert semester string to integer for database storage
+        if (isset($validated['semester'])) {
+            $validated['semester'] = str_contains($validated['semester'], '2nd') ? 2 : 1;
+        } elseif (isset($validated['semester_filter'])) {
+            $validated['semester'] = (int) $validated['semester_filter'];
+        } else {
+            $validated['semester'] = 1; // Default to 1st semester
+        }
 
         Log::info('Validation passed', ['validated_data' => $validated]);
 
@@ -1058,27 +1072,39 @@ class ScheduleController extends Controller
                 $scheduleStartTime = $schedule->start_time;
                 $scheduleEndTime = $schedule->end_time;
                 
-                // Try H:i:s format first, then H:i format
+                // Try multiple time formats: full datetime, H:i:s, then H:i format
                 try {
-                    $scheduleStart = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleStartTime);
-                } catch (\Exception $e) {
-                    try {
-                        $scheduleStart = \Carbon\Carbon::createFromFormat('H:i', $scheduleStartTime);
-                    } catch (\Exception $e2) {
-                        Log::warning('Invalid start time format: ' . $scheduleStartTime);
-                        return false;
+                    // First try to parse as full datetime and extract time
+                    if (strlen($scheduleStartTime) > 8) {
+                        $scheduleStart = \Carbon\Carbon::parse($scheduleStartTime);
+                    } else {
+                        // Try H:i:s format first, then H:i format
+                        try {
+                            $scheduleStart = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleStartTime);
+                        } catch (\Exception $e) {
+                            $scheduleStart = \Carbon\Carbon::createFromFormat('H:i', $scheduleStartTime);
+                        }
                     }
+                } catch (\Exception $e) {
+                    Log::warning('Invalid start time format: ' . $scheduleStartTime);
+                    return false;
                 }
                 
                 try {
-                    $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleEndTime);
-                } catch (\Exception $e) {
-                    try {
-                        $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i', $scheduleEndTime);
-                    } catch (\Exception $e2) {
-                        Log::warning('Invalid end time format: ' . $scheduleEndTime);
-                        return false;
+                    // First try to parse as full datetime and extract time
+                    if (strlen($scheduleEndTime) > 8) {
+                        $scheduleEnd = \Carbon\Carbon::parse($scheduleEndTime);
+                    } else {
+                        // Try H:i:s format first, then H:i format
+                        try {
+                            $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleEndTime);
+                        } catch (\Exception $e) {
+                            $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i', $scheduleEndTime);
+                        }
                     }
+                } catch (\Exception $e) {
+                    Log::warning('Invalid end time format: ' . $scheduleEndTime);
+                    return false;
                 }
                 
                 // Check for time overlap: schedules conflict if they overlap at any point
@@ -1242,8 +1268,8 @@ class ScheduleController extends Controller
                 'schedules.*.subject_id' => 'required|exists:subjects,id',
                 'schedules.*.faculty_id' => 'required|exists:users,id',
                 'schedules.*.day_of_week' => 'required|string',
-                'schedules.*.start_time' => 'required|date_format:H:i',
-                'schedules.*.end_time' => 'required|date_format:H:i',
+                'schedules.*.start_time' => 'required|string',
+                'schedules.*.end_time' => 'required|string',
                 'schedules.*.duration' => 'required|integer|min:1',
                 // Note: notifications parameter removed
             ]);
@@ -1268,13 +1294,17 @@ class ScheduleController extends Controller
 
             foreach ($schedules as $index => $scheduleData) {
                 try {
+                    // Normalize time formats - convert datetime to H:i format
+                    $startTime = $this->normalizeTimeFormat($scheduleData['start_time']);
+                    $endTime = $this->normalizeTimeFormat($scheduleData['end_time']);
+                    
                     // Prepare data for conflict checking
                     $conflictCheckData = [
                         'faculty_id' => $scheduleData['faculty_id'],
                         'section_id' => $scheduleData['section_id'],
                         'day_of_week' => $scheduleData['day_of_week'],
-                        'start_time' => $scheduleData['start_time'],
-                        'end_time' => $scheduleData['end_time'],
+                        'start_time' => $startTime,
+                        'end_time' => $endTime,
                         'school_year_id' => $currentAcademicYear->id,
                         'semester' => $currentAcademicYear->current_semester ?? 1,
                         'room' => $scheduleData['room'] ?? null
@@ -1292,17 +1322,45 @@ class ScheduleController extends Controller
                         continue;
                     }
 
-                    // Create the schedule
+                    // Determine semester from the request data or subject
+                    $semester = 1; // Default to 1st semester
+                    
+                    Log::info('Determining semester for schedule', [
+                        'schedule_data_keys' => array_keys($scheduleData),
+                        'semester_in_data' => $scheduleData['semester'] ?? 'not set',
+                        'semester_filter_in_data' => $scheduleData['semester_filter'] ?? 'not set'
+                    ]);
+                    
+                    if (isset($scheduleData['semester'])) {
+                        // Use semester from request (e.g., "1st Semester", "2nd Semester")
+                        $semester = str_contains($scheduleData['semester'], '2nd') ? 2 : 1;
+                        Log::info('Using semester from request', ['semester_string' => $scheduleData['semester'], 'parsed_semester' => $semester]);
+                    } elseif (isset($scheduleData['semester_filter'])) {
+                        // Use semester_filter from request (e.g., "1", "2")
+                        $semester = (int) $scheduleData['semester_filter'];
+                        Log::info('Using semester_filter from request', ['semester_filter' => $scheduleData['semester_filter'], 'parsed_semester' => $semester]);
+                    } else {
+                        // Fallback: get semester from subject
+                        $subject = \App\Models\Subject::find($scheduleData['subject_id']);
+                        if ($subject && $subject->semester) {
+                            $semester = (int) $subject->semester;
+                            Log::info('Using semester from subject', ['subject_id' => $scheduleData['subject_id'], 'subject_semester' => $subject->semester, 'parsed_semester' => $semester]);
+                        } else {
+                            Log::info('Using default semester', ['default_semester' => $semester]);
+                        }
+                    }
+                    
+                    // Create the schedule using normalized time formats and correct semester
                     $schedule = ClassSchedule::create([
                         'section_id' => $scheduleData['section_id'],
                         'subject_id' => $scheduleData['subject_id'],
                         'faculty_id' => $scheduleData['faculty_id'],
                         'day_of_week' => $scheduleData['day_of_week'],
-                        'start_time' => $scheduleData['start_time'],
-                        'end_time' => $scheduleData['end_time'],
+                        'start_time' => $startTime,
+                        'end_time' => $endTime,
                         'duration' => $scheduleData['duration'],
                         'school_year_id' => $currentAcademicYear->id,
-                        'semester' => $currentAcademicYear->current_semester ?? 1,
+                        'semester' => $semester,
                         'room' => $scheduleData['room'] ?? null
                     ]);
 
@@ -1372,6 +1430,32 @@ class ScheduleController extends Controller
                     'confirmButtonText' => 'OK'
                 ]
             ]);
+        }
+    }
+
+    /**
+     * Normalize time format - convert various time formats to H:i
+     */
+    private function normalizeTimeFormat($timeString)
+    {
+        try {
+            // If it's a full datetime string, parse and extract time
+            if (strlen($timeString) > 8) {
+                $carbon = \Carbon\Carbon::parse($timeString);
+                return $carbon->format('H:i');
+            }
+            
+            // If it's already in H:i or H:i:s format, parse and reformat to H:i
+            try {
+                $carbon = \Carbon\Carbon::createFromFormat('H:i:s', $timeString);
+                return $carbon->format('H:i');
+            } catch (\Exception $e) {
+                $carbon = \Carbon\Carbon::createFromFormat('H:i', $timeString);
+                return $carbon->format('H:i');
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to normalize time format: ' . $timeString);
+            throw new \InvalidArgumentException('Invalid time format: ' . $timeString);
         }
     }
 }
