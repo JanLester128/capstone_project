@@ -43,10 +43,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   const [selectedStudentForCOR, setSelectedStudentForCOR] = useState(null);
   const [showCORModal, setShowCORModal] = useState(false);
   
-  // Grade 11 to Grade 12 progression states
-  const [grade11Students, setGrade11Students] = useState([]);
-  const [loadingGrade11, setLoadingGrade11] = useState(false);
-  const [showProgressionModal, setShowProgressionModal] = useState(false);
   
   // Student Details Modal states
   const [showModal, setShowModal] = useState(false);
@@ -499,113 +495,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
   };
 
-  // Fetch Grade 11 students for progression
-  const fetchGrade11Students = async () => {
-    setLoadingGrade11(true);
-    try {
-      // Try to fetch from backend first
-      const response = await fetch('/faculty/grade11-students', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setGrade11Students(data.students || []);
-      } else {
-        // Fallback: Use mock Grade 11 students data
-        console.log('Backend not ready, using mock data');
-        const mockGrade11Students = [
-          {
-            id: 1,
-            firstname: 'John',
-            lastname: 'Doe',
-            email: 'john.doe@example.com',
-            grade_level: '11',
-            strand_name: 'STEM',
-            section_name: 'STEM-A',
-            lrn: '123456789012',
-            student_status: 'regular'
-          },
-          {
-            id: 2,
-            firstname: 'Jane',
-            lastname: 'Smith',
-            email: 'jane.smith@example.com',
-            grade_level: '11',
-            strand_name: 'HUMSS',
-            section_name: 'HUMSS-A',
-            lrn: '123456789013',
-            student_status: 'regular'
-          },
-          {
-            id: 3,
-            firstname: 'Mark',
-            lastname: 'Johnson',
-            email: 'mark.johnson@example.com',
-            grade_level: '11',
-            strand_name: 'ABM',
-            section_name: 'ABM-A',
-            lrn: '123456789014',
-            student_status: 'regular'
-          }
-        ];
-        setGrade11Students(mockGrade11Students);
-        
-        // Show info message about using demo data
-        Swal.fire({
-          title: 'Demo Mode',
-          text: 'Showing sample Grade 11 students. Backend endpoints need to be implemented for real data.',
-          icon: 'info',
-          timer: 3000,
-          showConfirmButton: false
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching Grade 11 students:', error);
-      
-      // Fallback: Use mock data on network error too
-      const mockGrade11Students = [
-        {
-          id: 1,
-          firstname: 'John',
-          lastname: 'Doe',
-          email: 'john.doe@example.com',
-          grade_level: '11',
-          strand_name: 'STEM',
-          section_name: 'STEM-A',
-          lrn: '123456789012',
-          student_status: 'regular'
-        },
-        {
-          id: 2,
-          firstname: 'Jane',
-          lastname: 'Smith',
-          email: 'jane.smith@example.com',
-          grade_level: '11',
-          strand_name: 'HUMSS',
-          section_name: 'HUMSS-A',
-          lrn: '123456789013',
-          student_status: 'regular'
-        }
-      ];
-      setGrade11Students(mockGrade11Students);
-      
-      Swal.fire({
-        title: 'Demo Mode',
-        text: 'Using sample data. Please implement backend endpoints for full functionality.',
-        icon: 'info',
-        timer: 3000,
-        showConfirmButton: false
-      });
-    } finally {
-      setLoadingGrade11(false);
-    }
-  };
-
   // Fetch student details for modal
   const fetchStudentDetails = async (studentId) => {
     try {
@@ -636,108 +525,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         text: 'An error occurred while loading student details',
         icon: 'error'
       });
-    }
-  };
-
-  // Progress Grade 11 student to Grade 12
-  const progressToGrade12 = async (studentId) => {
-    const result = await Swal.fire({
-      title: 'Progress to Grade 12?',
-      text: 'This will enroll the student into Grade 12. Make sure they have completed Grade 11 with passing grades.',
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: 'Yes, Progress to Grade 12',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: '#3085d6',
-      cancelButtonColor: '#d33'
-    });
-
-    if (result.isConfirmed) {
-      try {
-        const response = await fetch('/faculty/progress-to-grade12', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-          },
-          body: JSON.stringify({
-            student_id: studentId,
-            school_year_id: activeSchoolYear?.id
-          })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            Swal.fire({
-              title: 'Success!',
-              html: `
-                <div class="text-left">
-                  <p class="mb-3">${data.message}</p>
-                  <div class="bg-green-50 border border-green-200 rounded p-3">
-                    <p class="text-sm text-green-800">
-                      <strong>Grade 12 Section:</strong> ${data.grade12_section || 'Assigned'}<br>
-                      <strong>Enrollment ID:</strong> ${data.enrollment_id || 'Generated'}<br>
-                      <strong>Status:</strong> Student can now view their Grade 12 COR
-                    </p>
-                  </div>
-                </div>
-              `,
-              icon: 'success',
-              confirmButtonText: 'View Students Page',
-              showCancelButton: true,
-              cancelButtonText: 'Close'
-            }).then((result) => {
-              if (result.isConfirmed) {
-                window.location.href = '/faculty/students';
-              }
-            });
-            // Refresh the Grade 11 students list
-            fetchGrade11Students();
-          } else {
-            Swal.fire({
-              title: 'Error',
-              text: data.message || 'Failed to progress student to Grade 12',
-              icon: 'error'
-            });
-          }
-        } else {
-          // Backend not implemented yet - show demo message
-          const student = grade11Students.find(s => s.id === studentId);
-          Swal.fire({
-            title: 'Demo Mode - Progression Simulated',
-            html: `
-              <div class="text-left">
-                <p class="mb-3"><strong>${student?.firstname} ${student?.lastname}</strong> would be progressed to Grade 12.</p>
-                <div class="bg-yellow-50 border border-yellow-200 rounded p-3">
-                  <p class="text-sm text-yellow-800">
-                    <strong>Note:</strong> This is a demonstration. To make this functional, implement the backend endpoint:
-                    <code class="bg-gray-100 px-1 rounded">POST /faculty/progress-to-grade12</code>
-                  </p>
-                </div>
-              </div>
-            `,
-            icon: 'info',
-            confirmButtonText: 'OK'
-          });
-          
-          // Remove student from list to simulate progression
-          setGrade11Students(prev => prev.filter(s => s.id !== studentId));
-        }
-      } catch (error) {
-        console.error('Error progressing student:', error);
-        
-        // Show demo success for network errors too
-        const student = grade11Students.find(s => s.id === studentId);
-        Swal.fire({
-          title: 'Demo Mode - Progression Simulated',
-          text: `${student?.firstname} ${student?.lastname} would be progressed to Grade 12. Backend implementation needed for real functionality.`,
-          icon: 'info'
-        });
-        
-        // Remove student from list to simulate progression
-        setGrade11Students(prev => prev.filter(s => s.id !== studentId));
-      }
     }
   };
 
@@ -960,9 +747,9 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           <p className="text-gray-600">Review and manage student enrollment applications</p>
         </div>
 
-        {/* Grade 11 to Grade 12 Progression Section */}
+        {/* Quick Access to Grade Progression */}
         <div className="mb-8 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
                 <FaGraduationCap className="text-white text-lg" />
@@ -973,41 +760,12 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
               </div>
             </div>
             <button
-              onClick={() => {
-                setShowProgressionModal(true);
-                fetchGrade11Students();
-              }}
+              onClick={() => router.visit('/faculty/progression')}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
             >
               <FaArrowRight className="w-4 h-4" />
-              <span>Start Progression</span>
+              <span>Go to Progression Page</span>
             </button>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-4 rounded-lg border border-blue-100">
-              <div className="flex items-center space-x-2 mb-2">
-                <FaCheckCircle className="text-green-600" />
-                <span className="font-medium text-gray-800">Step 1: Verify Grades</span>
-              </div>
-              <p className="text-sm text-gray-600">Check Grade 11 completion and passing grades</p>
-            </div>
-            
-            <div className="bg-white p-4 rounded-lg border border-blue-100">
-              <div className="flex items-center space-x-2 mb-2">
-                <FaFileAlt className="text-blue-600" />
-                <span className="font-medium text-gray-800">Step 2: Documentation</span>
-              </div>
-              <p className="text-sm text-gray-600">Collect Grade 11 report cards and requirements</p>
-            </div>
-            
-            <div className="bg-white p-4 rounded-lg border border-blue-100">
-              <div className="flex items-center space-x-2 mb-2">
-                <FaUserGraduate className="text-purple-600" />
-                <span className="font-medium text-gray-800">Step 3: Enroll Grade 12</span>
-              </div>
-              <p className="text-sm text-gray-600">Process Grade 12 enrollment with Registrar</p>
-            </div>
           </div>
         </div>
 
@@ -2122,124 +1880,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         </div>
       )}
 
-      {/* Grade 11 to Grade 12 Progression Modal */}
-      {showProgressionModal && (
-        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 rounded-t-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <FaGraduationCap className="text-2xl" />
-                  <div>
-                    <h2 className="text-xl font-bold">Grade 11 to Grade 12 Progression</h2>
-                    <p className="text-blue-100">Enroll eligible Grade 11 students into Grade 12</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowProgressionModal(false)}
-                  className="text-white hover:text-gray-200 transition-colors"
-                >
-                  <FaTimes className="text-xl" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {loadingGrade11 ? (
-                <div className="flex items-center justify-center py-12">
-                  <FaSpinner className="animate-spin text-blue-600 mr-3 text-xl" />
-                  <span className="text-gray-600">Loading Grade 11 students...</span>
-                </div>
-              ) : grade11Students.length === 0 ? (
-                <div className="text-center py-12">
-                  <FaUserGraduate className="mx-auto text-4xl text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Grade 11 Students Found</h3>
-                  <p className="text-gray-600">There are currently no Grade 11 students eligible for progression.</p>
-                </div>
-              ) : (
-                <div>
-                  <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <div className="flex items-start space-x-3">
-                      <FaInfoCircle className="text-yellow-600 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm">
-                        <p className="text-yellow-800 font-medium">Important Requirements:</p>
-                        <ul className="text-yellow-700 mt-1 list-disc list-inside space-y-1">
-                          <li>Students must have completed Grade 11 with passing grades</li>
-                          <li>Grade 11 report cards must be submitted</li>
-                          <li>Progression will create new Grade 12 enrollment records</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4">
-                    {grade11Students.map((student) => (
-                      <div key={student.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                              <span className="text-white font-semibold text-sm">
-                                {student.firstname?.charAt(0)}{student.lastname?.charAt(0)}
-                              </span>
-                            </div>
-                            <div>
-                              <h3 className="font-medium text-gray-900">
-                                {student.firstname} {student.lastname}
-                              </h3>
-                              <p className="text-sm text-gray-600">{student.email}</p>
-                              <div className="flex items-center space-x-4 mt-1">
-                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                                  Grade {student.grade_level || '11'}
-                                </span>
-                                <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                                  {student.strand_name || 'N/A'}
-                                </span>
-                                <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                                  {student.section_name || 'N/A'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-3">
-                            <button
-                              onClick={() => progressToGrade12(student.id)}
-                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
-                            >
-                              <FaArrowRight className="w-4 h-4" />
-                              <span>Progress to Grade 12</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-6 border-t bg-gray-50 rounded-b-lg">
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setShowProgressionModal(false)}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => fetchGrade11Students()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <FaSpinner className="w-4 h-4" />
-                  <span>Refresh List</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

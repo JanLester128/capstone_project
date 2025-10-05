@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Simple ONSTS Favicon</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .favicon-preview { 
+            width: 32px; 
+            height: 32px; 
+            background: #4F46E5; 
+            color: white; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-weight: bold; 
+            font-size: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        canvas { border: 1px solid #ccc; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h2>ONSTS Favicon Generator</h2>
+    <p>Preview:</p>
+    <div class="favicon-preview">O</div>
+    
+    <canvas id="favicon" width="32" height="32"></canvas>
+    <br>
+    <button onclick="downloadFavicon()">Download Favicon</button>
+    
+    <script>
+        // Create simple ONSTS favicon
+        const canvas = document.getElementById('favicon');
+        const ctx = canvas.getContext('2d');
+        
+        // Background
+        ctx.fillStyle = '#4F46E5';
+        ctx.fillRect(0, 0, 32, 32);
+        
+        // Text
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('O', 16, 16);
+        
+        function downloadFavicon() {
+            const link = document.createElement('a');
+            link.download = 'favicon-32x32.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+    
+    <h3>Instructions:</h3>
+    <ol>
+        <li>Click "Download Favicon" to get a simple ONSTS favicon</li>
+        <li>Rename the downloaded file to match the required names:
+            <ul>
+                <li>favicon-32x32.png</li>
+                <li>favicon-16x16.png (resize to 16x16)</li>
+                <li>apple-touch-icon.png (resize to 180x180)</li>
+            </ul>
+        </li>
+        <li>Convert one copy to favicon.ico format</li>
+        <li>Place all files in the public directory</li>
+    </ol>
+</body>
+</html>

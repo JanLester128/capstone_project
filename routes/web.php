@@ -421,6 +421,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'processManualEnrollment'])
             ->name('faculty.manual-enrollment.process');
             
+        // Grade Progression Page for Coordinators
+        Route::get('/progression', [App\Http\Controllers\FacultyController::class, 'progressionPage'])
+            ->name('faculty.progression');
+            
         Route::post('/students/{student}/reject', [App\Http\Controllers\CoordinatorController::class, 'rejectStudent'])
             ->name('coordinator.students.reject');
         Route::post('/students/{student}/finalize', [App\Http\Controllers\CoordinatorController::class, 'finalizeStudent'])

@@ -1980,6 +1980,32 @@ class FacultyController extends Controller
     }
 
     /**
+     * Show grade progression page for coordinators
+     */
+    public function progressionPage()
+    {
+        $user = Auth::user();
+        
+        // Check if user is a coordinator
+        if (!$user->is_coordinator) {
+            return redirect()->route('faculty.dashboard')
+                ->with('error', 'Access denied. Only coordinators can access grade progression.');
+        }
+
+        // Get active school year
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $currentAcademicYear = SchoolYear::where('is_current_academic_year', true)->first();
+        $displaySchoolYear = $currentAcademicYear ?? $activeSchoolYear;
+
+        return Inertia::render('Faculty/Faculty_Progression', [
+            'auth' => [
+                'user' => $user
+            ],
+            'activeSchoolYear' => $displaySchoolYear
+        ]);
+    }
+
+    /**
      * Process manual enrollment for students without internet/email
      */
     public function processManualEnrollment(Request $request)

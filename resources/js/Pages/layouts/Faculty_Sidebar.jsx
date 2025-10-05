@@ -249,6 +249,7 @@ export default function FacultySidebar({ onToggle }) {
   const coordinatorMenuItems = [
     { name: "Enrollment Management", href: "/faculty/enrollment", icon: FaUserGraduate, description: "Review student enrollments" },
     { name: "Manual Enrollment", href: "/faculty/manual-enrollment", icon: FaUserPlus, description: "Enroll students manually (for those without internet/email)" },
+    { name: "Grade Progression", href: "/faculty/progression", icon: FaGraduationCap, description: "Progress Grade 11 students to Grade 12" },
     { 
       name: "Student Management", 
       href: "/faculty/students", 
