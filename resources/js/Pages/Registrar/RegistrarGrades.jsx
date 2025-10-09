@@ -23,116 +23,109 @@ import {
 
 export default function RegistrarGrades() {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [pendingGrades, setPendingGrades] = useState([]);
-  const [approvedGrades, setApprovedGrades] = useState([]);
+  const [studentsWithPendingGrades, setStudentsWithPendingGrades] = useState([]);
   const [selectedTab, setSelectedTab] = useState("pending");
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedClass, setSelectedClass] = useState("");
   const [loading, setLoading] = useState(true);
+  const [processingStudents, setProcessingStudents] = useState(new Set());
 
-  // Mock data - replace with actual API calls
-  const mockPendingGrades = [
-    {
-      id: 1,
-      faculty: "John Smith",
-      subject: "Mathematics Grade 11",
-      section: "STEM-A",
-      submittedAt: "2024-08-30 14:30:00",
-      studentsCount: 32,
-      status: "pending",
-      grades: [
-        { studentId: "2024-001", name: "Juan Dela Cruz", prelim: "A", midterm: "A-", final: "B+", average: "92.5" },
-        { studentId: "2024-002", name: "Maria Santos", prelim: "B+", midterm: "A", final: "A-", average: "90.0" }
-      ]
-    },
-    {
-      id: 2,
-      faculty: "Sarah Johnson",
-      subject: "Physics",
-      section: "STEM-B",
-      submittedAt: "2024-08-30 10:15:00",
-      studentsCount: 28,
-      status: "pending",
-      grades: [
-        { studentId: "2024-003", name: "Pedro Garcia", prelim: "B", midterm: "B+", final: "A-", average: "88.5" }
-      ]
-    }
-  ];
-
-  const mockApprovedGrades = [
-    {
-      id: 3,
-      faculty: "Lisa Brown",
-      subject: "Chemistry",
-      section: "STEM-A",
-      approvedAt: "2024-08-29 16:45:00",
-      studentsCount: 30,
-      status: "approved"
-    }
-  ];
-
+  // Load students with pending grades
   useEffect(() => {
-    // Simulate API call
-    setTimeout(() => {
-      setPendingGrades(mockPendingGrades);
-      setApprovedGrades(mockApprovedGrades);
-      setLoading(false);
-    }, 1000);
+    loadStudentsWithPendingGrades();
   }, []);
 
-  const handleApproveGrades = async (gradeSubmissionId) => {
+  const loadStudentsWithPendingGrades = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/registrar/grades/students/pending');
+      const data = await response.json();
+      
+      if (data.success) {
+        setStudentsWithPendingGrades(data.students);
+      } else {
+        console.error('Failed to load students:', data.error);
+      }
+    } catch (error) {
+      console.error('Error loading students:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApproveStudentGrades = async (studentId, studentName) => {
     const result = await Swal.fire({
-      title: 'Approve Grades?',
-      text: 'Are you sure you want to approve these grades? This action cannot be undone.',
+      title: 'Approve All Grades?',
+      html: `Are you sure you want to approve <strong>ALL grades</strong> for:<br><br><strong>${studentName}</strong><br><br>This will approve all pending subject grades for this student.`,
       icon: 'question',
       showCancelButton: true,
       confirmButtonColor: '#10b981',
       cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Yes, Approve',
+      confirmButtonText: 'Yes, Approve All',
       cancelButtonText: 'Cancel'
     });
 
     if (result.isConfirmed) {
       try {
-        // API call to approve grades
-        console.log(`Approving grades for submission ${gradeSubmissionId}`);
+        setProcessingStudents(prev => new Set(prev).add(studentId));
         
-        // Update local state
-        const submission = pendingGrades.find(g => g.id === gradeSubmissionId);
-        if (submission) {
-          setApprovedGrades([...approvedGrades, { ...submission, status: 'approved', approvedAt: new Date().toISOString() }]);
-          setPendingGrades(pendingGrades.filter(g => g.id !== gradeSubmissionId));
+        const response = await fetch(`/registrar/grades/students/${studentId}/approve`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+          },
+          body: JSON.stringify({
+            approval_notes: 'Bulk approved by registrar'
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Remove student from pending list
+          setStudentsWithPendingGrades(prev => 
+            prev.filter(student => student.student_id !== studentId)
+          );
           
           Swal.fire({
             title: 'Success!',
-            text: 'Grades have been approved successfully.',
+            html: `Successfully approved <strong>${data.approved_count} grades</strong> for ${studentName}`,
             icon: 'success',
             confirmButtonColor: '#10b981',
-            timer: 2000,
+            timer: 3000,
             showConfirmButton: false
           });
+        } else {
+          throw new Error(data.error || 'Failed to approve grades');
         }
       } catch (error) {
+        console.error('Error approving grades:', error);
         Swal.fire({
           title: 'Error!',
-          text: 'Failed to approve grades. Please try again.',
+          text: error.message || 'Failed to approve grades. Please try again.',
           icon: 'error',
           confirmButtonColor: '#ef4444'
+        });
+      } finally {
+        setProcessingStudents(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(studentId);
+          return newSet;
         });
       }
     }
   };
 
-  const handleRejectGrades = async (gradeSubmissionId) => {
+  const handleRejectStudentGrades = async (studentId, studentName) => {
     const { value: reason } = await Swal.fire({
-      title: 'Reject Grades',
-      text: 'Please provide a reason for rejecting these grades:',
+      title: 'Reject All Grades',
+      html: `Please provide a reason for rejecting <strong>ALL grades</strong> for:<br><br><strong>${studentName}</strong>`,
       input: 'textarea',
       inputPlaceholder: 'Enter rejection reason...',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
       cancelButtonColor: '#6b7280',
-      confirmButtonText: 'Reject Grades',
+      confirmButtonText: 'Reject All Grades',
       cancelButtonText: 'Cancel',
       inputValidator: (value) => {
         if (!value) {
@@ -143,35 +136,62 @@ export default function RegistrarGrades() {
 
     if (reason) {
       try {
-        // API call to reject grades
-        console.log(`Rejecting grades for submission ${gradeSubmissionId}:`, reason);
+        setProcessingStudents(prev => new Set(prev).add(studentId));
         
-        // Remove from pending
-        setPendingGrades(pendingGrades.filter(g => g.id !== gradeSubmissionId));
-        
-        Swal.fire({
-          title: 'Grades Rejected',
-          text: 'The grades have been rejected and faculty has been notified.',
-          icon: 'success',
-          confirmButtonColor: '#10b981',
-          timer: 2000,
-          showConfirmButton: false
+        const response = await fetch(`/registrar/grades/students/${studentId}/reject`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+          },
+          body: JSON.stringify({
+            approval_notes: reason
+          })
         });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Remove student from pending list
+          setStudentsWithPendingGrades(prev => 
+            prev.filter(student => student.student_id !== studentId)
+          );
+          
+          Swal.fire({
+            title: 'Grades Rejected',
+            html: `Successfully rejected <strong>${data.rejected_count} grades</strong> for ${studentName}.<br>Faculty has been notified.`,
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            timer: 3000,
+            showConfirmButton: false
+          });
+        } else {
+          throw new Error(data.error || 'Failed to reject grades');
+        }
       } catch (error) {
+        console.error('Error rejecting grades:', error);
         Swal.fire({
           title: 'Error!',
-          text: 'Failed to reject grades. Please try again.',
+          text: error.message || 'Failed to reject grades. Please try again.',
           icon: 'error',
           confirmButtonColor: '#ef4444'
+        });
+      } finally {
+        setProcessingStudents(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(studentId);
+          return newSet;
         });
       }
     }
   };
 
-  const filteredGrades = (selectedTab === "pending" ? pendingGrades : approvedGrades).filter(grade =>
-    grade.faculty.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    grade.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    grade.section.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredStudents = studentsWithPendingGrades.filter(student =>
+    student.firstname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    student.lastname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    student.lrn.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    student.section_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    student.strand_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (loading) {
@@ -216,8 +236,8 @@ export default function RegistrarGrades() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 mb-1">Pending Reviews</p>
-                    <p className="text-3xl font-bold text-yellow-600">{pendingGrades.length}</p>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Students Pending</p>
+                    <p className="text-3xl font-bold text-yellow-600">{studentsWithPendingGrades.length}</p>
                   </div>
                   <div className="p-3 bg-yellow-100 rounded-xl">
                     <FaClock className="text-yellow-600 text-xl" />
@@ -228,11 +248,13 @@ export default function RegistrarGrades() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 mb-1">Approved Grades</p>
-                    <p className="text-3xl font-bold text-green-600">{approvedGrades.length}</p>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Total Pending Grades</p>
+                    <p className="text-3xl font-bold text-orange-600">
+                      {studentsWithPendingGrades.reduce((sum, student) => sum + parseInt(student.pending_grades_count), 0)}
+                    </p>
                   </div>
-                  <div className="p-3 bg-green-100 rounded-xl">
-                    <FaCheckCircle className="text-green-600 text-xl" />
+                  <div className="p-3 bg-orange-100 rounded-xl">
+                    <FaBookOpen className="text-orange-600 text-xl" />
                   </div>
                 </div>
               </div>
@@ -240,13 +262,11 @@ export default function RegistrarGrades() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 mb-1">Total Students</p>
-                    <p className="text-3xl font-bold text-blue-600">
-                      {[...pendingGrades, ...approvedGrades].reduce((sum, grade) => sum + grade.studentsCount, 0)}
-                    </p>
+                    <p className="text-sm font-medium text-gray-600 mb-1">Processing</p>
+                    <p className="text-3xl font-bold text-blue-600">{processingStudents.size}</p>
                   </div>
                   <div className="p-3 bg-blue-100 rounded-xl">
-                    <FaUserGraduate className="text-blue-600 text-xl" />
+                    <FaSpinner className={`text-blue-600 text-xl ${processingStudents.size > 0 ? 'animate-spin' : ''}`} />
                   </div>
                 </div>
               </div>
@@ -258,7 +278,7 @@ export default function RegistrarGrades() {
                 <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search by faculty, subject, or section..."
+                  placeholder="Search by student name, LRN, section, or strand..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white shadow-sm transition-all duration-200"
@@ -267,54 +287,18 @@ export default function RegistrarGrades() {
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="mb-6">
-            <div className="border-b border-gray-200 bg-white rounded-t-2xl">
-              <nav className="flex space-x-8 px-6">
-                <button
-                  onClick={() => setSelectedTab("pending")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-all duration-200 ${
-                    selectedTab === "pending"
-                      ? "border-blue-500 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <FaClock className="text-sm" />
-                    Pending Review ({pendingGrades.length})
-                  </div>
-                </button>
-                <button
-                  onClick={() => setSelectedTab("approved")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-all duration-200 ${
-                    selectedTab === "approved"
-                      ? "border-blue-500 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <FaCheckCircle className="text-sm" />
-                    Approved ({approvedGrades.length})
-                  </div>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-          {/* Grades List */}
+          {/* Students List */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            {filteredGrades.length === 0 ? (
+            {filteredStudents.length === 0 ? (
               <div className="p-12 text-center">
                 <div className="mb-4">
                   <FaClipboardCheck className="text-4xl text-gray-400 mx-auto" />
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  {selectedTab === "pending" ? "No Pending Grades" : "No Approved Grades"}
+                  No Students with Pending Grades
                 </h3>
                 <p className="text-gray-600">
-                  {selectedTab === "pending" 
-                    ? "All grade submissions have been reviewed." 
-                    : "No grades have been approved yet."}
+                  All student grades have been reviewed and approved.
                 </p>
               </div>
             ) : (
@@ -323,16 +307,16 @@ export default function RegistrarGrades() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        Faculty & Subject
+                        Student Information
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        Section
+                        Section & Strand
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        Students
+                        Pending Grades
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        {selectedTab === "pending" ? "Submitted" : "Approved"}
+                        Latest Submission
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                         Actions
@@ -340,60 +324,81 @@ export default function RegistrarGrades() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredGrades.map((grade) => (
-                      <tr key={grade.id} className="hover:bg-gray-50 transition-colors duration-200">
-                        <td className="px-6 py-4">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">{grade.faculty}</div>
-                            <div className="text-sm text-gray-500">{grade.subject}</div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            {grade.section}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <FaUsers className="text-gray-400 text-sm" />
-                            <span className="text-sm font-medium text-gray-900">{grade.studentsCount}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
-                            {new Date(selectedTab === "pending" ? grade.submittedAt : grade.approvedAt).toLocaleDateString()}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {new Date(selectedTab === "pending" ? grade.submittedAt : grade.approvedAt).toLocaleTimeString()}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <button className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-2 rounded-lg transition-all duration-200">
-                              <FaEye className="text-sm" />
-                            </button>
-                            {selectedTab === "pending" && (
-                              <>
-                                <button
-                                  onClick={() => handleApproveGrades(grade.id)}
-                                  className="text-green-600 hover:text-green-800 hover:bg-green-50 p-2 rounded-lg transition-all duration-200"
-                                  title="Approve grades"
-                                >
+                    {filteredStudents.map((student) => {
+                      const isProcessing = processingStudents.has(student.student_id);
+                      const studentName = `${student.firstname} ${student.lastname}`;
+                      
+                      return (
+                        <tr key={student.student_id} className="hover:bg-gray-50 transition-colors duration-200">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                {student.firstname?.charAt(0)}{student.lastname?.charAt(0)}
+                              </div>
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">{studentName}</div>
+                                <div className="text-sm text-gray-500">LRN: {student.lrn}</div>
+                                <div className="text-xs text-gray-400">{student.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div>
+                              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mb-1">
+                                {student.section_name || 'No Section'}
+                              </span>
+                              <div className="text-sm text-gray-600">{student.strand_name || 'No Strand'}</div>
+                              <div className="text-xs text-gray-500">Grade {student.grade_level}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <div className="p-2 bg-yellow-100 rounded-lg">
+                                <FaBookOpen className="text-yellow-600 text-sm" />
+                              </div>
+                              <div>
+                                <div className="text-lg font-bold text-yellow-600">{student.pending_grades_count}</div>
+                                <div className="text-xs text-gray-500">subjects</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-gray-900">
+                              {new Date(student.latest_submission).toLocaleDateString()}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {new Date(student.latest_submission).toLocaleTimeString()}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleApproveStudentGrades(student.student_id, studentName)}
+                                disabled={isProcessing}
+                                className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 text-sm"
+                                title={`Approve all ${student.pending_grades_count} grades for this student`}
+                              >
+                                {isProcessing ? (
+                                  <FaSpinner className="text-sm animate-spin" />
+                                ) : (
                                   <FaCheck className="text-sm" />
-                                </button>
-                                <button
-                                  onClick={() => handleRejectGrades(grade.id)}
-                                  className="text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded-lg transition-all duration-200"
-                                  title="Reject grades"
-                                >
-                                  <FaTimes className="text-sm" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                                )}
+                                Approve All
+                              </button>
+                              <button
+                                onClick={() => handleRejectStudentGrades(student.student_id, studentName)}
+                                disabled={isProcessing}
+                                className="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 text-sm"
+                                title={`Reject all ${student.pending_grades_count} grades for this student`}
+                              >
+                                <FaTimes className="text-sm" />
+                                Reject All
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

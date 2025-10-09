@@ -4,6 +4,16 @@ import Sidebar from "../layouts/Sidebar";
 import useAuth from "../../hooks/useAuth";
 import { useAuthMiddleware } from "../../middleware/AuthMiddleware";
 import Swal from 'sweetalert2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Bar } from 'react-chartjs-2';
 import { 
   FaUsers, 
   FaUserGraduate, 
@@ -25,6 +35,16 @@ import {
   FaArrowUp
 } from "react-icons/fa";
 
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
 export default function RegistrarDashboard() {
   const { user, isAuthenticated, isLoading, requireAuth } = useAuth();
   
@@ -33,13 +53,14 @@ export default function RegistrarDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({
-    totalStudents: 1247,
-    pendingEnrollments: 23,
-    activeClasses: 156,
-    facultyMembers: 45,
-    activeSections: 32,
-    totalStrands: 6
+    totalStudents: 0,
+    pendingEnrollments: 0,
+    activeClasses: 0,
+    facultyMembers: 0,
+    activeSections: 0,
+    totalStrands: 0
   });
+  const [strandChartData, setStrandChartData] = useState(null);
   const [recentActivities, setRecentActivities] = useState([]);
   const [notifications, setNotifications] = useState([]);
 
@@ -48,18 +69,74 @@ export default function RegistrarDashboard() {
       setLoading(true);
       
       try {
-        // Simulate network delay for better UX
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        setStats({
-          totalStudents: 1247,
-          pendingEnrollments: 23,
-          activeClasses: 156,
-          facultyMembers: 45,
-          activeSections: 32,
-          totalStrands: 6
+        // Fetch real dashboard statistics
+        const statsResponse = await fetch('/registrar/dashboard-stats', {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+          },
+          credentials: 'same-origin'
         });
 
+        if (statsResponse.ok) {
+          const statsData = await statsResponse.json();
+          if (statsData.success) {
+            setStats(statsData.data);
+          }
+        }
+
+        // Fetch enrolled students per strand for chart
+        const chartResponse = await fetch('/registrar/enrolled-students-per-strand', {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+          },
+          credentials: 'same-origin'
+        });
+
+        if (chartResponse.ok) {
+          const chartData = await chartResponse.json();
+          if (chartData.success) {
+            // Prepare chart data
+            const labels = chartData.data.map(item => item.strand);
+            const data = chartData.data.map(item => item.students);
+            const backgroundColors = [
+              'rgba(59, 130, 246, 0.8)',   // Blue
+              'rgba(16, 185, 129, 0.8)',   // Green
+              'rgba(245, 158, 11, 0.8)',   // Yellow
+              'rgba(239, 68, 68, 0.8)',    // Red
+              'rgba(139, 92, 246, 0.8)',   // Purple
+              'rgba(236, 72, 153, 0.8)',   // Pink
+            ];
+            const borderColors = [
+              'rgba(59, 130, 246, 1)',
+              'rgba(16, 185, 129, 1)',
+              'rgba(245, 158, 11, 1)',
+              'rgba(239, 68, 68, 1)',
+              'rgba(139, 92, 246, 1)',
+              'rgba(236, 72, 153, 1)',
+            ];
+
+            setStrandChartData({
+              labels: labels,
+              datasets: [
+                {
+                  label: 'Enrolled Students',
+                  data: data,
+                  backgroundColor: backgroundColors.slice(0, labels.length),
+                  borderColor: borderColors.slice(0, labels.length),
+                  borderWidth: 2,
+                  borderRadius: 8,
+                  borderSkipped: false,
+                }
+              ]
+            });
+          }
+        }
+
+        // Set sample activities and notifications
         setRecentActivities([
           {
             id: 1,
@@ -99,26 +176,20 @@ export default function RegistrarDashboard() {
           {
             id: 1,
             title: 'Pending Enrollments',
-            message: '23 new enrollment applications need review',
+            message: `${stats.pendingEnrollments || 0} new enrollment applications need review`,
             type: 'warning',
             time: '5 minutes ago'
           },
           {
             id: 2,
-            title: 'Schedule Conflict',
-            message: 'Room 101 has overlapping class schedules',
-            type: 'error',
-            time: '30 minutes ago'
-          },
-          {
-            id: 3,
-            title: 'Semester Update',
-            message: 'New semester configuration is ready',
-            type: 'info',
+            title: 'Active School Year',
+            message: stats.activeSchoolYear ? `Current: ${stats.activeSchoolYear.year_start}-${stats.activeSchoolYear.year_end}` : 'No active school year set',
+            type: stats.activeSchoolYear ? 'info' : 'error',
             time: '1 hour ago'
           }
         ]);
       } catch (error) {
+        console.error('Dashboard loading error:', error);
         Swal.fire({
           title: 'Error Loading Dashboard',
           text: 'Failed to load dashboard data. Please refresh the page.',
@@ -154,6 +225,68 @@ export default function RegistrarDashboard() {
         timer: 2000,
         showConfirmButton: false
       });
+    }
+  };
+
+  const handleFixEnrollmentIssues = async () => {
+    const result = await Swal.fire({
+      title: 'Fix Enrollment Issues',
+      text: 'This will automatically fix students without assigned sections and create missing class details. Continue?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Yes, Fix Issues',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        Swal.fire({
+          title: 'Processing...',
+          text: 'Fixing enrollment issues, please wait...',
+          icon: 'info',
+          allowOutsideClick: false,
+          showConfirmButton: false,
+          didOpen: () => {
+            Swal.showLoading();
+          }
+        });
+
+        const response = await fetch('/registrar/fix-enrollment-issues', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+          }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          Swal.fire({
+            title: 'Success!',
+            text: data.message,
+            icon: 'success',
+            confirmButtonColor: '#10b981'
+          });
+        } else {
+          Swal.fire({
+            title: 'Error!',
+            text: data.message || 'Failed to fix enrollment issues',
+            icon: 'error',
+            confirmButtonColor: '#dc2626'
+          });
+        }
+      } catch (error) {
+        console.error('Error fixing enrollment issues:', error);
+        Swal.fire({
+          title: 'Error!',
+          text: 'An unexpected error occurred while fixing enrollment issues',
+          icon: 'error',
+          confirmButtonColor: '#dc2626'
+        });
+      }
     }
   };
 
@@ -265,6 +398,13 @@ export default function RegistrarDashboard() {
                 <FaDownload className="text-sm" />
                 Export Report
               </button>
+              <button
+                onClick={handleFixEnrollmentIssues}
+                className="bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg transition-all duration-200 flex items-center gap-2 shadow-sm hover:shadow-md"
+              >
+                <FaCog className="text-sm" />
+                Fix Enrollment Issues
+              </button>
             </div>
           </div>
 
@@ -315,29 +455,117 @@ export default function RegistrarDashboard() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Recent Activities */}
+            {/* Enrolled Students Per Strand Chart */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gradient-to-br from-slate-500 to-gray-600 rounded-lg">
-                      <FaClipboardList className="text-white text-lg" />
+                    <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg">
+                      <FaChartLine className="text-white text-lg" />
                     </div>
-                    <h2 className="text-xl font-bold text-gray-900">Recent Activities</h2>
+                    <h2 className="text-xl font-bold text-gray-900">Enrolled Students per Strand</h2>
                   </div>
-                  <button
-                    onClick={() => router.visit('/registrar/activities')}
-                    className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
-                  >
-                    View All
-                    <FaArrowRight className="text-xs" />
-                  </button>
+                  <div className="text-sm text-gray-500">
+                    Current Academic Year
+                  </div>
                 </div>
                 
-                <div className="space-y-2">
-                  {recentActivities.map((activity) => (
-                    <ActivityItem key={activity.id} activity={activity} />
-                  ))}
+                {loading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <FaSpinner className="animate-spin text-blue-500 text-2xl" />
+                  </div>
+                ) : strandChartData ? (
+                  <div className="h-64">
+                    <Bar
+                      data={strandChartData}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            display: false,
+                          },
+                          title: {
+                            display: false,
+                          },
+                          tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: 'white',
+                            bodyColor: 'white',
+                            borderColor: 'rgba(255, 255, 255, 0.2)',
+                            borderWidth: 1,
+                            cornerRadius: 8,
+                            callbacks: {
+                              label: function(context) {
+                                return `Students: ${context.parsed.y}`;
+                              }
+                            }
+                          }
+                        },
+                        scales: {
+                          y: {
+                            beginAtZero: true,
+                            ticks: {
+                              stepSize: 1,
+                              color: '#6b7280'
+                            },
+                            grid: {
+                              color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                          },
+                          x: {
+                            ticks: {
+                              color: '#6b7280',
+                              font: {
+                                weight: 'bold'
+                              }
+                            },
+                            grid: {
+                              display: false
+                            }
+                          }
+                        },
+                        animation: {
+                          duration: 1000,
+                          easing: 'easeInOutQuart'
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-64 text-gray-500">
+                    <div className="text-center">
+                      <FaChartLine className="text-4xl mb-2 mx-auto" />
+                      <p>No enrollment data available</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Recent Activities */}
+              <div className="mt-8">
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-gradient-to-br from-slate-500 to-gray-600 rounded-lg">
+                        <FaClipboardList className="text-white text-lg" />
+                      </div>
+                      <h2 className="text-xl font-bold text-gray-900">Recent Activities</h2>
+                    </div>
+                    <button
+                      onClick={() => router.visit('/registrar/activities')}
+                      className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
+                    >
+                      View All
+                      <FaArrowRight className="text-xs" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {recentActivities.map((activity) => (
+                      <ActivityItem key={activity.id} activity={activity} />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

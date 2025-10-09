@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Link, usePage } from "@inertiajs/react";
 import axios from "axios";
+import { AuthManager } from '../../auth';
 import {
   FaTachometerAlt,
-  FaUserGraduate,
   FaLayerGroup,
   FaChalkboardTeacher,
   FaBookOpen,
@@ -65,15 +65,11 @@ const Sidebar = ({ onToggle }) => {
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
-        const token = localStorage.getItem('auth_token') || localStorage.getItem('registrar_token');
-        if (token) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-          const response = await axios.get('/user');
-          
-          if (response.data) {
-            // The /user endpoint returns the user object directly
-            setUserProfile(response.data);
-          }
+        // Get user data from AuthManager instead of making API call
+        const user = AuthManager.getUser();
+        
+        if (user) {
+          setUserProfile(user);
         } else {
           // Fallback to localStorage
           const savedUser = localStorage.getItem('auth_user');
@@ -300,18 +296,11 @@ const Sidebar = ({ onToggle }) => {
       shortcut: "Alt+D"
     },
     {
-      path: "/registrar/students",
-      icon: FaUserGraduate,
-      label: "Students",
-      description: "Student management",
-      shortcut: "Alt+S"
-    },
-    {
       path: "/registrar/strands",
       icon: FaLayerGroup,
       label: "Strands",
       description: "Academic tracks",
-      shortcut: "Alt+T"
+      shortcut: "Alt+S"
     },
     {
       path: "/registrar/sections",

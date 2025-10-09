@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Head, usePage } from "@inertiajs/react";
+import { Head, usePage, router } from "@inertiajs/react";
+import axios from 'axios';
 import Student_Sidebar from "../layouts/Student_Sidebar";
 import { 
   FaCalendarAlt, 
@@ -21,7 +22,36 @@ import {
   FaPause,
   FaStop,
   FaList,
-  FaTable
+  FaTable,
+  FaRocket,
+  FaWifi,
+  FaTimes,
+  FaSyncAlt,
+  FaHome,
+  FaQuestionCircle,
+  FaLightbulb,
+  FaShieldAlt,
+  FaFileAlt,
+  FaEnvelope,
+  FaPhone,
+  FaMapMarkerAlt as FaLocation,
+  FaHistory,
+  FaChevronDown,
+  FaChevronUp,
+  FaExpand,
+  FaCompress,
+  FaSort,
+  FaSortUp,
+  FaSortDown,
+  FaFilter,
+  FaEye,
+  FaTachometerAlt,
+  FaCalendarDay,
+  FaCalendarCheck,
+  FaBell,
+  FaChartLine,
+  FaAward,
+  FaTrophy
 } from "react-icons/fa";
 
 export default function Student_Schedule() {
@@ -39,12 +69,89 @@ export default function Student_Schedule() {
   const [error, setError] = useState(null);
   const [enrollmentStatus, setEnrollmentStatus] = useState('pending');
 
+  // HCI Principle 1: Visibility of system status - Enhanced state management
+  const [connectionStatus, setConnectionStatus] = useState('online');
+  const [pageLoadTime] = useState(new Date());
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [sortBy, setSortBy] = useState('time');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedDay, setSelectedDay] = useState('all');
+  const [animationEnabled, setAnimationEnabled] = useState(true);
+  const [highContrastMode, setHighContrastMode] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Monitor connection status
+  useEffect(() => {
+    const handleOnline = () => setConnectionStatus('online');
+    const handleOffline = () => setConnectionStatus('offline');
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // HCI Principle 7: Flexibility and efficiency of use - Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl+F for search
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        document.querySelector('input[placeholder*="Search"]')?.focus();
+      }
+      // Alt+H for help
+      if (e.altKey && e.key === 'h') {
+        e.preventDefault();
+        setShowHelp(!showHelp);
+      }
+      // Ctrl+P for print
+      if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        window.print();
+      }
+      // F5 for refresh
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefresh();
+      }
+      // F11 for fullscreen
+      if (e.key === 'F11') {
+        e.preventDefault();
+        setIsFullscreen(!isFullscreen);
+      }
+      // Escape to clear search or close panels
+      if (e.key === 'Escape') {
+        if (searchTerm) {
+          setSearchTerm('');
+        } else if (showHelp) {
+          setShowHelp(false);
+        } else if (showFilters) {
+          setShowFilters(false);
+        }
+      }
+      // Tab to switch view modes
+      if (e.key === 'Tab' && e.altKey) {
+        e.preventDefault();
+        setViewMode(viewMode === 'list' ? 'timetable' : 'list');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showHelp, searchTerm, viewMode, showFilters, isFullscreen]);
 
   // Fetch schedule data from API
   useEffect(() => {
@@ -55,37 +162,40 @@ export default function Student_Schedule() {
     try {
       setLoading(true);
       setError(null);
+      setConnectionStatus('loading');
       
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://127.0.0.1:8000/student/schedule-data', {
-        method: 'GET',
+      const response = await axios.get('/student/schedule-data', {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+          'X-Requested-With': 'XMLHttpRequest'
+        }
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = response.data;
       
       if (data.success) {
         setScheduleData(data);
         setEnrollmentStatus(data.enrollment_status || 'pending');
+        setConnectionStatus('online');
+        setLastRefresh(new Date());
       } else {
         setError(data.message || 'Failed to fetch schedule data');
         setEnrollmentStatus('pending');
+        setConnectionStatus('error');
       }
     } catch (err) {
       console.error('Error fetching schedule data:', err);
       setError('Failed to load schedule data. Please try again.');
       setEnrollmentStatus('pending');
+      setConnectionStatus('error');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Enhanced refresh handler
+  const handleRefresh = async () => {
+    setLastRefresh(new Date());
+    await fetchScheduleData();
   };
 
   // Temporary function for testing section assignment
@@ -266,69 +376,310 @@ export default function Student_Schedule() {
         
         <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
           
-          <header className="bg-white shadow-lg border-b border-gray-200 px-6 py-4">
+          {/* Enhanced Header with System Status - HCI Principle 1: Visibility of system status */}
+          <header className="bg-gradient-to-r from-blue-600 to-indigo-700 shadow-xl border-b border-gray-200 px-6 py-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
-                  <FaCalendarAlt className="text-white text-xl" />
+                <div className="w-16 h-16 bg-white bg-opacity-20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg border border-white border-opacity-30">
+                  <FaRocket className="text-white text-2xl" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Class Schedule</h1>
-                  <p className="text-gray-600 flex items-center space-x-2">
-                    <FaClock className="text-sm" />
-                    <span>{currentTime.toLocaleDateString('en-US', { 
-                      weekday: 'long', 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
-                    })}</span>
-                    <span className="text-gray-400">•</span>
-                    <span>{currentTime.toLocaleTimeString('en-US', { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
-                    })}</span>
-                  </p>
+                  <h1 className="text-3xl font-bold text-white mb-2">Class Schedule</h1>
+                  <div className="flex items-center space-x-4 text-blue-100">
+                    <div className="flex items-center space-x-1">
+                      <FaClock className="text-sm" />
+                      <span className="text-sm font-medium">
+                        {currentTime.toLocaleDateString('en-US', { 
+                          weekday: 'short', 
+                          month: 'short', 
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                    <span className="text-blue-200">•</span>
+                    <div className="flex items-center space-x-1">
+                      <FaCalendarCheck className="text-sm" />
+                      <span className="text-sm font-medium">Academic Schedule</span>
+                    </div>
+                    <span className="text-blue-200">•</span>
+                    <div className="flex items-center space-x-1">
+                      <FaUser className="text-sm" />
+                      <span className="text-sm font-medium">
+                        {auth?.user?.firstname || 'Student'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
               
+              {/* Enhanced Action Buttons - HCI Principle 7: Flexibility and efficiency of use */}
               <div className="flex items-center space-x-3">
+                {/* Connection Status */}
+                <div className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs ${
+                  connectionStatus === 'online' ? 'bg-green-100 text-green-700' :
+                  connectionStatus === 'offline' ? 'bg-red-100 text-red-700' :
+                  connectionStatus === 'loading' ? 'bg-blue-100 text-blue-700' :
+                  'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {connectionStatus === 'online' && <FaWifi />}
+                  {connectionStatus === 'offline' && <FaTimes />}
+                  {connectionStatus === 'loading' && <FaSpinner className="animate-spin" />}
+                  {connectionStatus === 'error' && <FaExclamationTriangle />}
+                  <span className="capitalize">{connectionStatus}</span>
+                </div>
+
+                {/* Fullscreen Toggle */}
+                <button 
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="p-2 text-white hover:bg-white hover:bg-opacity-20 rounded-lg transition-all duration-200"
+                  title="Toggle fullscreen (F11)"
+                >
+                  {isFullscreen ? <FaCompress /> : <FaExpand />}
+                </button>
+
+                {/* Filter Toggle */}
+                <button 
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center px-4 py-2 text-sm rounded-lg transition-all duration-200 shadow-md ${
+                    showFilters ? 'bg-white text-blue-700' : 'text-white bg-white bg-opacity-20 hover:bg-opacity-30'
+                  }`}
+                  title="Toggle filters (Ctrl+F)"
+                >
+                  <FaFilter className="mr-2" />
+                  Filters
+                </button>
+
+                <button 
+                  onClick={() => setShowHelp(!showHelp)}
+                  className="flex items-center px-4 py-2 text-sm text-blue-700 bg-white hover:bg-blue-50 rounded-lg transition-all duration-200 shadow-md border border-white/20"
+                  title="Get help and information (Alt+H)"
+                >
+                  <FaQuestionCircle className="mr-2" />
+                  Help
+                </button>
+
                 <button 
                   onClick={() => window.print()}
-                  className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                  className="flex items-center px-4 py-2 text-sm text-blue-700 bg-white hover:bg-blue-50 rounded-lg transition-all duration-200 shadow-md border border-white/20"
+                  title="Print schedule (Ctrl+P)"
                 >
                   <FaPrint className="mr-2" />
                   Print
                 </button>
+
                 <button 
-                  onClick={fetchScheduleData}
-                  className="flex items-center px-3 py-2 text-sm text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors duration-200"
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="flex items-center px-4 py-2 text-sm text-blue-700 bg-white hover:bg-blue-50 rounded-lg transition-all duration-200 shadow-md border border-white/20 disabled:opacity-50"
+                  title="Refresh schedule (F5)"
                 >
-                  <FaSpinner className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  <FaSyncAlt className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
                   Refresh
                 </button>
               </div>
             </div>
+
+            {/* System Status Bar */}
+            <div className="mt-4 flex items-center justify-between text-xs text-blue-100">
+              <div className="flex items-center space-x-4">
+                <span>Page loaded: {pageLoadTime.toLocaleTimeString()}</span>
+                <span>•</span>
+                <span>Last refresh: {lastRefresh.toLocaleTimeString()}</span>
+                <span>•</span>
+                <span>Status: {enrollmentStatus}</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span>View: {viewMode}</span>
+                <span>•</span>
+                <span>Sort: {sortBy} ({sortOrder})</span>
+              </div>
+            </div>
+
+            {/* Enhanced Help Panel - HCI Principle 10: Help and documentation */}
+            {showHelp && (
+              <div className="mt-4 bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-6 border border-white border-opacity-20">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-bold text-lg flex items-center">
+                    <FaLightbulb className="mr-2 text-yellow-300" />
+                    How to use your schedule
+                  </h3>
+                  <button
+                    onClick={() => setShowHelp(false)}
+                    className="text-white hover:bg-white hover:bg-opacity-20 p-1 rounded"
+                  >
+                    <FaTimes />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-blue-100">
+                  <div>
+                    <h4 className="font-semibold text-white mb-2 flex items-center">
+                      <FaEye className="mr-2" />
+                      Viewing Schedule
+                    </h4>
+                    <ul className="space-y-1">
+                      <li>• Switch between List and Timetable views</li>
+                      <li>• Search for specific subjects or teachers</li>
+                      <li>• Filter by day or time slots</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-white mb-2 flex items-center">
+                      <FaSearch className="mr-2" />
+                      Navigation
+                    </h4>
+                    <ul className="space-y-1">
+                      <li>• Use search to find classes quickly</li>
+                      <li>• Click on classes for more details</li>
+                      <li>• Print or export your schedule</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-white mb-2 flex items-center">
+                      <FaRocket className="mr-2" />
+                      Keyboard Shortcuts
+                    </h4>
+                    <ul className="space-y-1">
+                      <li>• Alt+H: Toggle help</li>
+                      <li>• Ctrl+F: Focus search</li>
+                      <li>• Ctrl+P: Print schedule</li>
+                      <li>• F5: Refresh data</li>
+                      <li>• Alt+Tab: Switch views</li>
+                    </ul>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-blue-600 bg-opacity-30 rounded-lg">
+                  <p className="text-xs text-blue-100">
+                    <strong>💡 Pro Tip:</strong> Your schedule updates automatically when changes are made by faculty. 
+                    Use the refresh button to get the latest updates.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Enhanced Filter Panel - HCI Principle 7: Flexibility and efficiency of use */}
+            {showFilters && (
+              <div className="mt-4 bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-bold flex items-center">
+                    <FaFilter className="mr-2" />
+                    Filters & Search
+                  </h3>
+                  <button
+                    onClick={() => setShowFilters(false)}
+                    className="text-white hover:bg-white hover:bg-opacity-20 p-1 rounded"
+                  >
+                    <FaTimes />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-white text-sm font-medium mb-2">Search</label>
+                    <div className="relative">
+                      <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search subjects or teachers..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 bg-white bg-opacity-20 border border-white border-opacity-30 rounded-lg text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-white text-sm font-medium mb-2">Day Filter</label>
+                    <select
+                      value={selectedDay}
+                      onChange={(e) => setSelectedDay(e.target.value)}
+                      className="w-full px-3 py-2 bg-white bg-opacity-20 border border-white border-opacity-30 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50"
+                    >
+                      <option value="all" className="text-gray-900">All Days</option>
+                      <option value="Monday" className="text-gray-900">Monday</option>
+                      <option value="Tuesday" className="text-gray-900">Tuesday</option>
+                      <option value="Wednesday" className="text-gray-900">Wednesday</option>
+                      <option value="Thursday" className="text-gray-900">Thursday</option>
+                      <option value="Friday" className="text-gray-900">Friday</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-white text-sm font-medium mb-2">Sort By</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="w-full px-3 py-2 bg-white bg-opacity-20 border border-white border-opacity-30 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-50"
+                    >
+                      <option value="time" className="text-gray-900">Time</option>
+                      <option value="subject" className="text-gray-900">Subject</option>
+                      <option value="teacher" className="text-gray-900">Teacher</option>
+                      <option value="day" className="text-gray-900">Day</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-white text-sm font-medium mb-2">Order</label>
+                    <button
+                      onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                      className="w-full flex items-center justify-center px-3 py-2 bg-white bg-opacity-20 border border-white border-opacity-30 rounded-lg text-white hover:bg-opacity-30 transition-all duration-200"
+                    >
+                      {sortOrder === 'asc' ? <FaSortUp className="mr-2" /> : <FaSortDown className="mr-2" />}
+                      {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </header>
 
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-7xl mx-auto space-y-6">
               
+              {/* Enhanced Status Message - HCI Principle 8: Aesthetic and minimalist design */}
               {(enrollmentStatus !== 'enrolled' || loading || error || getTotalClasses() === 0) && (
-                <div className={`${statusInfo.bgColor} border-2 ${statusInfo.borderColor} rounded-xl p-8 shadow-lg`}>
-                  <div className="text-center space-y-4">
-                    <div className="flex justify-center">{statusInfo.icon}</div>
-                    <div>
-                      <h2 className={`text-2xl font-bold ${statusInfo.textColor}`}>{statusInfo.title}</h2>
-                      <p className={`text-lg ${statusInfo.textColor} mt-2`}>{statusInfo.message}</p>
-                      {error && (
-                        <button 
-                          onClick={fetchScheduleData}
-                          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200"
-                        >
-                          Try Again
-                        </button>
+                <div className={`${statusInfo.bgColor} border-2 ${statusInfo.borderColor} rounded-xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-[1.02]`}>
+                  <div className="text-center space-y-6">
+                    <div className="flex justify-center">
+                      <div className="relative">
+                        {statusInfo.icon}
+                        {/* Animated ring for active status */}
+                        <div className="absolute inset-0 rounded-full border-2 border-current opacity-20 animate-ping"></div>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <h2 className={`text-3xl font-bold ${statusInfo.textColor} tracking-tight`}>{statusInfo.title}</h2>
+                      <p className={`text-lg ${statusInfo.textColor} max-w-2xl mx-auto leading-relaxed`}>{statusInfo.message}</p>
+                      
+                      {/* Progress indicator for loading */}
+                      {loading && (
+                        <div className="mt-4">
+                          <div className="w-full bg-blue-200 rounded-full h-2">
+                            <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
+                          </div>
+                          <p className="text-xs text-blue-700 mt-2">Loading your schedule...</p>
+                        </div>
                       )}
-                      {statusInfo.action}
+
+                      {/* Action buttons */}
+                      <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+                        {error && (
+                          <button 
+                            onClick={handleRefresh}
+                            className="flex items-center px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white font-semibold rounded-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                          >
+                            <FaSyncAlt className="mr-3" />
+                            Try Again
+                          </button>
+                        )}
+                        {statusInfo.action}
+                        
+                        {/* Additional help button */}
+                        <button 
+                          onClick={() => setShowHelp(true)}
+                          className="flex items-center px-6 py-3 bg-gradient-to-r from-gray-500 to-gray-600 text-white font-semibold rounded-lg hover:from-gray-600 hover:to-gray-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                        >
+                          <FaQuestionCircle className="mr-3" />
+                          Need Help?
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -336,37 +687,68 @@ export default function Student_Schedule() {
 
               {enrollmentStatus === 'enrolled' && !loading && !error && scheduleData && getTotalClasses() > 0 && (
                 <>
-                  {/* Semester Header */}
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
-                    <h2 className="text-2xl font-bold text-gray-800">
-                      {scheduleData.school_year ? `${scheduleData.school_year} First Semester` : '2025-2026 First Semester'}
-                    </h2>
+                  {/* Enhanced Semester Header */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-lg border border-blue-200 p-8 text-center">
+                    <div className="flex items-center justify-center space-x-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-md">
+                        <FaCalendarCheck className="text-white text-xl" />
+                      </div>
+                      <div>
+                        <h2 className="text-3xl font-bold text-gray-800">
+                          {scheduleData.school_year ? `${scheduleData.school_year} First Semester` : '2025-2026 First Semester'}
+                        </h2>
+                        <p className="text-gray-600 mt-1">Your Official Class Schedule</p>
+                      </div>
+                    </div>
+                    
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                      <div className="bg-white bg-opacity-50 rounded-lg p-4">
+                        <FaBookOpen className="text-blue-500 text-2xl mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-700">Total Classes</p>
+                        <p className="text-2xl font-bold text-blue-600">{getTotalClasses()}</p>
+                      </div>
+                      <div className="bg-white bg-opacity-50 rounded-lg p-4">
+                        <FaGraduationCap className="text-green-500 text-2xl mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-700">Subjects</p>
+                        <p className="text-2xl font-bold text-green-600">{getUniqueSubjects()}</p>
+                      </div>
+                      <div className="bg-white bg-opacity-50 rounded-lg p-4">
+                        <FaUser className="text-purple-500 text-2xl mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-700">Section</p>
+                        <p className="text-2xl font-bold text-purple-600">
+                          {scheduleData.student?.section || 'N/A'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* View Mode Tabs */}
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="flex border-b border-gray-200">
+                  {/* Enhanced View Mode Tabs */}
+                  <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div className="flex border-b border-gray-200 bg-gray-50">
                       <button
                         onClick={() => setViewMode('list')}
-                        className={`flex-1 px-6 py-4 text-sm font-medium transition-colors duration-200 ${
+                        className={`flex-1 px-8 py-4 text-sm font-bold transition-all duration-200 flex items-center justify-center space-x-2 ${
                           viewMode === 'list'
-                            ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg transform scale-105'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                         }`}
                       >
-                        <FaList className="inline mr-2" />
-                        List
+                        <FaList className="text-lg" />
+                        <span>List View</span>
+                        {viewMode === 'list' && <FaCheckCircle className="text-sm" />}
                       </button>
                       <button
                         onClick={() => setViewMode('timetable')}
-                        className={`flex-1 px-6 py-4 text-sm font-medium transition-colors duration-200 ${
+                        className={`flex-1 px-8 py-4 text-sm font-bold transition-all duration-200 flex items-center justify-center space-x-2 ${
                           viewMode === 'timetable'
-                            ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg transform scale-105'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                         }`}
                       >
-                        <FaTable className="inline mr-2" />
-                        Timetable
+                        <FaTable className="text-lg" />
+                        <span>Timetable View</span>
+                        {viewMode === 'timetable' && <FaCheckCircle className="text-sm" />}
                       </button>
                     </div>
 

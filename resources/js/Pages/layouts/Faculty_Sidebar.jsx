@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link, usePage } from "@inertiajs/react";
-import { router } from "@inertiajs/react";
+import { Link, usePage, router } from "@inertiajs/react";
 import axios from "axios";
 import { 
   FaHome, 
@@ -49,9 +48,6 @@ export default function FacultySidebar({ onToggle }) {
     setCurrentUrl(url);
     // Use AuthManager to store current page
     AuthManager.storeCurrentPage(url);
-    console.log('Sidebar: Current URL changed to:', url);
-    console.log('Sidebar: Stored page via AuthManager:', url);
-    console.log('Sidebar: Window location:', window.location.pathname);
   }, [url]);
 
   // Notify parent component of initial state on mount
@@ -97,23 +93,15 @@ export default function FacultySidebar({ onToggle }) {
     // Get user info to determine if they have coordinator access
     const fetchUserInfo = async () => {
       try {
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-          const response = await axios.get('/user');
-          
-          // The /user endpoint returns the user object directly
-          if (response.data) {
-            setUserInfo(response.data);
-            setUserRole(response.data.role);
-            setIsCoordinator(response.data.is_coordinator || false);
-          }
-          
-          console.log('User role check:', {
-            role: response.data?.role,
-            is_coordinator: response.data?.is_coordinator,
-            final_coordinator_status: response.data?.is_coordinator || false
-          });
+        // Get user data from AuthManager instead of making API call
+        const user = AuthManager.getUser();
+        
+        if (user) {
+          setUserInfo(user);
+          setUserRole(user.role);
+          setIsCoordinator(user.is_coordinator || false);
+        } else {
+          console.warn('No user data found in AuthManager');
         }
       } catch (error) {
         console.error('Error fetching user info:', error);
@@ -275,25 +263,23 @@ export default function FacultySidebar({ onToggle }) {
   const isActive = (href) => {
     // Check current URL from usePage hook
     if (url === href) {
-      console.log(`Sidebar: ${href} is active (matches usePage url: ${url})`);
       return true;
     }
     
     // Check stored URL using AuthManager key
     const storedUrl = AuthManager.getCurrentPage();
     if (storedUrl === href) {
-      console.log(`Sidebar: ${href} is active (matches stored url: ${storedUrl})`);
       return true;
     }
     
     // Check browser location as fallback
     if (typeof window !== 'undefined' && window.location.pathname === href) {
-      console.log(`Sidebar: ${href} is active (matches window.location: ${window.location.pathname})`);
       return true;
     }
     
     return false;
   };
+
 
   return (
     <div className={`fixed left-0 top-0 h-full bg-white shadow-xl border-r border-gray-200 transition-all duration-300 z-40 flex flex-col ${
@@ -378,7 +364,6 @@ export default function FacultySidebar({ onToggle }) {
                     }`}
                     onClick={() => {
                       AuthManager.storeCurrentPage(item.href);
-                      console.log('Sidebar: Storing clicked page via AuthManager:', item.href);
                     }}
                   >
                     <Icon className={`text-lg flex-shrink-0 ${

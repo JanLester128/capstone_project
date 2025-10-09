@@ -11,42 +11,77 @@ import {
     FaCheckSquare,
     FaSquare,
     FaFilter,
-    FaSort
+    FaSort,
+    FaGraduationCap,
+    FaChalkboardTeacher
 } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 import Sidebar from '../layouts/Sidebar';
 
 export default function PendingGrades({ pendingGrades, auth }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
-    const [selectedGrades, setSelectedGrades] = useState([]);
+    const [selectedStudents, setSelectedStudents] = useState([]);
     const [filterSubject, setFilterSubject] = useState('');
     const [filterFaculty, setFilterFaculty] = useState('');
-    const [sortBy, setSortBy] = useState('submitted_for_approval_at');
-    const [sortOrder, setSortOrder] = useState('desc');
+    const [sortBy, setSortBy] = useState('student_name');
+    const [sortOrder, setSortOrder] = useState('asc');
 
-    // Extract unique subjects and faculty for filters
+    // Group grades by student
     const gradesData = pendingGrades?.data || [];
-    const subjects = [...new Set(gradesData.map(grade => grade.subject?.name).filter(Boolean))];
-    const faculty = [...new Set(gradesData.map(grade => grade.faculty?.firstname + ' ' + grade.faculty?.lastname).filter(Boolean))];
+    const studentGroups = gradesData.reduce((groups, grade) => {
+        const studentId = grade.student_id;
+        const studentKey = `${grade.student?.user?.firstname} ${grade.student?.user?.lastname}`;
+        
+        if (!groups[studentId]) {
+            groups[studentId] = {
+                studentId,
+                studentName: studentKey,
+                studentEmail: grade.student?.user?.email,
+                studentInfo: grade.student,
+                grades: [],
+                latestSubmission: grade.submitted_for_approval_at
+            };
+        }
+        
+        groups[studentId].grades.push(grade);
+        
+        // Keep track of latest submission
+        if (new Date(grade.submitted_for_approval_at) > new Date(groups[studentId].latestSubmission)) {
+            groups[studentId].latestSubmission = grade.submitted_for_approval_at;
+        }
+        
+        return groups;
+    }, {});
 
-    // Filter and sort grades
-    const filteredGrades = gradesData
-        .filter(grade => {
-            const matchesSubject = !filterSubject || grade.subject?.name === filterSubject;
+    // Convert to array and apply filters
+    const studentGroupsArray = Object.values(studentGroups)
+        .filter(studentGroup => {
+            const matchesSubject = !filterSubject || 
+                studentGroup.grades.some(grade => grade.subject?.name === filterSubject);
             const matchesFaculty = !filterFaculty || 
-                (grade.faculty?.firstname + ' ' + grade.faculty?.lastname) === filterFaculty;
+                studentGroup.grades.some(grade => 
+                    (grade.faculty?.firstname + ' ' + grade.faculty?.lastname) === filterFaculty);
             return matchesSubject && matchesFaculty;
         })
         .sort((a, b) => {
-            let aValue = a[sortBy];
-            let bValue = b[sortBy];
+            let aValue, bValue;
             
-            if (sortBy === 'student_name') {
-                aValue = (a.student?.user?.firstname || '') + ' ' + (a.student?.user?.lastname || '');
-                bValue = (b.student?.user?.firstname || '') + ' ' + (b.student?.user?.lastname || '');
-            } else if (sortBy === 'faculty_name') {
-                aValue = (a.faculty?.firstname || '') + ' ' + (a.faculty?.lastname || '');
-                bValue = (b.faculty?.firstname || '') + ' ' + (b.faculty?.lastname || '');
+            switch (sortBy) {
+                case 'student_name':
+                    aValue = a.studentName;
+                    bValue = b.studentName;
+                    break;
+                case 'submission_date':
+                    aValue = new Date(a.latestSubmission);
+                    bValue = new Date(b.latestSubmission);
+                    break;
+                case 'subject_count':
+                    aValue = a.grades.length;
+                    bValue = b.grades.length;
+                    break;
+                default:
+                    aValue = a.studentName;
+                    bValue = b.studentName;
             }
             
             if (sortOrder === 'asc') {
@@ -56,82 +91,131 @@ export default function PendingGrades({ pendingGrades, auth }) {
             }
         });
 
-    const handleSelectGrade = (gradeId) => {
-        setSelectedGrades(prev => 
-            prev.includes(gradeId) 
-                ? prev.filter(id => id !== gradeId)
-                : [...prev, gradeId]
+    // Extract unique subjects and faculty for filters
+    const subjects = [...new Set(gradesData.map(grade => grade.subject?.name).filter(Boolean))];
+    const faculty = [...new Set(gradesData.map(grade => grade.faculty?.firstname + ' ' + grade.faculty?.lastname).filter(Boolean))];
+
+    // Helper function to get relevant quarters based on semester
+    const getRelevantQuarters = (semester) => {
+        if (semester === 1) {
+            return [
+                { key: 'first_quarter', label: '1st' },
+                { key: 'second_quarter', label: '2nd' }
+            ];
+        } else if (semester === 2) {
+            return [
+                { key: 'third_quarter', label: '3rd' },
+                { key: 'fourth_quarter', label: '4th' }
+            ];
+        }
+        // Default: show all quarters
+        return [
+            { key: 'first_quarter', label: '1st' },
+            { key: 'second_quarter', label: '2nd' },
+            { key: 'third_quarter', label: '3rd' },
+            { key: 'fourth_quarter', label: '4th' }
+        ];
+    };
+
+    const handleSelectStudent = (studentId) => {
+        setSelectedStudents(prev => 
+            prev.includes(studentId) 
+                ? prev.filter(id => id !== studentId)
+                : [...prev, studentId]
         );
     };
 
     const handleSelectAll = () => {
-        if (selectedGrades.length === filteredGrades.length) {
-            setSelectedGrades([]);
+        if (selectedStudents.length === studentGroupsArray.length) {
+            setSelectedStudents([]);
         } else {
-            setSelectedGrades(filteredGrades.map(grade => grade.id));
+            setSelectedStudents(studentGroupsArray.map(student => student.studentId));
         }
     };
 
-    const handleApproveGrade = async (gradeId, notes = '') => {
+    const handleApproveStudent = async (studentGroup) => {
         try {
+            const gradeIds = studentGroup.grades.map(grade => grade.id);
+            const subjectCount = studentGroup.grades.length;
+            
             const result = await Swal.fire({
-                title: 'Approve Grade',
-                text: 'Are you sure you want to approve this grade?',
+                title: `Approve All Grades for ${studentGroup.studentName}`,
+                html: `
+                    <div class="text-left">
+                        <p class="mb-3">You are about to approve <strong>${subjectCount} subjects</strong> for this student:</p>
+                        <ul class="text-sm text-gray-600 mb-4">
+                            ${studentGroup.grades.map(grade => 
+                                `<li>• ${grade.subject?.name} - ${grade.semester_grade} (${grade.semester_grade >= 75 ? 'Passed' : 'Failed'})</li>`
+                            ).join('')}
+                        </ul>
+                    </div>
+                `,
                 input: 'textarea',
                 inputLabel: 'Approval Notes (Optional)',
-                inputValue: notes,
                 inputPlaceholder: 'Enter any notes about this approval...',
                 showCancelButton: true,
                 confirmButtonColor: '#10b981',
                 cancelButtonColor: '#6b7280',
-                confirmButtonText: 'Approve',
+                confirmButtonText: `Approve All ${subjectCount} Subjects`,
                 cancelButtonText: 'Cancel',
-                inputValidator: (value) => {
-                    // Notes are optional for approval
-                    return null;
-                }
+                width: '600px'
             });
 
             if (result.isConfirmed) {
-                router.post(`/registrar/grades/${gradeId}/approve`, {
+                router.post('/registrar/grades/bulk-approve', {
+                    grade_ids: gradeIds,
                     approval_notes: result.value
                 }, {
                     onSuccess: () => {
                         Swal.fire({
-                            title: 'Approved!',
-                            text: 'Grade has been approved successfully.',
+                            title: 'All Grades Approved!',
+                            text: `Successfully approved ${subjectCount} subjects for ${studentGroup.studentName}.`,
                             icon: 'success',
-                            timer: 2000,
+                            timer: 3000,
                             showConfirmButton: false
                         });
                     },
                     onError: () => {
                         Swal.fire({
                             title: 'Error!',
-                            text: 'Failed to approve grade. Please try again.',
+                            text: 'Failed to approve grades. Please try again.',
                             icon: 'error'
                         });
                     }
                 });
             }
         } catch (error) {
-            console.error('Error approving grade:', error);
+            console.error('Error approving student grades:', error);
         }
     };
 
-    const handleRejectGrade = async (gradeId) => {
+    const handleRejectStudent = async (studentGroup) => {
         try {
+            const gradeIds = studentGroup.grades.map(grade => grade.id);
+            const subjectCount = studentGroup.grades.length;
+            
             const result = await Swal.fire({
-                title: 'Reject Grade',
-                text: 'Please provide a reason for rejecting this grade:',
+                title: `Reject All Grades for ${studentGroup.studentName}`,
+                html: `
+                    <div class="text-left">
+                        <p class="mb-3">You are about to reject <strong>${subjectCount} subjects</strong> for this student:</p>
+                        <ul class="text-sm text-gray-600 mb-4">
+                            ${studentGroup.grades.map(grade => 
+                                `<li>• ${grade.subject?.name} - ${grade.semester_grade}</li>`
+                            ).join('')}
+                        </ul>
+                        <p class="text-red-600 font-medium">Please provide a reason for rejection:</p>
+                    </div>
+                `,
                 input: 'textarea',
                 inputLabel: 'Rejection Reason (Required)',
-                inputPlaceholder: 'Enter the reason for rejection...',
+                inputPlaceholder: 'Enter the reason for rejecting all grades...',
                 showCancelButton: true,
                 confirmButtonColor: '#ef4444',
                 cancelButtonColor: '#6b7280',
-                confirmButtonText: 'Reject',
+                confirmButtonText: `Reject All ${subjectCount} Subjects`,
                 cancelButtonText: 'Cancel',
+                width: '600px',
                 inputValidator: (value) => {
                     if (!value || value.trim().length === 0) {
                         return 'Please provide a reason for rejection';
@@ -144,68 +228,88 @@ export default function PendingGrades({ pendingGrades, auth }) {
             });
 
             if (result.isConfirmed) {
-                router.post(`/registrar/grades/${gradeId}/reject`, {
+                router.post('/registrar/grades/bulk-reject', {
+                    grade_ids: gradeIds,
                     approval_notes: result.value
                 }, {
                     onSuccess: () => {
                         Swal.fire({
-                            title: 'Rejected!',
-                            text: 'Grade has been rejected successfully.',
+                            title: 'All Grades Rejected!',
+                            text: `Successfully rejected ${subjectCount} subjects for ${studentGroup.studentName}.`,
                             icon: 'success',
-                            timer: 2000,
+                            timer: 3000,
                             showConfirmButton: false
                         });
                     },
                     onError: () => {
                         Swal.fire({
                             title: 'Error!',
-                            text: 'Failed to reject grade. Please try again.',
+                            text: 'Failed to reject grades. Please try again.',
                             icon: 'error'
                         });
                     }
                 });
             }
         } catch (error) {
-            console.error('Error rejecting grade:', error);
+            console.error('Error rejecting student grades:', error);
         }
     };
 
     const handleBulkApprove = async () => {
-        if (selectedGrades.length === 0) {
+        if (selectedStudents.length === 0) {
             Swal.fire({
                 title: 'No Selection',
-                text: 'Please select grades to approve.',
+                text: 'Please select students to approve.',
                 icon: 'warning'
             });
             return;
         }
 
+        const selectedStudentGroups = studentGroupsArray.filter(student => 
+            selectedStudents.includes(student.studentId)
+        );
+        const totalGrades = selectedStudentGroups.reduce((sum, student) => sum + student.grades.length, 0);
+
         try {
             const result = await Swal.fire({
-                title: `Bulk Approve ${selectedGrades.length} Grades`,
-                text: 'Are you sure you want to approve all selected grades?',
+                title: `Bulk Approve ${selectedStudents.length} Students`,
+                html: `
+                    <div class="text-left">
+                        <p class="mb-3">You are about to approve grades for <strong>${selectedStudents.length} students</strong> (${totalGrades} total subjects):</p>
+                        <ul class="text-sm text-gray-600 mb-4 max-h-40 overflow-y-auto">
+                            ${selectedStudentGroups.map(student => 
+                                `<li>• ${student.studentName} - ${student.grades.length} subjects</li>`
+                            ).join('')}
+                        </ul>
+                    </div>
+                `,
                 input: 'textarea',
                 inputLabel: 'Bulk Approval Notes (Optional)',
-                inputPlaceholder: 'Enter notes for all selected grades...',
+                inputPlaceholder: 'Enter notes for all selected students...',
                 showCancelButton: true,
                 confirmButtonColor: '#10b981',
                 cancelButtonColor: '#6b7280',
-                confirmButtonText: `Approve ${selectedGrades.length} Grades`,
-                cancelButtonText: 'Cancel'
+                confirmButtonText: `Approve ${selectedStudents.length} Students`,
+                cancelButtonText: 'Cancel',
+                width: '600px'
             });
 
             if (result.isConfirmed) {
+                const allGradeIds = selectedStudentGroups.flatMap(student => 
+                    student.grades.map(grade => grade.id)
+                );
+
                 router.post('/registrar/grades/bulk-approve', {
-                    grade_ids: selectedGrades,
+                    grade_ids: allGradeIds,
                     approval_notes: result.value
                 }, {
                     onSuccess: () => {
-                        setSelectedGrades([]);
+                        setSelectedStudents([]);
                         Swal.fire({
                             title: 'Success!',
-                            text: `${selectedGrades.length} grades approved successfully.`,
+                            text: `Successfully approved grades for ${selectedStudents.length} students.`,
                             icon: 'success',
-                            timer: 2000,
+                            timer: 3000,
                             showConfirmButton: false
                         });
                     },
@@ -265,15 +369,18 @@ export default function PendingGrades({ pendingGrades, auth }) {
                             </div>
                             <div className="flex items-center gap-4">
                                 <div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-full font-semibold">
-                                    {filteredGrades.length} Pending
+                                    {studentGroupsArray.length} Students
                                 </div>
-                                {selectedGrades.length > 0 && (
+                                <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full font-semibold">
+                                    {gradesData.length} Total Subjects
+                                </div>
+                                {selectedStudents.length > 0 && (
                                     <button
                                         onClick={handleBulkApprove}
                                         className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold flex items-center gap-2 transition-colors"
                                     >
                                         <FaCheck />
-                                        Approve Selected ({selectedGrades.length})
+                                        Approve Selected ({selectedStudents.length})
                                     </button>
                                 )}
                             </div>
@@ -327,10 +434,9 @@ export default function PendingGrades({ pendingGrades, auth }) {
                                     onChange={(e) => setSortBy(e.target.value)}
                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                                 >
-                                    <option value="submitted_for_approval_at">Date Submitted</option>
                                     <option value="student_name">Student Name</option>
-                                    <option value="faculty_name">Faculty Name</option>
-                                    <option value="semester_grade">Semester Grade</option>
+                                    <option value="submission_date">Latest Submission</option>
+                                    <option value="subject_count">Number of Subjects</option>
                                 </select>
                             </div>
 
@@ -348,161 +454,164 @@ export default function PendingGrades({ pendingGrades, auth }) {
                         </div>
                     </div>
 
-                    {/* Grades Table */}
-                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                        {filteredGrades.length === 0 ? (
-                            <div className="text-center py-12">
+                    {/* Student Cards */}
+                    <div className="space-y-6">
+                        {studentGroupsArray.length === 0 ? (
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
                                 <FaClock className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Grades</h3>
                                 <p className="text-gray-500">All submitted grades have been processed.</p>
                             </div>
                         ) : (
                             <>
-                                {/* Table Header */}
-                                <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+                                {/* Select All Header */}
+                                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                                     <div className="flex items-center gap-4">
                                         <button
                                             onClick={handleSelectAll}
                                             className="text-purple-600 hover:text-purple-800"
                                         >
-                                            {selectedGrades.length === filteredGrades.length ? (
+                                            {selectedStudents.length === studentGroupsArray.length ? (
                                                 <FaCheckSquare className="w-5 h-5" />
                                             ) : (
                                                 <FaSquare className="w-5 h-5" />
                                             )}
                                         </button>
                                         <span className="text-sm font-medium text-gray-700">
-                                            Select All ({filteredGrades.length})
+                                            Select All Students ({studentGroupsArray.length})
                                         </span>
                                     </div>
                                 </div>
 
-                                {/* Table Content */}
-                                <div className="divide-y divide-gray-200">
-                                    {filteredGrades.map((grade) => (
-                                        <div key={grade.id} className="p-6 hover:bg-gray-50 transition-colors">
-                                            <div className="flex items-start gap-4">
-                                                <button
-                                                    onClick={() => handleSelectGrade(grade.id)}
-                                                    className="mt-1 text-purple-600 hover:text-purple-800"
-                                                >
-                                                    {selectedGrades.includes(grade.id) ? (
-                                                        <FaCheckSquare className="w-5 h-5" />
-                                                    ) : (
-                                                        <FaSquare className="w-5 h-5" />
-                                                    )}
-                                                </button>
-
-                                                <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-6">
-                                                    {/* Student & Subject Info */}
-                                                    <div className="lg:col-span-2">
-                                                        <div className="flex items-center gap-3 mb-2">
-                                                            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                                                                <FaUser className="text-purple-600" />
-                                                            </div>
-                                                            <div>
-                                                                <h3 className="font-semibold text-gray-900">
-                                                                    {grade.student?.user?.firstname} {grade.student?.user?.lastname}
-                                                                </h3>
-                                                                <p className="text-sm text-gray-600">
-                                                                    {grade.student?.user?.email}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                                                            <FaBook className="text-blue-500" />
-                                                            <span className="font-medium">{grade.subject?.name}</span>
-                                                            <span>•</span>
-                                                            <span>{grade.class?.section?.name}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
-                                                            <FaUser className="text-green-500" />
-                                                            <span>Faculty: {grade.faculty?.firstname} {grade.faculty?.lastname}</span>
-                                                        </div>
+                                {/* Student Cards */}
+                                {studentGroupsArray.map((studentGroup) => (
+                                    <div key={studentGroup.studentId} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                                        {/* Student Header */}
+                                        <div className="bg-gradient-to-r from-purple-50 to-blue-50 p-6 border-b border-gray-200">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-4">
+                                                    <button
+                                                        onClick={() => handleSelectStudent(studentGroup.studentId)}
+                                                        className="text-purple-600 hover:text-purple-800"
+                                                    >
+                                                        {selectedStudents.includes(studentGroup.studentId) ? (
+                                                            <FaCheckSquare className="w-6 h-6" />
+                                                        ) : (
+                                                            <FaSquare className="w-6 h-6" />
+                                                        )}
+                                                    </button>
+                                                    <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                                                        <FaGraduationCap className="text-purple-600 w-6 h-6" />
                                                     </div>
-
-                                                    {/* Grades Display */}
                                                     <div>
-                                                        <h4 className="text-sm font-medium text-gray-700 mb-2">Quarter Grades</h4>
-                                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                                            <div className="flex justify-between">
-                                                                <span>1st:</span>
-                                                                <span className={getGradeColor(grade.first_quarter)}>
-                                                                    {grade.first_quarter || '-'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex justify-between">
-                                                                <span>2nd:</span>
-                                                                <span className={getGradeColor(grade.second_quarter)}>
-                                                                    {grade.second_quarter || '-'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex justify-between">
-                                                                <span>3rd:</span>
-                                                                <span className={getGradeColor(grade.third_quarter)}>
-                                                                    {grade.third_quarter || '-'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex justify-between">
-                                                                <span>4th:</span>
-                                                                <span className={getGradeColor(grade.fourth_quarter)}>
-                                                                    {grade.fourth_quarter || '-'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="mt-3 pt-2 border-t border-gray-200">
-                                                            <div className="flex justify-between font-semibold">
-                                                                <span>Semester:</span>
-                                                                <span className={`text-lg ${getGradeColor(grade.semester_grade)}`}>
-                                                                    {grade.semester_grade}
-                                                                </span>
-                                                            </div>
-                                                            <div className="text-xs text-center mt-1">
-                                                                <span className={`px-2 py-1 rounded-full ${
-                                                                    grade.semester_grade >= 75 
-                                                                        ? 'bg-green-100 text-green-800' 
-                                                                        : 'bg-red-100 text-red-800'
-                                                                }`}>
-                                                                    {grade.semester_grade >= 75 ? 'Passed' : 'Failed'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Submission Info & Actions */}
-                                                    <div className="flex flex-col justify-between">
-                                                        <div className="mb-4">
-                                                            <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                                                                <FaCalendarAlt className="text-orange-500" />
-                                                                <span>Submitted:</span>
-                                                            </div>
-                                                            <p className="text-sm font-medium">
-                                                                {formatDate(grade.submitted_for_approval_at)}
-                                                            </p>
-                                                        </div>
-
-                                                        <div className="flex gap-2">
-                                                            <button
-                                                                onClick={() => handleApproveGrade(grade.id)}
-                                                                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
-                                                            >
-                                                                <FaCheck />
-                                                                Approve
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleRejectGrade(grade.id)}
-                                                                className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition-colors"
-                                                            >
-                                                                <FaTimes />
-                                                                Reject
-                                                            </button>
+                                                        <h3 className="text-xl font-bold text-gray-900">
+                                                            {studentGroup.studentName}
+                                                        </h3>
+                                                        <p className="text-gray-600">
+                                                            {studentGroup.studentEmail}
+                                                        </p>
+                                                        <div className="flex items-center gap-4 mt-2">
+                                                            <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                                                                {studentGroup.grades.length} Subjects
+                                                            </span>
+                                                            <span className="text-sm text-gray-500">
+                                                                Latest: {formatDate(studentGroup.latestSubmission)}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <div className="flex gap-3">
+                                                    <button
+                                                        onClick={() => handleApproveStudent(studentGroup)}
+                                                        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-colors"
+                                                    >
+                                                        <FaCheck />
+                                                        Approve All
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleRejectStudent(studentGroup)}
+                                                        className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-colors"
+                                                    >
+                                                        <FaTimes />
+                                                        Reject All
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+
+                                        {/* Subjects Grid */}
+                                        <div className="p-6">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                {studentGroup.grades.map((grade) => {
+                                                    const relevantQuarters = getRelevantQuarters(grade.subject?.semester || 1);
+                                                    
+                                                    return (
+                                                        <div key={grade.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                                            {/* Subject Header */}
+                                                            <div className="flex items-center gap-3 mb-4">
+                                                                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                                                                    <FaBook className="text-blue-600 w-4 h-4" />
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <h4 className="font-semibold text-gray-900 text-sm">
+                                                                        {grade.subject?.name}
+                                                                    </h4>
+                                                                    <p className="text-xs text-gray-600">
+                                                                        Semester {grade.subject?.semester || 1}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Quarter Grades - Only show relevant quarters */}
+                                                            <div className="mb-4">
+                                                                <h5 className="text-xs font-medium text-gray-700 mb-2 uppercase tracking-wide">
+                                                                    Quarter Grades
+                                                                </h5>
+                                                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                                                    {relevantQuarters.map((quarter) => (
+                                                                        <div key={quarter.key} className="flex justify-between">
+                                                                            <span className="text-gray-600">{quarter.label}:</span>
+                                                                            <span className={getGradeColor(grade[quarter.key])}>
+                                                                                {grade[quarter.key] || '-'}
+                                                                            </span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Semester Grade */}
+                                                            <div className="pt-3 border-t border-gray-300">
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="font-semibold text-gray-700">Semester:</span>
+                                                                    <span className={`text-lg font-bold ${getGradeColor(grade.semester_grade)}`}>
+                                                                        {grade.semester_grade}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="text-center mt-2">
+                                                                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                                                        grade.semester_grade >= 75 
+                                                                            ? 'bg-green-100 text-green-800' 
+                                                                            : 'bg-red-100 text-red-800'
+                                                                    }`}>
+                                                                        {grade.semester_grade >= 75 ? 'Passed' : 'Failed'}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Faculty Info */}
+                                                            <div className="mt-3 pt-3 border-t border-gray-300">
+                                                                <div className="flex items-center gap-2 text-xs text-gray-600">
+                                                                    <FaChalkboardTeacher className="text-green-500" />
+                                                                    <span>{grade.faculty?.firstname} {grade.faculty?.lastname}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </>
                         )}
                     </div>

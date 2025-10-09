@@ -390,6 +390,8 @@ const RegistrarSchedules = () => {
   const [editSchedule, setEditSchedule] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDay, setSelectedDay] = useState("");
+  const [selectedGrade, setSelectedGrade] = useState("");
+  const [selectedSemester, setSelectedSemester] = useState("");
   const [viewType, setViewType] = useState('table');
 
   const filteredSchedules = schedules.filter(schedule => {
@@ -402,7 +404,15 @@ const RegistrarSchedules = () => {
     
     const matchesDay = selectedDay === "" || schedule.day_of_week === selectedDay;
     
-    return matchesSearch && matchesDay;
+    // Filter by grade level (check section's grade_level)
+    const matchesGrade = selectedGrade === "" || 
+      schedule.section?.grade_level?.toString() === selectedGrade ||
+      schedule.section?.year_level?.toString() === selectedGrade;
+    
+    // Filter by semester
+    const matchesSemester = selectedSemester === "" || schedule.semester === selectedSemester;
+    
+    return matchesSearch && matchesDay && matchesGrade && matchesSemester;
   });
 
   const handleDeleteSchedule = (id) => {
@@ -504,6 +514,24 @@ const RegistrarSchedules = () => {
                   <option value="Thursday">Thursday</option>
                   <option value="Friday">Friday</option>
                   <option value="Saturday">Saturday</option>
+                </select>
+                <select
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value)}
+                  className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none bg-white shadow-sm"
+                >
+                  <option value="">All Grades</option>
+                  <option value="11">Grade 11</option>
+                  <option value="12">Grade 12</option>
+                </select>
+                <select
+                  value={selectedSemester}
+                  onChange={(e) => setSelectedSemester(e.target.value)}
+                  className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none bg-white shadow-sm"
+                >
+                  <option value="">All Semesters</option>
+                  <option value="1st Semester">1st Semester</option>
+                  <option value="2nd Semester">2nd Semester</option>
                 </select>
                 <button
                   onClick={openAddScheduleModal}

@@ -16,7 +16,7 @@ class Enrollment extends Model
         'grade_level',
         'lrn',
         'strand_id',
-        'section_id',
+        'assigned_section_id',
         'student_status',
         'enrollment_date',
         'student_type',

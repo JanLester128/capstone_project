@@ -31,9 +31,7 @@ class Subject extends Model
         return $this->belongsTo(Strand::class);
     }
 
-    public function strands() {
-        return $this->belongsToMany(Strand::class, 'strand_subjects');
-    }
+    // Removed strands() relationship - subjects now belong to a single strand via strand_id
 
     public function schoolYear() {
         return $this->belongsTo(SchoolYear::class);

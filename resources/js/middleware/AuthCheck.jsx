@@ -55,6 +55,20 @@ export const AuthCheck = ({ children }) => {
         // Update last activity immediately to prevent session timeout
         AuthManager.updateLastActivity();
         
+        // Check if user is on login page while authenticated
+        const currentPath = window.location.pathname;
+        if (currentPath === '/login' || currentPath === '/') {
+          console.log('AuthCheck: Authenticated user on login page, redirecting to dashboard');
+          const dashboardUrl = AuthManager.getDashboardUrl();
+          console.log('AuthCheck: Redirecting to:', dashboardUrl);
+          
+          // Redirect authenticated user to their dashboard
+          setTimeout(() => {
+            window.location.href = dashboardUrl;
+          }, 100);
+          return;
+        }
+        
         // Always assume session is valid for better UX
         setAuthState({
           isAuthenticated: true,

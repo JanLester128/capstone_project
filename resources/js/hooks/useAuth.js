@@ -24,11 +24,14 @@ const useAuth = () => {
         userRole: user?.role
       });
       
-      setAuthState({
+      // CRITICAL FIX: Always sync with AuthManager state
+      const newAuthState = {
         isAuthenticated: isAuth,
         user: user,
         token: token
-      });
+      };
+      
+      setAuthState(newAuthState);
       
       // Set axios headers if authenticated
       if (isAuth && token) {
@@ -37,7 +40,8 @@ const useAuth = () => {
         AuthManager.updateLastActivity();
       }
       
-      // Don't automatically redirect - let AuthCheck component handle authentication flow
+      console.log('useAuth: Auth state updated to:', newAuthState);
+      
     } catch (error) {
       console.error('Error initializing auth:', error);
       setAuthState({
@@ -46,8 +50,8 @@ const useAuth = () => {
         token: null
       });
     } finally {
-      // Faster loading for better UX - reduced from 100ms to 50ms
-      setTimeout(() => setIsLoading(false), 50);
+      // Set loading to false immediately - no artificial delay needed
+      setIsLoading(false);
     }
   }, []);
 
@@ -177,6 +181,26 @@ const useAuth = () => {
     AuthManager.storeCurrentPage(currentPath);
     
     initializeAuth();
+    
+    // REDUCED FREQUENCY: Periodic sync with AuthManager to prevent desync
+    // Reduced from 1 second to 5 seconds to prevent excessive checks during redirects
+    const syncInterval = setInterval(() => {
+      // Skip sync if redirect is in progress to prevent interference
+      const redirectInProgress = sessionStorage.getItem('auth_redirect_in_progress');
+      if (redirectInProgress === 'true') {
+        return;
+      }
+      
+      const managerAuth = AuthManager.isAuthenticated();
+      const currentAuth = authState.isAuthenticated;
+      
+      if (managerAuth !== currentAuth) {
+        console.log('useAuth: Detected auth state desync, reinitializing');
+        initializeAuth();
+      }
+    }, 5000); // Check every 5 seconds instead of 1 second
+    
+    return () => clearInterval(syncInterval);
   }, [initializeAuth]);
 
   // Track page changes when authenticated

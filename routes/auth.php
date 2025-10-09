@@ -16,6 +16,35 @@ Route::post('/auth/test', function() {
     return response()->json(['message' => 'Auth routes are accessible', 'status' => 'success']);
 });
 
+// Debug route to test login endpoint specifically
+Route::post('/auth/login-test', function() {
+    return response()->json([
+        'message' => 'Login endpoint is accessible', 
+        'status' => 'success',
+        'timestamp' => now(),
+        'method' => request()->method()
+    ]);
+});
+
+// Debug route to test user lookup
+Route::post('/auth/debug-user', function() {
+    $email = request('email', 'registrar@gmail.com');
+    $user = \App\Models\User::where('email', $email)->first();
+    
+    return response()->json([
+        'message' => 'User lookup test',
+        'email' => $email,
+        'user_found' => !!$user,
+        'user_data' => $user ? [
+            'id' => $user->id,
+            'email' => $user->email,
+            'role' => $user->role,
+            'has_password' => !!$user->password
+        ] : null,
+        'total_users' => \App\Models\User::count()
+    ]);
+});
+
 // Registrar/Faculty/Coordinator login (must be first to avoid conflict)
 Route::post('/auth/login', [AuthController::class, 'login']);
 

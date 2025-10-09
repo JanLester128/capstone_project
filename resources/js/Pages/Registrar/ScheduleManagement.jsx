@@ -137,8 +137,9 @@ export default function ScheduleManagement() {
             const matchesGradeLevel = subject.year_level === formData.grade_level ||
                 subject.grade_level === formData.grade_level;
 
-            // Check if subject matches section's strand
-            const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
+            // Fix strand matching logic: Allow subjects with null strand_id (core subjects) or matching strand_id
+            const matchesStrand = selectedSection ? 
+                (subject.strand_id === null || subject.strand_id === undefined || subject.strand_id == selectedSection.strand_id) : true;
 
             // Check if subject matches semester filter
             const matchesSemester = semesterFilter === 'all' || 
@@ -192,7 +193,21 @@ export default function ScheduleManagement() {
         
         const filteredSubjects = subjects?.filter(subject => {
             const matchesGradeLevel = subject.year_level == gradeLevel || subject.grade_level == gradeLevel;
-            const matchesStrand = selectedSection ? subject.strand_id == selectedSection.strand_id : true;
+            
+            // Fix strand matching logic: Allow subjects with null strand_id (core subjects) or matching strand_id
+            const matchesStrand = selectedSection ? 
+                (subject.strand_id === null || subject.strand_id === undefined || subject.strand_id == selectedSection.strand_id) : true;
+            
+            // Enhanced debugging for strand matching
+            if (subject.name.includes('General Mathematics') || subject.name.includes('Physical Education')) {
+                console.log(`DEBUG - Subject: ${subject.name}`, {
+                    subject_strand_id: subject.strand_id,
+                    selected_section_strand_id: selectedSection?.strand_id,
+                    strand_match_result: matchesStrand,
+                    is_null_strand: subject.strand_id == null,
+                    exact_match: subject.strand_id == selectedSection?.strand_id
+                });
+            }
             
             // Check if subject matches semester filter
             const matchesSemester = semesterFilter === 'all' || 

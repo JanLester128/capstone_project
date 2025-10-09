@@ -11,16 +11,14 @@ class Strand extends Model
 
     protected $fillable = ['code', 'name', 'description'];
 
-    public function registrar() {
-        return $this->belongsTo(Registrar::class);
-    }
+    // Removed registrar relationship - not needed
 
     public function sections() {
         return $this->hasMany(Section::class);
     }
 
     public function subjects() {
-        return $this->belongsToMany(Subject::class, 'strand_subjects');
+        return $this->hasMany(Subject::class);
     }
 
     public function students() {

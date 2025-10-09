@@ -12,6 +12,7 @@ class ClassDetail extends Model
     protected $fillable = [
         'class_id',
         'enrollment_id',
+        'student_id', // Add student_id to fillable fields
         'section_id',
         'is_enrolled',
         'enrolled_at'

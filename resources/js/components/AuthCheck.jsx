@@ -18,8 +18,18 @@ const AuthCheck = ({ children, allowedRoles = null, fallbackUrl = null }) => {
       // Store current page for persistence
       AuthManager.storeCurrentPage(currentPath);
       
-      // Skip auth check for public routes
-      if (currentPath === '/login' || currentPath === '/' || currentPath === '/register') {
+      // Skip auth check for public routes - EXPANDED to prevent redirects
+      if (currentPath === '/login' || currentPath === '/' || currentPath === '/register' || 
+          currentPath.includes('/auth/') || currentPath.includes('/password')) {
+        console.log('AuthCheck: Skipping auth check for public route:', currentPath);
+        setIsInitialized(true);
+        return;
+      }
+
+      // CRITICAL FIX: Check if redirect is already in progress
+      const redirectInProgress = sessionStorage.getItem('auth_redirect_in_progress');
+      if (redirectInProgress === 'true') {
+        console.log('AuthCheck: Redirect already in progress, skipping to prevent loop');
         setIsInitialized(true);
         return;
       }
@@ -29,16 +39,30 @@ const AuthCheck = ({ children, allowedRoles = null, fallbackUrl = null }) => {
         return;
       }
 
-      // Check authentication
+      // Use useAuth hook as primary source of truth (now properly synced)
       if (!isAuthenticated) {
         console.log('AuthCheck: User not authenticated, redirecting to login');
-        router.visit('/login');
+        // Set flag to prevent infinite redirect loop
+        sessionStorage.setItem('auth_redirect_in_progress', 'true');
+        router.visit('/login', {
+          onFinish: () => {
+            // Clear redirect flag after navigation completes
+            sessionStorage.removeItem('auth_redirect_in_progress');
+          }
+        });
         return;
       }
+      
+      console.log('AuthCheck: User authenticated:', {
+        isAuthenticated,
+        currentPath,
+        userRole: user?.role
+      });
 
       // Check role authorization if specified
-      if (allowedRoles && user) {
-        const userRole = user.role?.toLowerCase();
+      const authUser = AuthManager.getUser();
+      if (allowedRoles && authUser) {
+        const userRole = authUser.role?.toLowerCase();
         const allowed = Array.isArray(allowedRoles) 
           ? allowedRoles.map(role => role.toLowerCase()).includes(userRole)
           : allowedRoles.toLowerCase() === userRole;
@@ -52,7 +76,7 @@ const AuthCheck = ({ children, allowedRoles = null, fallbackUrl = null }) => {
       }
 
       // Validate current page for user role
-      if (user && !AuthManager.isValidPageForUser(currentPath, user.role)) {
+      if (authUser && !AuthManager.isValidPageForUser(currentPath, authUser.role)) {
         console.log('AuthCheck: Invalid page for user role, redirecting to dashboard');
         const dashboardUrl = AuthManager.getDashboardUrl();
         router.visit(dashboardUrl);

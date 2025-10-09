@@ -840,92 +840,6 @@ class RegistrarController extends Controller
         ]);
     }
 
-    // Students Management Method
-    public function studentsPage()
-    {
-        // Get active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-        
-        Log::info('Active school year for students query', [
-            'school_year' => $activeSchoolYear ? $activeSchoolYear->toArray() : null
-        ]);
-        
-        if (!$activeSchoolYear) {
-            return Inertia::render('Registrar/RegistrarStudents', [
-                'students' => collect([]),
-                'allowFacultyCorPrint' => true,
-                'auth' => [
-                    'user' => Auth::user()
-                ]
-            ]);
-        }
-
-        // Get all students with their enrollment data
-        $students = DB::table('enrollments')
-            ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
-            ->join('users', 'student_personal_info.user_id', '=', 'users.id')
-            ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
-            ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
-            ->where('enrollments.school_year_id', $activeSchoolYear->id)
-            ->where('enrollments.student_id', '>', 0) // Exclude invalid student_id = 0
-            ->select([
-                'student_personal_info.id',
-                'student_personal_info.user_id',
-                'users.firstname',
-                'users.lastname',
-                'users.email',
-                'student_personal_info.lrn',
-                'student_personal_info.birthdate',
-                'student_personal_info.grade_level',
-                'sections.section_name',
-                'strands.name as strand_name',
-                'strands.code as strand_code',
-                'sections.id as section_id',
-                'strands.id as strand_id',
-                'enrollments.status as enrollment_status'
-            ])
-            ->get();
-
-        // Debug: Log the query results
-        Log::info('Students query results', [
-            'count' => $students->count(),
-            'students' => $students->toArray()
-        ]);
-
-        // Get all students with enrollment records (regardless of specific status)
-        // Since we removed the approved students tab, we'll show all enrolled students
-        $enrolledStudents = $students; // Show all students with enrollment records
-        $allStudents = $students;
-
-        return Inertia::render('Registrar/RegistrarStudents', [
-            'enrolledStudents' => $enrolledStudents->map(function($student) {
-                return [
-                    'id' => $student->id,
-                    'user_id' => $student->user_id,
-                    'name' => ($student->firstname ?? '') . ' ' . ($student->lastname ?? ''),
-                    'firstname' => $student->firstname ?? '',
-                    'lastname' => $student->lastname ?? '',
-                    'email' => $student->email ?? '',
-                    'student_id' => $student->lrn ?? 'N/A',
-                    'lrn' => $student->lrn ?? 'N/A',
-                    'birthdate' => $student->birthdate ?? 'N/A',
-                    'grade_level' => $student->grade_level ?? 11,
-                    'section' => $student->section_name ?? 'Unassigned',
-                    'section_name' => $student->section_name ?? 'Unassigned',
-                    'strand' => $student->strand_code ?? 'N/A',
-                    'strand_name' => $student->strand_code ?? 'N/A',
-                    'strand_code' => $student->strand_code ?? 'N/A',
-                    'enrollment_status' => $student->enrollment_status ?? 'unknown',
-                ];
-            })->values(),
-            'strands' => Strand::orderBy('name')->get(),
-            'sections' => Section::with('strand')->orderBy('section_name')->get(),
-            'allowFacultyCorPrint' => (bool)($activeSchoolYear->allow_faculty_cor_print ?? true),
-            'auth' => [
-                'user' => Auth::user()
-            ]
-        ]);
-    }
 
     // Sections Management Method
     public function sectionsPage()
@@ -1553,47 +1467,6 @@ class RegistrarController extends Controller
         }
     }
 
-    public function updateStudent(Request $request, $id)
-    {
-        $request->validate([
-            'firstname' => 'required|string|max:255',
-            'lastname' => 'required|string|max:255',
-            'middlename' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $id,
-        ]);
-
-        try {
-            $student = User::findOrFail($id);
-            $student->update([
-                'firstname' => $request->firstname,
-                'lastname' => $request->lastname,
-                'middlename' => $request->middlename,
-                'email' => $request->email,
-            ]);
-
-            return redirect()->back()->with('success', 'Student updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update student: ' . $e->getMessage()]);
-        }
-    }
-
-    public function deleteStudent($id)
-    {
-        try {
-            $student = User::findOrFail($id);
-
-            // Check if student has enrollments
-            if ($student->enrollments()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete student. They have enrollment records.']);
-            }
-
-            $student->delete();
-
-            return redirect()->back()->with('success', 'Student deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete student: ' . $e->getMessage()]);
-        }
-    }
 
     // Semester Management Methods
     public function createSemester(Request $request)
@@ -1703,6 +1576,113 @@ class RegistrarController extends Controller
             return redirect()->back()->with('dashboard_stats', $stats);
         } catch (\Exception $e) {
             return redirect()->back()->withErrors(['general' => 'Failed to get dashboard stats: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * API endpoint for dashboard statistics
+     */
+    public function getDashboardStatsApi()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            // Get enrolled students count (those with approved enrollment status)
+            $enrolledStudentsCount = Enrollment::where('status', 'approved')
+                ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
+                    return $query->where('school_year_id', $activeSchoolYear->id);
+                })
+                ->count();
+
+            // Get pending enrollments count
+            $pendingEnrollmentsCount = Enrollment::where('status', 'pending')
+                ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
+                    return $query->where('school_year_id', $activeSchoolYear->id);
+                })
+                ->count();
+
+            $stats = [
+                'totalStudents' => $enrolledStudentsCount,
+                'pendingEnrollments' => $pendingEnrollmentsCount,
+                'activeClasses' => ClassSchedule::where('is_active', true)
+                    ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
+                        return $query->where('school_year_id', $activeSchoolYear->id);
+                    })
+                    ->count(),
+                'facultyMembers' => User::whereIn('role', ['faculty', 'coordinator'])
+                    ->where('is_disabled', false)
+                    ->count(),
+                'activeSections' => Section::count(),
+                'totalStrands' => Strand::count(),
+                'activeSchoolYear' => $activeSchoolYear
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $stats
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getDashboardStatsApi error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get dashboard stats'
+            ], 500);
+        }
+    }
+
+    /**
+     * API endpoint for enrolled students per strand data for charts
+     */
+    public function getEnrolledStudentsPerStrand()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No active school year found'
+                ], 404);
+            }
+
+            // Get enrolled students grouped by strand
+            $strandData = DB::table('enrollments')
+                ->join('strands', 'enrollments.strand_id', '=', 'strands.id')
+                ->where('enrollments.status', 'approved')
+                ->where('enrollments.school_year_id', $activeSchoolYear->id)
+                ->select(
+                    'strands.code',
+                    'strands.name',
+                    DB::raw('COUNT(enrollments.id) as student_count')
+                )
+                ->groupBy('strands.id', 'strands.code', 'strands.name')
+                ->orderBy('strands.code')
+                ->get();
+
+            // Also get all strands to show 0 counts for strands with no enrollments
+            $allStrands = Strand::orderBy('code')->get();
+            
+            $chartData = [];
+            foreach ($allStrands as $strand) {
+                $enrollmentData = $strandData->firstWhere('code', $strand->code);
+                $chartData[] = [
+                    'strand' => $strand->code,
+                    'name' => $strand->name,
+                    'students' => $enrollmentData ? (int)$enrollmentData->student_count : 0
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $chartData,
+                'total_enrolled' => $strandData->sum('student_count')
+            ]);
+        } catch (\Exception $e) {
+            Log::error('getEnrolledStudentsPerStrand error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get strand enrollment data'
+            ], 500);
         }
     }
 
@@ -2356,15 +2336,16 @@ class RegistrarController extends Controller
     {
         $user = Auth::user();
         
-        // Get all pending grades with relationships
+        // ✅ FIXED: Get grades that are actually pending approval
         $pendingGrades = \App\Models\Grade::with([
-            'student.user', 
+            'student', 
             'faculty', 
             'subject', 
             'class.section'
         ])
-        ->pendingApproval()
-        ->orderBy('submitted_for_approval_at', 'desc')
+        ->where('approval_status', 'pending_approval')  // ✅ FIXED: Proper approval status
+        ->whereNotNull('submitted_for_approval_at')     // ✅ FIXED: Must be submitted
+        ->orderBy('submitted_for_approval_at', 'desc')  // ✅ FIXED: Order by submission date
         ->paginate(20);
 
         return Inertia::render('Registrar/PendingGrades', [
@@ -2485,11 +2466,291 @@ class RegistrarController extends Controller
     }
 
     /**
+     * Bulk reject grades
+     */
+    public function bulkRejectGrades(Request $request)
+    {
+        $request->validate([
+            'grade_ids' => 'required|array',
+            'grade_ids.*' => 'exists:grades,id',
+            'approval_notes' => 'required|string|max:500'
+        ]);
+
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return back()->withErrors(['error' => 'Unauthorized to reject grades.']);
+            }
+
+            $rejectedCount = 0;
+            foreach ($request->grade_ids as $gradeId) {
+                $grade = \App\Models\Grade::find($gradeId);
+                if ($grade && $grade->isPendingApproval()) {
+                    $grade->reject($user->id, $request->approval_notes);
+                    $rejectedCount++;
+                }
+            }
+
+            Log::info('Bulk grade rejection', [
+                'rejected_count' => $rejectedCount,
+                'rejected_by' => $user->id
+            ]);
+
+            return back()->with('success', "Successfully rejected {$rejectedCount} grades.");
+
+        } catch (\Exception $e) {
+            Log::error('Failed to bulk reject grades: ' . $e->getMessage());
+            return back()->withErrors(['error' => 'Failed to reject grades.']);
+        }
+    }
+
+    /**
+     * Approve all grades for a specific student
+     */
+    public function approveStudentGrades(Request $request, $studentId)
+    {
+        $request->validate([
+            'approval_notes' => 'nullable|string|max:500'
+        ]);
+
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return response()->json(['error' => 'Unauthorized to approve grades.'], 403);
+            }
+
+            // Get all pending grades for this student
+            $pendingGrades = \App\Models\Grade::where('student_id', $studentId)
+                ->where('status', 'pending_approval')
+                ->get();
+
+            if ($pendingGrades->isEmpty()) {
+                return response()->json(['error' => 'No pending grades found for this student.'], 404);
+            }
+
+            $approvedCount = 0;
+            foreach ($pendingGrades as $grade) {
+                $grade->approve($user->id, $request->approval_notes);
+                $approvedCount++;
+            }
+
+            Log::info('Student grades bulk approval', [
+                'student_id' => $studentId,
+                'approved_count' => $approvedCount,
+                'approved_by' => $user->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully approved {$approvedCount} grades for student.",
+                'approved_count' => $approvedCount
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to approve student grades: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to approve student grades.'], 500);
+        }
+    }
+
+    /**
+     * Reject all grades for a specific student
+     */
+    public function rejectStudentGrades(Request $request, $studentId)
+    {
+        $request->validate([
+            'approval_notes' => 'required|string|max:500'
+        ]);
+
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return response()->json(['error' => 'Unauthorized to reject grades.'], 403);
+            }
+
+            // Get all pending grades for this student
+            $pendingGrades = \App\Models\Grade::where('student_id', $studentId)
+                ->where('status', 'pending_approval')
+                ->get();
+
+            if ($pendingGrades->isEmpty()) {
+                return response()->json(['error' => 'No pending grades found for this student.'], 404);
+            }
+
+            $rejectedCount = 0;
+            foreach ($pendingGrades as $grade) {
+                $grade->reject($user->id, $request->approval_notes);
+                $rejectedCount++;
+            }
+
+            Log::info('Student grades bulk rejection', [
+                'student_id' => $studentId,
+                'rejected_count' => $rejectedCount,
+                'rejected_by' => $user->id,
+                'reason' => $request->approval_notes
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully rejected {$rejectedCount} grades for student.",
+                'rejected_count' => $rejectedCount
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to reject student grades: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to reject student grades.'], 500);
+        }
+    }
+
+    /**
+     * Get students with pending grades grouped by student
+     */
+    public function getStudentsWithPendingGrades()
+    {
+        try {
+            $studentsWithGrades = DB::table('grades')
+                ->join('users', 'grades.student_id', '=', 'users.id')
+                ->join('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+                ->leftJoin('sections', 'student_personal_info.section_id', '=', 'sections.id')
+                ->leftJoin('strands', 'sections.strand_id', '=', 'strands.id')
+                ->where('grades.status', 'pending_approval')
+                ->select([
+                    'users.id as student_id',
+                    'users.firstname',
+                    'users.lastname',
+                    'users.email',
+                    'student_personal_info.lrn',
+                    'student_personal_info.grade_level',
+                    'sections.section_name',
+                    'strands.name as strand_name',
+                    DB::raw('COUNT(grades.id) as pending_grades_count'),
+                    DB::raw('MIN(grades.created_at) as earliest_submission'),
+                    DB::raw('MAX(grades.updated_at) as latest_submission')
+                ])
+                ->groupBy([
+                    'users.id', 'users.firstname', 'users.lastname', 'users.email',
+                    'student_personal_info.lrn', 'student_personal_info.grade_level',
+                    'sections.section_name', 'strands.name'
+                ])
+                ->orderBy('latest_submission', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'students' => $studentsWithGrades
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to get students with pending grades: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to fetch student data.'], 500);
+        }
+    }
+
+    /**
+     * ✅ NEW: Registrar-only grade editing method
+     */
+    public function editGrade(Request $request, $gradeId)
+    {
+        $request->validate([
+            'first_quarter' => 'nullable|numeric|min:0|max:100',
+            'second_quarter' => 'nullable|numeric|min:0|max:100',
+            'third_quarter' => 'nullable|numeric|min:0|max:100',
+            'fourth_quarter' => 'nullable|numeric|min:0|max:100',
+            'remarks' => 'nullable|string|max:1000',
+            'registrar_notes' => 'required|string|max:500' // Required for audit trail
+        ]);
+
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return response()->json(['error' => 'Unauthorized. Only registrar can edit grades.'], 403);
+            }
+
+            $grade = \App\Models\Grade::findOrFail($gradeId);
+
+            // Calculate new semester grade
+            $quarters = array_filter([
+                $request->first_quarter,
+                $request->second_quarter,
+                $request->third_quarter,
+                $request->fourth_quarter
+            ], function($grade) {
+                return $grade !== null && $grade > 0;
+            });
+            
+            $semesterGrade = count($quarters) > 0 ? round(array_sum($quarters) / count($quarters), 2) : null;
+
+            // Update grade with registrar notes
+            $grade->update([
+                'first_quarter' => $request->first_quarter,
+                'second_quarter' => $request->second_quarter,
+                'third_quarter' => $request->third_quarter,
+                'fourth_quarter' => $request->fourth_quarter,
+                'semester_grade' => $semesterGrade,
+                'remarks' => $request->remarks,
+                'approval_notes' => $request->registrar_notes,
+                'approved_by' => $user->id,
+                'approved_at' => now(),
+                'approval_status' => 'approved',
+                'status' => 'approved'
+            ]);
+
+            Log::info('Grade edited by registrar', [
+                'grade_id' => $gradeId,
+                'registrar_id' => $user->id,
+                'student_id' => $grade->student_id,
+                'subject_id' => $grade->subject_id,
+                'old_semester_grade' => $grade->getOriginal('semester_grade'),
+                'new_semester_grade' => $semesterGrade,
+                'registrar_notes' => $request->registrar_notes
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Grade updated successfully by registrar.',
+                'grade' => $grade->fresh()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to edit grade: ' . $e->getMessage(), [
+                'grade_id' => $gradeId,
+                'registrar_id' => $user->id ?? null
+            ]);
+            
+            return response()->json(['error' => 'Failed to update grade.'], 500);
+        }
+    }
+
+    /**
      * Display settings page
      */
     public function settingsPage()
     {
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Auto-set enrollment dates if they don't exist
+        if ($activeSchoolYear && (!$activeSchoolYear->enrollment_start || !$activeSchoolYear->enrollment_end)) {
+            $startDate = now();
+            $endDate = now()->addDays(30);
+            
+            $activeSchoolYear->update([
+                'enrollment_start' => $startDate,
+                'enrollment_end' => $endDate,
+                'enrollment_open' => true
+            ]);
+            
+            Log::info('Auto-set enrollment dates for active school year', [
+                'school_year_id' => $activeSchoolYear->id,
+                'enrollment_start' => $startDate,
+                'enrollment_end' => $endDate
+            ]);
+            
+            // Refresh the model
+            $activeSchoolYear = $activeSchoolYear->fresh();
+        }
         
         // Get enrollment settings from active school year
         $enrollmentSettings = [
@@ -2515,6 +2776,23 @@ class RegistrarController extends Controller
             if (!$activeSchoolYear) {
                 return redirect()->back()->withErrors([
                     'general' => 'No active school year found. Please activate a school year first.'
+                ]);
+            }
+
+            // Auto-set enrollment dates if they don't exist
+            if (!$activeSchoolYear->enrollment_start || !$activeSchoolYear->enrollment_end) {
+                $startDate = now();
+                $endDate = now()->addDays(30);
+                
+                $activeSchoolYear->update([
+                    'enrollment_start' => $startDate,
+                    'enrollment_end' => $endDate
+                ]);
+                
+                Log::info('Auto-set enrollment dates during toggle', [
+                    'school_year_id' => $activeSchoolYear->id,
+                    'enrollment_start' => $startDate,
+                    'enrollment_end' => $endDate
                 ]);
             }
 
@@ -2594,6 +2872,675 @@ class RegistrarController extends Controller
             return redirect()->back()->withErrors([
                 'general' => 'Failed to update coordinator COR printing permission: ' . $e->getMessage()
             ]);
+        }
+    }
+
+    /**
+     * Reports Page
+     */
+    public function reportsPage()
+    {
+        return Inertia::render('Registrar/RegistrarReports');
+    }
+
+    /**
+     * Get filter options for reports
+     */
+    public function getReportFilterOptions()
+    {
+        try {
+            $schoolYears = SchoolYear::select('id', 'year_start', 'year_end', 'semester')
+                ->orderBy('year_start', 'desc')
+                ->get();
+
+            $sections = Section::select('id', 'section_name')
+                ->orderBy('section_name')
+                ->get();
+
+            $strands = Strand::select('id', 'code', 'name')
+                ->orderBy('code')
+                ->get();
+
+            $faculty = User::select('id', 'firstname', 'lastname')
+                ->whereIn('role', ['faculty', 'coordinator'])
+                ->orderBy('firstname')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'schoolYears' => $schoolYears,
+                'sections' => $sections,
+                'strands' => $strands,
+                'faculty' => $faculty
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching report filter options: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load filter options'
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate report based on filters
+     */
+    public function generateReport(Request $request)
+    {
+        try {
+            $type = $request->get('type', 'students');
+            $filters = $request->only(['schoolYear', 'semester', 'section', 'strand', 'faculty', 'gradeLevel']);
+            $search = $request->get('search', '');
+
+            if ($type === 'students') {
+                return $this->generateStudentReport($filters, $search);
+            } elseif ($type === 'grades') {
+                return $this->generateGradesReport($filters, $search);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid report type'
+            ], 400);
+
+        } catch (\Exception $e) {
+            Log::error('Error generating report: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate report'
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate student list report
+     */
+    private function generateStudentReport($filters, $search)
+    {
+        try {
+            // Enhanced query to show all students with proper relationships
+            $query = DB::table('users')
+                ->leftJoin('enrollments', 'users.id', '=', 'enrollments.student_id')
+                ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
+                ->leftJoin('strands', function($join) {
+                    $join->on('enrollments.strand_id', '=', 'strands.id')
+                         ->orOn('enrollments.first_strand_choice_id', '=', 'strands.id');
+                })
+                ->leftJoin('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
+                ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+                ->leftJoin('transferee_previous_schools', 'users.id', '=', 'transferee_previous_schools.student_id')
+                ->select(
+                    'users.id as user_id',
+                    'users.firstname',
+                    'users.lastname', 
+                    'users.email',
+                    'users.student_type',
+                    'student_personal_info.grade_level',
+                    'sections.section_name',
+                    'strands.code as strand_code',
+                    'strands.name as strand_name',
+                    DB::raw("CASE 
+                        WHEN school_years.year_start IS NOT NULL AND school_years.year_end IS NOT NULL 
+                        THEN CONCAT(school_years.year_start, '-', school_years.year_end, ' (', COALESCE(school_years.semester, 'N/A'), ')') 
+                        ELSE 'N/A' 
+                    END as school_year"),
+                    DB::raw("COALESCE(enrollments.status, 'not_enrolled') as status"),
+                    'enrollments.enrollment_date',
+                    'transferee_previous_schools.last_school as previous_school',
+                    'enrollments.id as enrollment_id'
+                )
+                ->where('users.role', 'student');
+
+            // Apply filters only if they have values - use whereHas for better filtering
+            if (!empty($filters['schoolYear']) && $filters['schoolYear'] !== '') {
+                $query->where('enrollments.school_year_id', $filters['schoolYear']);
+            }
+
+            if (!empty($filters['section']) && $filters['section'] !== '') {
+                $query->where('enrollments.assigned_section_id', $filters['section']);
+            }
+
+            if (!empty($filters['strand']) && $filters['strand'] !== '') {
+                $query->where(function($q) use ($filters) {
+                    $q->where('enrollments.strand_id', $filters['strand'])
+                      ->orWhere('enrollments.first_strand_choice_id', $filters['strand']);
+                });
+            }
+
+            if (!empty($filters['gradeLevel']) && $filters['gradeLevel'] !== '') {
+                $query->where('student_personal_info.grade_level', $filters['gradeLevel']);
+            }
+
+            // Apply search
+            if (!empty($search) && $search !== '') {
+                $query->where(function($q) use ($search) {
+                    $q->where('users.firstname', 'like', "%{$search}%")
+                      ->orWhere('users.lastname', 'like', "%{$search}%")
+                      ->orWhere('users.email', 'like', "%{$search}%");
+                    
+                    // Only search in sections/strands if they exist
+                    if (Schema::hasTable('sections')) {
+                        $q->orWhere('sections.section_name', 'like', "%{$search}%");
+                    }
+                    if (Schema::hasTable('strands')) {
+                        $q->orWhere('strands.name', 'like', "%{$search}%");
+                    }
+                });
+            }
+
+            // Add debugging information
+            $hasFilters = !empty(array_filter($filters)) || !empty($search);
+            
+            // Get results with proper ordering
+            $students = $query->orderBy('users.lastname')->get();
+            
+            // If no results and no filters applied, get all students as fallback
+            if ($students->isEmpty() && !$hasFilters) {
+                Log::info('No students found with joins, trying fallback query');
+                $students = DB::table('users')
+                    ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+                    ->select(
+                        'users.id as user_id',
+                        'users.firstname',
+                        'users.lastname', 
+                        'users.email',
+                        'users.student_type',
+                        'student_personal_info.grade_level',
+                        DB::raw("'N/A' as section_name"),
+                        DB::raw("'N/A' as strand_code"),
+                        DB::raw("'N/A' as strand_name"),
+                        DB::raw("'N/A' as school_year"),
+                        DB::raw("'not_enrolled' as status"),
+                        DB::raw("NULL as enrollment_date"),
+                        DB::raw("NULL as previous_school"),
+                        DB::raw("NULL as enrollment_id")
+                    )
+                    ->where('users.role', 'student')
+                    ->orderBy('users.lastname')
+                    ->get();
+            }
+
+            // Log detailed query information for debugging
+            Log::info('Student report query executed', [
+                'filters_applied' => $filters,
+                'search_term' => $search,
+                'has_filters' => $hasFilters,
+                'result_count' => $students->count(),
+                'total_students_in_db' => DB::table('users')->where('role', 'student')->count(),
+                'sample_students' => $students->take(3)->toArray(),
+                'query_method_used' => $students->isEmpty() && !$hasFilters ? 'fallback' : 'main'
+            ]);
+
+            // Calculate statistics
+            $statistics = [
+                'totalStudents' => $students->count(),
+                'enrolledStudents' => $students->where('status', 'enrolled')->count(),
+                'pendingStudents' => $students->where('status', 'pending')->count(),
+                'rejectedStudents' => $students->where('status', 'rejected')->count(),
+                'approvedStudents' => $students->where('status', 'approved')->count(),
+                'notEnrolledStudents' => $students->where('status', 'not_enrolled')->count()
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $students,
+                'statistics' => $statistics,
+                'debug_info' => [
+                    'query_executed' => true,
+                    'filters_applied' => $hasFilters,
+                    'total_db_students' => DB::table('users')->where('role', 'student')->count()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error in generateStudentReport: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            // Return a simple fallback response
+            return response()->json([
+                'success' => false,
+                'message' => 'Database error: ' . $e->getMessage(),
+                'data' => [],
+                'statistics' => [
+                    'totalStudents' => 0,
+                    'enrolledStudents' => 0,
+                    'pendingStudents' => 0,
+                    'rejectedStudents' => 0
+                ]
+            ]);
+        }
+    }
+
+    /**
+     * Generate grades report
+     */
+    private function generateGradesReport($filters, $search)
+    {
+        try {
+            // Check if grades table exists
+            if (!Schema::hasTable('grades')) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                    'statistics' => [
+                        'totalGrades' => 0,
+                        'passedGrades' => 0,
+                        'failedGrades' => 0,
+                        'averageGrade' => 0,
+                        'transfereeGrades' => 0,
+                        'regularGrades' => 0
+                    ]
+                ]);
+            }
+
+            // Get regular grades from current enrollment
+            $regularGradesQuery = DB::table('grades')
+                ->join('users', 'grades.student_id', '=', 'users.id')
+                ->leftJoin('class', 'grades.class_id', '=', 'class.id')
+                ->leftJoin('subjects', 'class.subject_id', '=', 'subjects.id')
+                ->leftJoin('sections', 'class.section_id', '=', 'sections.id')
+                ->leftJoin('school_years', 'grades.school_year_id', '=', 'school_years.id')
+                ->leftJoin('users as faculty', 'class.faculty_id', '=', 'faculty.id')
+                ->select(
+                    DB::raw("CONCAT(COALESCE(users.firstname, ''), ' ', COALESCE(users.lastname, '')) as student_name"),
+                    DB::raw("COALESCE(subjects.name, 'Unknown Subject') as subject_name"),
+                    DB::raw("COALESCE(sections.section_name, 'N/A') as section_name"),
+                    DB::raw("CONCAT(COALESCE(faculty.firstname, ''), ' ', COALESCE(faculty.lastname, '')) as faculty_name"),
+                    'grades.semester',
+                    'grades.semester_grade',
+                    'grades.approval_status',
+                    'grades.created_at',
+                    DB::raw("'regular' as grade_type"),
+                    DB::raw("NULL as previous_school")
+                )
+                ->where('users.role', 'student');
+
+            // Get transferee credited subjects (transferee_grades) - only if table exists
+            $transfereeGrades = collect([]);
+            if (Schema::hasTable('transferee_credited_subjects')) {
+                $transfereeGradesQuery = DB::table('transferee_credited_subjects')
+                    ->join('users', 'transferee_credited_subjects.student_id', '=', 'users.id')
+                    ->join('subjects', 'transferee_credited_subjects.subject_id', '=', 'subjects.id')
+                    ->leftJoin('transferee_previous_schools', 'transferee_credited_subjects.student_id', '=', 'transferee_previous_schools.student_id')
+                    ->select(
+                        DB::raw("CONCAT(users.firstname, ' ', users.lastname) as student_name"),
+                        'subjects.name as subject_name',
+                        DB::raw("'Transferee' as section_name"),
+                        DB::raw("'Previous School' as faculty_name"),
+                        'transferee_credited_subjects.semester',
+                        'transferee_credited_subjects.grade as semester_grade',
+                        DB::raw("'approved' as approval_status"),
+                        'transferee_credited_subjects.created_at',
+                        DB::raw("'transferee' as grade_type"),
+                        'transferee_previous_schools.last_school as previous_school'
+                    )
+                    ->where('users.role', 'student');
+                
+                $transfereeGrades = $transfereeGradesQuery->get();
+            }
+
+            // Get regular grades
+            $regularGrades = $regularGradesQuery->get();
+            
+            // Merge the collections
+            $allGrades = $regularGrades->merge($transfereeGrades);
+
+            // Simple processing for now
+            $processedGrades = $allGrades->map(function($grade) {
+                return [
+                    'student_name' => $grade->student_name,
+                    'subject_name' => $grade->subject_name,
+                    'section_name' => $grade->section_name,
+                    'faculty_name' => $grade->faculty_name ?? 'N/A',
+                    'first_sem_avg' => $grade->semester === '1st' ? $grade->semester_grade : null,
+                    'second_sem_avg' => $grade->semester === '2nd' ? $grade->semester_grade : null,
+                    'final_grade' => $grade->semester_grade,
+                    'remarks' => $grade->semester_grade >= 75 ? 'Passed' : 'Failed',
+                    'grade_source' => $grade->grade_type === 'transferee' ? 'Transferee Credit' : 'Regular',
+                    'previous_school' => $grade->previous_school ?? null
+                ];
+            });
+
+            // Calculate statistics
+            $statistics = [
+                'totalGrades' => $processedGrades->count(),
+                'passedGrades' => $processedGrades->where('final_grade', '>=', 75)->count(),
+                'failedGrades' => $processedGrades->where('final_grade', '<', 75)->count(),
+                'averageGrade' => $processedGrades->where('final_grade', '!=', null)->avg('final_grade'),
+                'transfereeGrades' => $processedGrades->where('grade_source', 'like', '%Transferee%')->count(),
+                'regularGrades' => $processedGrades->where('grade_source', 'Regular')->count()
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $processedGrades->values()->all(),
+                'statistics' => $statistics
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error in generateGradesReport: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Database error: ' . $e->getMessage(),
+                'data' => [],
+                'statistics' => [
+                    'totalGrades' => 0,
+                    'passedGrades' => 0,
+                    'failedGrades' => 0,
+                    'averageGrade' => 0,
+                    'transfereeGrades' => 0,
+                    'regularGrades' => 0
+                ]
+            ]);
+        }
+    }
+
+    /**
+     * Export report to PDF or Excel
+     */
+    public function exportReport(Request $request)
+    {
+        try {
+            $type = $request->get('type', 'students');
+            $format = $request->get('format', 'xlsx');
+            $filters = $request->only(['schoolYear', 'semester', 'section', 'strand', 'faculty', 'gradeLevel']);
+            $search = $request->get('search', '');
+
+            // Generate the report data
+            if ($type === 'students') {
+                $reportResponse = $this->generateStudentReport($filters, $search);
+            } elseif ($type === 'grades') {
+                $reportResponse = $this->generateGradesReport($filters, $search);
+            } else {
+                return response()->json(['error' => 'Invalid report type'], 400);
+            }
+
+            $reportData = json_decode($reportResponse->getContent(), true);
+            
+            if (!$reportData['success']) {
+                return response()->json(['error' => 'Failed to generate report data'], 500);
+            }
+
+            $data = $reportData['data'];
+
+            if ($format === 'xlsx') {
+                return $this->exportToExcel($data, $type);
+            } elseif ($format === 'pdf') {
+                return $this->exportToPdf($data, $type);
+            }
+
+            return response()->json(['error' => 'Invalid export format'], 400);
+
+        } catch (\Exception $e) {
+            Log::error('Error exporting report: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to export report'], 500);
+        }
+    }
+
+    /**
+     * Export data to Excel format
+     */
+    private function exportToExcel($data, $type)
+    {
+        $filename = $type . '_report_' . date('Y-m-d') . '.xlsx';
+        
+        if ($type === 'students') {
+            $headers = [
+                'Student Name', 'Email', 'Student Type', 'Grade Level', 'Section', 'Strand', 'School Year', 'Status', 'Previous School', 'Enrollment Date'
+            ];
+            
+            $csvContent = implode(',', $headers) . "\n";
+            
+            foreach ($data as $student) {
+                $row = [
+                    $student['firstname'] . ' ' . $student['lastname'],
+                    $student['email'],
+                    $student['student_type'] === 'transferee' ? 'Transferee' : 'Regular',
+                    'Grade ' . $student['grade_level'],
+                    $student['section_name'] ?? 'N/A',
+                    ($student['strand_code'] ?? '') . ' - ' . ($student['strand_name'] ?? ''),
+                    $student['school_year'],
+                    ucfirst($student['status']),
+                    $student['previous_school'] ?? 'N/A',
+                    $student['enrollment_date'] ?? 'N/A'
+                ];
+                $csvContent .= '"' . implode('","', $row) . '"' . "\n";
+            }
+        } else {
+            $headers = [
+                'Student Name', 'Subject', 'Section', 'Faculty', '1st Sem AVG', '2nd Sem AVG', 'Final Grade', 'Grade Source', 'Previous School', 'Remarks'
+            ];
+            
+            $csvContent = implode(',', $headers) . "\n";
+            
+            foreach ($data as $grade) {
+                $row = [
+                    $grade['student_name'],
+                    $grade['subject_name'],
+                    $grade['section_name'] ?? 'N/A',
+                    $grade['faculty_name'] ?? 'N/A',
+                    $grade['first_sem_avg'] ?? 'N/A',
+                    $grade['second_sem_avg'] ?? 'N/A',
+                    $grade['final_grade'] ?? 'N/A',
+                    $grade['grade_source'] ?? 'Regular',
+                    $grade['previous_school'] ?? 'N/A',
+                    $grade['remarks']
+                ];
+                $csvContent .= '"' . implode('","', $row) . '"' . "\n";
+            }
+        }
+
+        return response($csvContent, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0'
+        ]);
+    }
+
+    /**
+     * Export data to PDF format
+     */
+    private function exportToPdf($data, $type)
+    {
+        $filename = $type . '_report_' . date('Y-m-d') . '.pdf';
+        
+        // For now, return CSV format as PDF generation requires additional libraries
+        // This can be enhanced with libraries like DomPDF or TCPDF
+        return $this->exportToExcel($data, $type);
+    }
+
+    /**
+     * Fix enrollment and class assignment issues
+     */
+    public function fixEnrollmentIssues()
+    {
+        try {
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No active school year found'
+                ]);
+            }
+
+            $results = [
+                'fixed_enrollments' => 0,
+                'created_class_details' => 0,
+                'created_missing_classes' => 0,
+                'issues_found' => []
+            ];
+
+            // Step 1: Find enrollments without assigned sections
+            $enrollmentsWithoutSections = DB::table('enrollments')
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->where('status', 'enrolled')
+                ->whereNull('assigned_section_id')
+                ->get();
+
+            Log::info('Found enrollments without sections', [
+                'count' => $enrollmentsWithoutSections->count(),
+                'enrollments' => $enrollmentsWithoutSections->pluck('id')->toArray()
+            ]);
+
+            foreach ($enrollmentsWithoutSections as $enrollment) {
+                // Try to find a matching section
+                $matchingSection = DB::table('sections')
+                    ->where('strand_id', $enrollment->strand_id)
+                    ->where('school_year_id', $activeSchoolYear->id)
+                    ->first();
+
+                if ($matchingSection) {
+                    // Update enrollment with section assignment
+                    DB::table('enrollments')
+                        ->where('id', $enrollment->id)
+                        ->update(['assigned_section_id' => $matchingSection->id]);
+
+                    $results['fixed_enrollments']++;
+
+                    Log::info('Fixed enrollment section assignment', [
+                        'enrollment_id' => $enrollment->id,
+                        'student_id' => $enrollment->student_id,
+                        'section_id' => $matchingSection->id,
+                        'section_name' => $matchingSection->section_name
+                    ]);
+                } else {
+                    $results['issues_found'][] = "No matching section found for enrollment {$enrollment->id} with strand {$enrollment->strand_id}";
+                }
+            }
+
+            // Step 2: Find all enrolled students and ensure they have class_details
+            $allEnrolledStudents = DB::table('enrollments')
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->where('status', 'enrolled')
+                ->whereNotNull('assigned_section_id')
+                ->get();
+
+            Log::info('Processing enrolled students for class_details', [
+                'count' => $allEnrolledStudents->count()
+            ]);
+
+            foreach ($allEnrolledStudents as $enrollment) {
+                // Check if student has class_details
+                $hasClassDetails = DB::table('class_details')
+                    ->where('enrollment_id', $enrollment->id)
+                    ->exists();
+
+                if (!$hasClassDetails) {
+                    // Create class_details for this enrollment
+                    $classSchedules = DB::table('class')
+                        ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                        ->where('class.section_id', $enrollment->assigned_section_id)
+                        ->where('class.school_year_id', $activeSchoolYear->id)
+                        ->where('subjects.strand_id', $enrollment->strand_id)
+                        ->where('class.is_active', true)
+                        ->select('class.id as class_id')
+                        ->get();
+
+                    if ($classSchedules->count() > 0) {
+                        foreach ($classSchedules as $class) {
+                            DB::table('class_details')->updateOrInsert(
+                                [
+                                    'class_id' => $class->class_id,
+                                    'enrollment_id' => $enrollment->id
+                                ],
+                                [
+                                    'student_id' => $enrollment->student_id,
+                                    'section_id' => $enrollment->assigned_section_id,
+                                    'is_enrolled' => true,
+                                    'enrolled_at' => now(),
+                                    'created_at' => now(),
+                                    'updated_at' => now()
+                                ]
+                            );
+                            $results['created_class_details']++;
+                        }
+
+                        Log::info('Created class_details for enrollment', [
+                            'enrollment_id' => $enrollment->id,
+                            'student_id' => $enrollment->student_id,
+                            'class_details_created' => $classSchedules->count()
+                        ]);
+                    } else {
+                        $results['issues_found'][] = "No classes found for enrollment {$enrollment->id} in section {$enrollment->assigned_section_id} with strand {$enrollment->strand_id}";
+                    }
+                }
+            }
+
+            // Step 3: Check for missing class records and create them if needed
+            $sections = DB::table('sections')
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->get();
+
+            foreach ($sections as $section) {
+                $strandSubjects = DB::table('subjects')
+                    ->where('strand_id', $section->strand_id)
+                    ->get();
+
+                foreach ($strandSubjects as $subject) {
+                    $classExists = DB::table('class')
+                        ->where('section_id', $section->id)
+                        ->where('subject_id', $subject->id)
+                        ->where('school_year_id', $activeSchoolYear->id)
+                        ->exists();
+
+                    if (!$classExists) {
+                        // Find a faculty member who can teach this subject
+                        $faculty = DB::table('users')
+                            ->where('role', 'faculty')
+                            ->first();
+
+                        if ($faculty) {
+                            DB::table('class')->insert([
+                                'section_id' => $section->id,
+                                'subject_id' => $subject->id,
+                                'faculty_id' => $faculty->id,
+                                'school_year_id' => $activeSchoolYear->id,
+                                'day_of_week' => 'Monday',
+                                'start_time' => '08:00:00',
+                                'duration' => 120,
+                                'end_time' => '10:00:00',
+                                'semester' => 1,
+                                'school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
+                                'is_active' => true,
+                                'created_at' => now(),
+                                'updated_at' => now()
+                            ]);
+
+                            $results['created_missing_classes']++;
+
+                            Log::info('Created missing class record', [
+                                'section_id' => $section->id,
+                                'subject_id' => $subject->id,
+                                'faculty_id' => $faculty->id
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            $message = "Fixed {$results['fixed_enrollments']} enrollments, created {$results['created_class_details']} class detail records, and {$results['created_missing_classes']} missing class records.";
+            
+            if (!empty($results['issues_found'])) {
+                $message .= " Issues found: " . implode('; ', $results['issues_found']);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'results' => $results
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fixing enrollment issues: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fixing enrollment issues: ' . $e->getMessage()
+            ], 500);
         }
     }
 

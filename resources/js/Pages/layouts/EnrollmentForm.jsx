@@ -133,7 +133,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         break;
       case 4:
         if (!uploadedFiles.reportCard) stepErrors.reportCard = "Report card is required";
-        if (!uploadedFiles.psaBirthCertificate) stepErrors.psaBirthCertificate = "PSA Birth certificate is required";
+        if (!uploadedFiles.psaBirthCertificate) stepErrors.psaBirthCertificate = "Birth certificate is required";
         break;
     }
 
@@ -291,9 +291,17 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     const formData = new FormData();
 
     // Add all form fields to FormData
+    // Always send required fields even if empty so backend validation can catch them
+    const requiredFields = [
+      'lrn', 'studentStatus', 'gradeLevel', 'birthdate', 'age', 'sex', 
+      'birthPlace', 'address', 'guardianName', 'guardianContact', 'guardianRelationship',
+      'lastGrade', 'lastSY'
+    ];
+    
     Object.keys(form).forEach(key => {
-      if (form[key] !== null && form[key] !== undefined && form[key] !== '') {
-        formData.append(key, form[key]);
+      // Always send required fields, even if empty
+      if (requiredFields.includes(key) || (form[key] !== null && form[key] !== undefined && form[key] !== '')) {
+        formData.append(key, form[key] || '');
       }
     });
 
@@ -315,19 +323,30 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           html: `
             <div class="text-left">
               <p class="mb-3"><strong>Your enrollment application has been submitted successfully!</strong></p>
-              <p class="mb-2">📋 <strong>What happens next:</strong></p>
+              <p class="mb-2"> <strong>What happens next:</strong></p>
               <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
                 <li>Your application will be reviewed by the coordinator</li>
                 <li>You will receive an email notification about your enrollment status</li>
                 <li>Check your student dashboard regularly for updates</li>
               </ul>
+              
+              <div class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p class="mb-2"><strong> Important: School Visit Required</strong></p>
+                <p class="text-sm text-green-700">
+                  Once you are enrolled, you need to <strong>visit the school</strong> to get your <strong>Certificate of Registration (COR)</strong> hardcopy and participate in <strong>BRIGADA SKWELA</strong> - the annual school maintenance and preparation activity.
+                </p>
+                <p class="text-sm text-green-700 mt-2 font-medium">
+                   Both activities will be scheduled together after enrollment approval.
+                </p>
+              </div>
+              
               <p class="mt-3 text-sm text-blue-600"><strong>Thank you for choosing ONSTS!</strong></p>
             </div>
           `,
           icon: 'success',
           confirmButtonText: 'Continue to Dashboard',
           confirmButtonColor: '#10B981',
-          width: '500px'
+          width: '600px'
         }).then(() => {
           onClose();
           // Reset form
@@ -388,8 +407,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             name="lastGrade"
             value={form.lastGrade || ''}
             onChange={handleChange}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lastGrade ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lastGrade ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           >
             <option value="">Select Last Grade</option>
             <option value="Grade 10">Grade 10</option>
@@ -416,55 +434,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             placeholder="Enter last school attended"
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
           />
-        </div>
-
-        {/* Guardian Information */}
-        <div className="md:col-span-2">
-          <h4 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
-            Guardian Information
-          </h4>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Guardian Name *
-          </label>
-          <input
-            type="text"
-            name="guardianName"
-            value={form.guardianName || ''}
-            onChange={handleChange}
-            placeholder="Enter guardian's full name"
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianName ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-          />
-          {showValidation && errors.guardianName && (
-            <p className="mt-1 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.guardianName}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Guardian Contact Number *
-          </label>
-          <input
-            type="tel"
-            name="guardianContact"
-            value={form.guardianContact || ''}
-            onChange={handleChange}
-            placeholder="Enter contact number"
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianContact ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-          />
-          {showValidation && errors.guardianContact && (
-            <p className="mt-1 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.guardianContact}
-            </p>
-          )}
         </div>
 
         {/* Additional Information */}
@@ -540,7 +509,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           <div>
             <h4 className="font-semibold text-yellow-800 mb-1">Document Requirements</h4>
             <p className="text-sm text-yellow-700">
-              Please upload clear, readable copies of the required documents. Accepted formats: JPEG, PNG, PDF (Max 5MB each)
+              Please upload clear, readable copies of the required documents: Birth Certificate and Report Card. Accepted formats: JPEG, PNG, PDF (Max 5MB each)
             </p>
           </div>
         </div>
@@ -551,7 +520,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">
             <FaFileAlt className="inline mr-2 text-blue-600" />
-            Report Card (Grade 10 or Latest) *
+            Report Card (Latest Grade Completed) *
           </label>
 
           {!uploadedFiles.reportCard ? (
@@ -605,11 +574,11 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           )}
         </div>
 
-        {/* PSA Birth Certificate Upload */}
+        {/* Birth Certificate Upload */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">
             <FaFileAlt className="inline mr-2 text-green-600" />
-            PSA Birth Certificate *
+            Birth Certificate *
           </label>
 
           {!uploadedFiles.psaBirthCertificate ? (
@@ -682,8 +651,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             onChange={handleChange}
             maxLength="12"
             placeholder="Enter your 12-digit LRN"
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lrn ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.lrn ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           />
           {showValidation && errors.lrn && (
             <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -693,7 +661,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           )}
         </div>
 
-        {/* Student Status - HCI Principle 6: Recognition rather than recall */}
+        {/* Student Status */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             <FaUser className="inline mr-2 text-purple-600" />
@@ -703,11 +671,9 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             name="studentStatus"
             value={form.studentStatus || 'New Student'}
             onChange={handleChange}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.studentStatus ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.studentStatus ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           >
             <option value="New Student">New Student</option>
-            <option value="Continuing">Continuing</option>
             <option value="Transferee">Transferee</option>
           </select>
           <p className="mt-1 text-xs text-gray-500">
@@ -731,8 +697,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             name="gradeLevel"
             value={form.gradeLevel || ''}
             onChange={handleChange}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.gradeLevel ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.gradeLevel ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           >
             <option value="">Select Grade Level</option>
             {allowedGrades.map(grade => (
@@ -758,8 +723,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             name="birthdate"
             value={form.birthdate || ''}
             onChange={handleChange}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthdate ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthdate ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           />
           {showValidation && errors.birthdate && (
             <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -793,8 +757,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             name="sex"
             value={form.sex || ''}
             onChange={handleChange}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.sex ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.sex ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           >
             <option value="">Select Sex</option>
             <option value="Male">Male</option>
@@ -859,8 +822,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             value={form.birthPlace || ''}
             onChange={handleChange}
             placeholder="Enter place of birth"
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthPlace ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.birthPlace ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           />
           {showValidation && errors.birthPlace && (
             <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -882,8 +844,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
             onChange={handleChange}
             rows="3"
             placeholder="Enter your complete address"
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none ${showValidation && errors.address ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none ${showValidation && errors.address ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
           />
           {showValidation && errors.address && (
             <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -913,8 +874,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   value={form.guardianName || ''}
                   onChange={handleChange}
                   placeholder="Enter guardian's full name"
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianName ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                    }`}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianName ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
                 />
                 {showValidation && errors.guardianName && (
                   <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -936,8 +896,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   value={form.guardianContact || ''}
                   onChange={handleChange}
                   placeholder="Enter guardian's contact number"
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianContact ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                    }`}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianContact ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
                 />
                 {showValidation && errors.guardianContact && (
                   <p className="mt-1 text-sm text-red-600 flex items-center">
@@ -957,8 +916,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   name="guardianRelationship"
                   value={form.guardianRelationship || ''}
                   onChange={handleChange}
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianRelationship ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                    }`}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.guardianRelationship ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
                 >
                   <option value="">Select Relationship</option>
                   <option value="Father">Father</option>
@@ -980,7 +938,6 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   </p>
                 )}
               </div>
-
             </div>
           </div>
         </div>
@@ -1050,119 +1007,146 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
     </div>
   );
 
-  const renderStrandPreferences = () => (
-    <div className="space-y-6">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-        <div className="flex items-start">
-          <FaInfoCircle className="text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+  const renderStrandPreferences = () => {
+    // Find STEM strand to check if first choice is STEM
+    const stemStrand = availableStrands.find(strand => strand.code === 'STEM');
+    const isFirstChoiceStem = stemStrand && form.firstChoice === String(stemStrand.id);
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start">
+            <FaInfoCircle className="text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+            <div>
+              <h4 className="font-semibold text-blue-800 mb-1">Strand Selection Guide</h4>
+              <p className="text-sm text-blue-700">
+                Choose three different strands in order of preference. Your first choice will be prioritized during enrollment.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* STEM Exam Requirement Notice */}
+        {isFirstChoiceStem && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+            <div className="flex items-start">
+              <FaExclamationTriangle className="text-orange-600 mt-0.5 mr-3 flex-shrink-0" />
+              <div>
+                <h4 className="font-semibold text-orange-800 mb-1"> STEM Entrance Examination Required</h4>
+                <p className="text-sm text-orange-700 mb-2">
+                  Since you selected <strong>STEM (Science, Technology, Engineering and Mathematics)</strong> as your first choice, you are required to:
+                </p>
+                <ul className="text-sm text-orange-700 list-disc list-inside space-y-1 ml-4">
+                  <li>Visit the school during enrollment week to take the STEM entrance examination</li>
+                  <li>Pass the examination to qualify for STEM enrollment</li>
+                  <li>Bring valid ID and any required documents</li>
+                  <li>No appointment needed - exam is available during enrollment week</li>
+                </ul>
+                <p className="text-sm text-orange-700 mt-2 font-medium">
+                   Visit the school during enrollment week to take the STEM entrance exam.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {/* First Choice */}
           <div>
-            <h4 className="font-semibold text-blue-800 mb-1">Strand Selection Guide</h4>
-            <p className="text-sm text-blue-700">
-              Choose three different strands in order of preference. Your first choice will be prioritized during enrollment.
-            </p>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 bg-green-600 text-white text-xs font-bold rounded-full mr-2">1</span>
+              First Choice *
+            </label>
+            <select
+              name="firstChoice"
+              value={form.firstChoice || ''}
+              onChange={(e) => handleChoiceChange('firstChoice', e.target.value)}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.firstChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
+            >
+              <option value="">Select your first choice</option>
+              {availableStrands.map(strand => (
+                <option
+                  key={strand.id}
+                  value={strand.id}
+                  disabled={isOptionDisabled(strand.id, 'firstChoice')}
+                >
+                  {strand.name}
+                </option>
+              ))}
+            </select>
+            {showValidation && errors.firstChoice && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <FaExclamationTriangle className="mr-1" />
+                {errors.firstChoice}
+              </p>
+            )}
+          </div>
+
+          {/* Second Choice */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 bg-yellow-600 text-white text-xs font-bold rounded-full mr-2">2</span>
+              Second Choice *
+            </label>
+            <select
+              name="secondChoice"
+              value={form.secondChoice || ''}
+              onChange={(e) => handleChoiceChange('secondChoice', e.target.value)}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.secondChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
+            >
+              <option value="">Select your second choice</option>
+              {availableStrands.map(strand => (
+                <option
+                  key={strand.id}
+                  value={strand.id}
+                  disabled={isOptionDisabled(strand.id, 'secondChoice')}
+                >
+                  {strand.name}
+                </option>
+              ))}
+            </select>
+            {showValidation && errors.secondChoice && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <FaExclamationTriangle className="mr-1" />
+                {errors.secondChoice}
+              </p>
+            )}
+          </div>
+
+          {/* Third Choice */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 bg-orange-600 text-white text-xs font-bold rounded-full mr-2">3</span>
+              Third Choice *
+            </label>
+            <select
+              name="thirdChoice"
+              value={form.thirdChoice || ''}
+              onChange={(e) => handleChoiceChange('thirdChoice', e.target.value)}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.thirdChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
+            >
+              <option value="">Select your third choice</option>
+              {availableStrands.map(strand => (
+                <option
+                  key={strand.id}
+                  value={strand.id}
+                  disabled={isOptionDisabled(strand.id, 'thirdChoice')}
+                >
+                  {strand.name}
+                </option>
+              ))}
+            </select>
+            {showValidation && errors.thirdChoice && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <FaExclamationTriangle className="mr-1" />
+                {errors.thirdChoice}
+              </p>
+            )}
           </div>
         </div>
       </div>
-
-      <div className="space-y-4">
-        {/* First Choice */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            <span className="inline-flex items-center justify-center w-6 h-6 bg-green-600 text-white text-xs font-bold rounded-full mr-2">1</span>
-            First Choice *
-          </label>
-          <select
-            name="firstChoice"
-            value={form.firstChoice || ''}
-            onChange={(e) => handleChoiceChange('firstChoice', e.target.value)}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.firstChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-          >
-            <option value="">Select your first choice</option>
-            {availableStrands.map(strand => (
-              <option
-                key={strand.id}
-                value={strand.id}
-                disabled={isOptionDisabled(strand.id, 'firstChoice')}
-              >
-                {strand.name}
-              </option>
-            ))}
-          </select>
-          {showValidation && errors.firstChoice && (
-            <p className="mt-1 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.firstChoice}
-            </p>
-          )}
-        </div>
-
-        {/* Second Choice */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            <span className="inline-flex items-center justify-center w-6 h-6 bg-yellow-600 text-white text-xs font-bold rounded-full mr-2">2</span>
-            Second Choice *
-          </label>
-          <select
-            name="secondChoice"
-            value={form.secondChoice || ''}
-            onChange={(e) => handleChoiceChange('secondChoice', e.target.value)}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.secondChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-          >
-            <option value="">Select your second choice</option>
-            {availableStrands.map(strand => (
-              <option
-                key={strand.id}
-                value={strand.id}
-                disabled={isOptionDisabled(strand.id, 'secondChoice')}
-              >
-                {strand.name}
-              </option>
-            ))}
-          </select>
-          {showValidation && errors.secondChoice && (
-            <p className="mt-1 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.secondChoice}
-            </p>
-          )}
-        </div>
-
-        {/* Third Choice */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            <span className="inline-flex items-center justify-center w-6 h-6 bg-orange-600 text-white text-xs font-bold rounded-full mr-2">3</span>
-            Third Choice *
-          </label>
-          <select
-            name="thirdChoice"
-            value={form.thirdChoice || ''}
-            onChange={(e) => handleChoiceChange('thirdChoice', e.target.value)}
-            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${showValidation && errors.thirdChoice ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-          >
-            <option value="">Select your third choice</option>
-            {availableStrands.map(strand => (
-              <option
-                key={strand.id}
-                value={strand.id}
-                disabled={isOptionDisabled(strand.id, 'thirdChoice')}
-              >
-                {strand.name}
-              </option>
-            ))}
-          </select>
-          {showValidation && errors.thirdChoice && (
-            <p className="mt-1 text-sm text-red-600 flex items-center">
-              <FaExclamationTriangle className="mr-1" />
-              {errors.thirdChoice}
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -1238,7 +1222,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           </div>
         </div>
 
-        {/* Step Indicators - HCI Principle 1: Visibility of system status */}
+        {/* Step Indicators */}
         <div className="bg-gray-50 px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between">
             {steps.map((step, index) => {
@@ -1249,15 +1233,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
               return (
                 <div key={step.id} className="flex items-center flex-1">
                   <div className="flex items-center">
-                    <div className={`
-                      flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-300
-                      ${isActive
-                        ? `bg-${step.color}-600 border-${step.color}-600 text-white`
-                        : isCompleted
-                          ? 'bg-green-600 border-green-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-400'
-                      }
-                    `}>
+                    <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-300 ${isActive ? `bg-${step.color}-600 border-${step.color}-600 text-white` : isCompleted ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-gray-300 text-gray-400'}`}>
                       {isCompleted ? (
                         <FaCheckCircle className="w-5 h-5" />
                       ) : (
@@ -1265,8 +1241,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                       )}
                     </div>
                     <div className="ml-3 hidden sm:block">
-                      <p className={`text-sm font-semibold ${isActive ? `text-${step.color}-600` : isCompleted ? 'text-green-600' : 'text-gray-400'
-                        }`}>
+                      <p className={`text-sm font-semibold ${isActive ? `text-${step.color}-600` : isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
                         {step.title}
                       </p>
                       <p className="text-xs text-gray-500">{step.description}</p>
@@ -1274,8 +1249,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   </div>
 
                   {index < steps.length - 1 && (
-                    <div className={`flex-1 h-0.5 mx-4 ${currentStep > step.id ? 'bg-green-600' : 'bg-gray-300'
-                      }`} />
+                    <div className={`flex-1 h-0.5 mx-4 ${currentStep > step.id ? 'bg-green-600' : 'bg-gray-300'}`} />
                   )}
                 </div>
               );
@@ -1283,26 +1257,19 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
           </div>
         </div>
 
-        {/* Form Content - Scrollable Area */}
+        {/* Form Content */}
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-y-auto">
           <div className="flex-1 overflow-y-auto p-6">
-            {/* HCI Principle 6: Recognition rather than recall - Clear step content */}
             {renderStepContent()}
           </div>
 
-          {/* Navigation Buttons - HCI Principle 3: User control and freedom */}
+          {/* Navigation Buttons */}
           <div className="bg-gray-50 px-6 py-4 border-t flex justify-between items-center flex-shrink-0">
             <button
               type="button"
               onClick={prevStep}
               disabled={currentStep === 1 || loading}
-              className={`
-                flex items-center px-4 py-2 rounded-lg font-medium transition-colors
-                ${currentStep === 1 || loading
-                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-gray-600 text-white hover:bg-gray-700'
-                }
-              `}
+              className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${currentStep === 1 || loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-600 text-white hover:bg-gray-700'}`}
             >
               <FaArrowLeft className="mr-2" />
               Previous
@@ -1324,13 +1291,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
                   nextStep();
                 }}
                 disabled={loading}
-                className={`
-                  flex items-center px-6 py-2 rounded-lg font-medium transition-colors
-                  ${loading
-                    ? 'bg-gray-400 text-white cursor-not-allowed'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                  }
-                `}
+                className={`flex items-center px-6 py-2 rounded-lg font-medium transition-colors ${loading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {loading ? (
                   <>
@@ -1348,13 +1309,7 @@ export default function EnrollmentForm({ isOpen, onClose, user, availableStrands
               <button
                 type="submit"
                 disabled={loading}
-                className={`
-                  flex items-center px-6 py-2 rounded-lg font-medium transition-colors
-                  ${loading
-                    ? 'bg-gray-400 text-white cursor-not-allowed'
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                  }
-                `}
+                className={`flex items-center px-6 py-2 rounded-lg font-medium transition-colors ${loading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
               >
                 {loading ? (
                   <>

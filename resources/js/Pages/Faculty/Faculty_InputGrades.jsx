@@ -36,23 +36,37 @@ export default function FacultyInputGrades({ class: classData, student, existing
     if (currentSemesterGrades) {
       setGradeData(prev => ({
         ...prev,
+        id: currentSemesterGrades.id || null,                    // ✅ ADDED: Grade ID
         first_quarter: currentSemesterGrades.first_quarter || '',
         second_quarter: currentSemesterGrades.second_quarter || '',
         third_quarter: currentSemesterGrades.third_quarter || '',
         fourth_quarter: currentSemesterGrades.fourth_quarter || '',
         semester_grade: currentSemesterGrades.semester_grade || 0,
-        remarks: currentSemesterGrades.remarks || ''
+        remarks: currentSemesterGrades.remarks || '',
+        approval_status: currentSemesterGrades.approval_status || null,     // ✅ ADDED: Approval status
+        is_locked: currentSemesterGrades.is_locked || false,                // ✅ ADDED: Lock status
+        lock_reason: currentSemesterGrades.lock_reason || null,             // ✅ ADDED: Lock reason
+        approval_notes: currentSemesterGrades.approval_notes || null,       // ✅ ADDED: Registrar notes
+        submitted_for_approval_at: currentSemesterGrades.submitted_for_approval_at || null, // ✅ ADDED: Submission date
+        approved_at: currentSemesterGrades.approved_at || null              // ✅ ADDED: Approval date
       }));
     } else {
       // Clear form for new semester
       setGradeData(prev => ({
         ...prev,
+        id: null,
         first_quarter: '',
         second_quarter: '',
         third_quarter: '',
         fourth_quarter: '',
         semester_grade: 0,
-        remarks: ''
+        remarks: '',
+        approval_status: null,
+        is_locked: false,
+        lock_reason: null,
+        approval_notes: null,
+        submitted_for_approval_at: null,
+        approved_at: null
       }));
     }
   }, [gradeData.semester, existingGrades]);
@@ -158,6 +172,52 @@ export default function FacultyInputGrades({ class: classData, student, existing
 
   const isPassing = (score) => {
     return score >= 75; // Philippine SHS passing grade
+  };
+
+  // ✅ NEW: Submit grades for registrar approval
+  const handleSubmitForApproval = async () => {
+    if (gradeData.semester_grade === 0) {
+      alert('Please save grades first before submitting for approval.');
+      return;
+    }
+
+    const confirmMessage = `Submit ${gradeData.semester} semester grade for registrar approval?\n\n` +
+      `Student: ${student?.firstname} ${student?.lastname}\n` +
+      `Subject: ${classData?.subject?.name}\n` +
+      `Semester Grade: ${gradeData.semester_grade.toFixed(1)} (${getGradeLetter(gradeData.semester_grade)})\n\n` +
+      `Once submitted, you cannot modify this grade until registrar approval.`;
+
+    if (confirm(confirmMessage)) {
+      try {
+        // First, save the current grades
+        await handleSaveGrades();
+        
+        // Then submit for approval (assuming we have a grade ID from existing grades)
+        const response = await fetch(`/faculty/students/${student.id}/submit-grades-for-approval`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+          }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          alert(`✅ Grades submitted for approval!\n\n` +
+            `${result.submitted_count} grade(s) submitted to registrar.\n` +
+            `You will be notified once the registrar reviews your submission.`);
+          
+          // Optionally redirect back to class students page
+          window.history.back();
+        } else {
+          alert(`❌ Error: ${result.message}`);
+        }
+      } catch (error) {
+        console.error('Error submitting grades for approval:', error);
+        alert('❌ Failed to submit grades for approval. Please try again.');
+      }
+    }
   };
 
   return (
@@ -280,10 +340,38 @@ export default function FacultyInputGrades({ class: classData, student, existing
             </div>
           </div>
           
+          {/* ✅ NEW: Grade Lock Status Display */}
+          {gradeData.is_locked && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <div className="text-red-600 mt-1">
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-red-800 mb-1">🔒 Grade Locked</h4>
+                  <p className="text-sm text-red-700 mb-2">{gradeData.lock_reason}</p>
+                  {gradeData.approval_status === 'approved' && (
+                    <p className="text-sm text-red-700">
+                      <strong>To request changes:</strong> Submit a written request to the registrar with proper justification for the grade modification.
+                    </p>
+                  )}
+                  {gradeData.approval_notes && (
+                    <div className="mt-2 p-2 bg-white rounded border border-red-200">
+                      <p className="text-sm font-medium text-gray-700">Registrar Notes:</p>
+                      <p className="text-sm text-gray-600">{gradeData.approval_notes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                1st Quarter
+                1st Quarter {gradeData.is_locked && <span className="text-red-500">🔒</span>}
               </label>
               <input
                 type="number"
@@ -292,14 +380,19 @@ export default function FacultyInputGrades({ class: classData, student, existing
                 step="0.1"
                 value={gradeData.first_quarter}
                 onChange={(e) => handleGradeChange('first_quarter', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                disabled={gradeData.is_locked}
+                className={`w-full px-4 py-3 border rounded-lg outline-none transition-all ${
+                  gradeData.is_locked 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                }`}
                 placeholder="0-100"
               />
             </div>
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                2nd Quarter
+                2nd Quarter {gradeData.is_locked && <span className="text-red-500">🔒</span>}
               </label>
               <input
                 type="number"
@@ -308,14 +401,19 @@ export default function FacultyInputGrades({ class: classData, student, existing
                 step="0.1"
                 value={gradeData.second_quarter}
                 onChange={(e) => handleGradeChange('second_quarter', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                disabled={gradeData.is_locked}
+                className={`w-full px-4 py-3 border rounded-lg outline-none transition-all ${
+                  gradeData.is_locked 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                }`}
                 placeholder="0-100"
               />
             </div>
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                3rd Quarter
+                3rd Quarter {gradeData.is_locked && <span className="text-red-500">🔒</span>}
               </label>
               <input
                 type="number"
@@ -324,14 +422,19 @@ export default function FacultyInputGrades({ class: classData, student, existing
                 step="0.1"
                 value={gradeData.third_quarter}
                 onChange={(e) => handleGradeChange('third_quarter', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                disabled={gradeData.is_locked}
+                className={`w-full px-4 py-3 border rounded-lg outline-none transition-all ${
+                  gradeData.is_locked 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                }`}
                 placeholder="0-100"
               />
             </div>
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                4th Quarter
+                4th Quarter {gradeData.is_locked && <span className="text-red-500">🔒</span>}
               </label>
               <input
                 type="number"
@@ -340,7 +443,12 @@ export default function FacultyInputGrades({ class: classData, student, existing
                 step="0.1"
                 value={gradeData.fourth_quarter}
                 onChange={(e) => handleGradeChange('fourth_quarter', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                disabled={gradeData.is_locked}
+                className={`w-full px-4 py-3 border rounded-lg outline-none transition-all ${
+                  gradeData.is_locked 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                }`}
                 placeholder="0-100"
               />
             </div>
@@ -349,14 +457,19 @@ export default function FacultyInputGrades({ class: classData, student, existing
           {/* Remarks Section */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Teacher Remarks (Optional)
+              Teacher Remarks (Optional) {gradeData.is_locked && <span className="text-red-500">🔒</span>}
             </label>
             <textarea
               value={gradeData.remarks}
               onChange={(e) => setGradeData({...gradeData, remarks: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+              disabled={gradeData.is_locked}
+              className={`w-full px-4 py-3 border rounded-lg outline-none transition-all ${
+                gradeData.is_locked 
+                  ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                  : 'border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+              }`}
               rows="3"
-              placeholder="Enter any remarks or comments about the student's performance..."
+              placeholder={gradeData.is_locked ? "Grade is locked - remarks cannot be edited" : "Enter any remarks or comments about the student's performance..."}
             />
           </div>
 
@@ -407,18 +520,60 @@ export default function FacultyInputGrades({ class: classData, student, existing
             </div>
           )}
 
-          {/* Save Button */}
+          {/* Action Buttons */}
           <div className="flex justify-between items-center">
             <div className="text-sm text-gray-600">
-              💡 <strong>Tip:</strong> You can save partial grades (e.g., just 1st quarter) and add more quarters later.
+              {gradeData.is_locked ? (
+                <span className="text-red-600">
+                  🔒 <strong>Grade Locked:</strong> {gradeData.lock_reason}
+                </span>
+              ) : (
+                <span>
+                  💡 <strong>Tip:</strong> You can save partial grades (e.g., just 1st quarter) and add more quarters later.
+                </span>
+              )}
             </div>
-            <button
-              onClick={handleSaveGrades}
-              className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 flex items-center gap-2"
-            >
-              <FaSave className="w-4 h-4" />
-              Save Grades ({gradeData.semester} Semester)
-            </button>
+            <div className="flex gap-3">
+              {/* Save Button - Disabled when locked */}
+              <button
+                onClick={handleSaveGrades}
+                disabled={gradeData.is_locked}
+                className={`px-6 py-3 rounded-lg transition-all duration-200 flex items-center gap-2 ${
+                  gradeData.is_locked
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700'
+                }`}
+              >
+                <FaSave className="w-4 h-4" />
+                {gradeData.is_locked ? 'Grade Locked' : `Save Grades (${gradeData.semester} Semester)`}
+              </button>
+              
+              {/* Submit for Approval Button - Only show if not locked and has grades */}
+              {!gradeData.is_locked && gradeData.semester_grade > 0 && (
+                <button
+                  onClick={handleSubmitForApproval}
+                  className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all duration-200 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Submit for Approval
+                </button>
+              )}
+
+              {/* Status Display for Locked Grades */}
+              {gradeData.is_locked && (
+                <div className="flex items-center gap-2 px-4 py-3 bg-red-100 text-red-700 rounded-lg border border-red-200">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="font-medium">
+                    {gradeData.approval_status === 'pending_approval' ? 'Pending Approval' : 
+                     gradeData.approval_status === 'approved' ? 'Approved' : 'Locked'}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>

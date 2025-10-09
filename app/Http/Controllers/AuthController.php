@@ -255,7 +255,14 @@ class AuthController extends Controller
             
             // Check if request expects JSON (from frontend fetch)
             if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                $response = response()->json([
+                Log::info('Returning JSON response for login', [
+                    'user_id' => $user->id,
+                    'user_role' => $user->role,
+                    'token_length' => strlen($token),
+                    'redirect_url' => $this->getDashboardRoute($user->role)
+                ]);
+                
+                return response()->json([
                     'success' => true,
                     'message' => 'Login successful',
                     'user' => $user,
@@ -263,9 +270,7 @@ class AuthController extends Controller
                     'token_key' => 'auth_token',
                     'session_id' => $sessionId,
                     'redirect' => $this->getDashboardRoute($user->role)
-                ]);
-                $response->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
-                return $response;
+                ])->withCookie(cookie('auth_token', $token, 60 * 24)); // Store token in cookie for 24 hours
             }
             
             // For web/Inertia requests, redirect directly to dashboard

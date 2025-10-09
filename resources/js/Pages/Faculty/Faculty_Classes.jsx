@@ -21,13 +21,23 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
     return saved ? JSON.parse(saved) : false;
   });
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedSemester, setSelectedSemester] = useState("current");
+  const [selectedSemester, setSelectedSemester] = useState("1st Semester");
 
-  const filteredClasses = classes.filter(cls =>
-    (cls.subject?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (cls.section?.section_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (cls.strand?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredClasses = classes.filter(cls => {
+    const matchesSearch = (cls.subject?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (cls.section?.section_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (cls.strand?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesSemester = selectedSemester === "all" || 
+      cls.semester === selectedSemester || 
+      (!cls.semester && selectedSemester === "1st Semester");
+    
+    return matchesSearch && matchesSemester;
+  });
+
+  // Get semester counts
+  const firstSemesterCount = classes.filter(cls => cls.semester === "1st Semester" || !cls.semester).length;
+  const secondSemesterCount = classes.filter(cls => cls.semester === "2nd Semester").length;
 
   const handleViewStudents = (classId) => {
     // Navigate to student list for this class using Inertia
@@ -72,17 +82,40 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
             
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Semester
+                Semester Filter
               </label>
-              <select
-                value={selectedSemester}
-                onChange={(e) => setSelectedSemester(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
-              >
-                <option value="current">Current Semester</option>
-                <option value="1st-2024">1st Semester 2024-2025</option>
-                <option value="2nd-2024">2nd Semester 2024-2025</option>
-              </select>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedSemester("all")}
+                  className={`px-4 py-2 rounded-lg transition-colors flex-1 ${
+                    selectedSemester === "all" 
+                      ? "bg-gray-600 text-white" 
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  All ({classes.length})
+                </button>
+                <button
+                  onClick={() => setSelectedSemester("1st Semester")}
+                  className={`px-4 py-2 rounded-lg transition-colors flex-1 ${
+                    selectedSemester === "1st Semester" 
+                      ? "bg-blue-600 text-white" 
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  1st Sem ({firstSemesterCount})
+                </button>
+                <button
+                  onClick={() => setSelectedSemester("2nd Semester")}
+                  className={`px-4 py-2 rounded-lg transition-colors flex-1 ${
+                    selectedSemester === "2nd Semester" 
+                      ? "bg-green-600 text-white" 
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  2nd Sem ({secondSemesterCount})
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -117,6 +150,9 @@ export default function FacultyClasses({ classes = [], activeSchoolYear, display
                       </span>
                       <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
                         {cls.student_count || 0} students
+                      </span>
+                      <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                        {cls.semester || '1st Semester'}
                       </span>
                     </div>
                   </div>

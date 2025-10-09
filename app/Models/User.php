@@ -33,17 +33,9 @@ class User extends Authenticatable
         'password_changed',
         'password_change_required',
         'last_login_at',
-        // Manual enrollment fields
+        // Manual enrollment fields (removed redundant columns - now in student_personal_info)
         'is_manual_enrollment',
         'enrolled_by_coordinator',
-        'guardian_name',
-        'guardian_contact',
-        'guardian_relationship',
-        'suffix',
-        'birthdate',
-        'gender',
-        'contact_number',
-        'address',
     ];
 
     /**

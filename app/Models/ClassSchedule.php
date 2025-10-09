@@ -27,9 +27,7 @@ class ClassSchedule extends Model
 
     protected $casts = [
         'duration' => 'integer',
-        'is_active' => 'boolean',
-        'start_time' => 'datetime:H:i',
-        'end_time' => 'datetime:H:i'
+        'is_active' => 'boolean'
     ];
 
     // Relationships
@@ -89,7 +87,17 @@ class ClassSchedule extends Model
     // Helper methods
     public function getTimeRangeAttribute()
     {
-        return $this->start_time . ' - ' . $this->end_time;
+        return $this->getFormattedStartTimeAttribute() . ' - ' . $this->getFormattedEndTimeAttribute();
+    }
+
+    public function getFormattedStartTimeAttribute()
+    {
+        return date('H:i', strtotime($this->start_time));
+    }
+
+    public function getFormattedEndTimeAttribute()
+    {
+        return date('H:i', strtotime($this->end_time));
     }
 
     public function getFacultyNameAttribute()

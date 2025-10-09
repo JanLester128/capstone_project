@@ -75,11 +75,21 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
 
   // Enhanced filtering and categorization logic
   const categorizeStudents = (students) => {
+    // Ensure students is an array to prevent errors
+    const safeStudents = Array.isArray(students) ? students : [];
+    
+    const newStudents = safeStudents.filter(s => s?.student_type === 'new' || s?.enrollment_status === 'new');
+    const transfereeStudents = safeStudents.filter(s => s?.student_type === 'transferee' || s?.previous_school);
+    const continuingStudents = safeStudents.filter(s => 
+      s?.student_type === 'continuing' || 
+      (s?.student_type !== 'new' && s?.student_type !== 'transferee' && !s?.previous_school)
+    );
+    
     return {
-      all: students,
-      new: students.filter(s => s.student_type === 'new' || s.enrollment_status === 'new' || s.grade_level === '11'),
-      continuing: students.filter(s => s.student_type === 'continuing' || s.grade_level === '12'),
-      transferee: students.filter(s => s.student_type === 'transferee' || s.previous_school)
+      all: safeStudents,
+      new: newStudents,
+      continuing: continuingStudents,
+      transferee: transfereeStudents
     };
   };
 
@@ -93,8 +103,10 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
 
   const getFilteredStudents = () => {
     const baseFiltered = (enrolledStudents || []).filter(student => {
+      if (!student) return false;
+      
       const matchesSearch = !searchTerm ||
-        `${student.firstname} ${student.lastname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        `${student.firstname || ''} ${student.lastname || ''}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (student.lrn && student.lrn.includes(searchTerm));
 
@@ -110,7 +122,10 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
   };
 
   const getSortedStudents = (studentsToSort) => {
-    return [...studentsToSort].sort((a, b) => {
+    const safeStudents = Array.isArray(studentsToSort) ? studentsToSort : [];
+    return [...safeStudents].sort((a, b) => {
+      if (!a || !b) return 0;
+      
       let aValue = a[sortField] || '';
       let bValue = b[sortField] || '';
 

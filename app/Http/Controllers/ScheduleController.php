@@ -1053,9 +1053,17 @@ class ScheduleController extends Controller
     {
         $conflicts = [];
         
-        // Calculate end time from start time and duration
-        $startTime = \Carbon\Carbon::createFromFormat('H:i', $data['start_time']);
-        $endTime = \Carbon\Carbon::createFromFormat('H:i', $data['end_time']);
+        // Normalize time formats - convert to H:i format for consistent comparison
+        $startTime = $this->normalizeTimeForComparison($data['start_time']);
+        $endTime = $this->normalizeTimeForComparison($data['end_time']);
+        
+        if (!$startTime || !$endTime) {
+            Log::error('Invalid time format in conflict check', [
+                'start_time' => $data['start_time'],
+                'end_time' => $data['end_time']
+            ]);
+            return ['error' => 'Invalid time format'];
+        }
         
         // Check section conflicts - prevent same section from having overlapping schedules
         $sectionConflicts = ClassSchedule::where('section_id', $data['section_id'])
@@ -1068,42 +1076,16 @@ class ScheduleController extends Controller
             ->with(['subject', 'faculty', 'section.strand'])
             ->get()
             ->filter(function ($schedule) use ($startTime, $endTime) {
-                // Handle different time formats from database
-                $scheduleStartTime = $schedule->start_time;
-                $scheduleEndTime = $schedule->end_time;
+                // Normalize schedule times for comparison
+                $scheduleStart = $this->normalizeTimeForComparison($schedule->start_time);
+                $scheduleEnd = $this->normalizeTimeForComparison($schedule->end_time);
                 
-                // Try multiple time formats: full datetime, H:i:s, then H:i format
-                try {
-                    // First try to parse as full datetime and extract time
-                    if (strlen($scheduleStartTime) > 8) {
-                        $scheduleStart = \Carbon\Carbon::parse($scheduleStartTime);
-                    } else {
-                        // Try H:i:s format first, then H:i format
-                        try {
-                            $scheduleStart = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleStartTime);
-                        } catch (\Exception $e) {
-                            $scheduleStart = \Carbon\Carbon::createFromFormat('H:i', $scheduleStartTime);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    Log::warning('Invalid start time format: ' . $scheduleStartTime);
-                    return false;
-                }
-                
-                try {
-                    // First try to parse as full datetime and extract time
-                    if (strlen($scheduleEndTime) > 8) {
-                        $scheduleEnd = \Carbon\Carbon::parse($scheduleEndTime);
-                    } else {
-                        // Try H:i:s format first, then H:i format
-                        try {
-                            $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleEndTime);
-                        } catch (\Exception $e) {
-                            $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i', $scheduleEndTime);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    Log::warning('Invalid end time format: ' . $scheduleEndTime);
+                if (!$scheduleStart || !$scheduleEnd) {
+                    Log::warning('Invalid schedule time format', [
+                        'schedule_id' => $schedule->id,
+                        'start_time' => $schedule->start_time,
+                        'end_time' => $schedule->end_time
+                    ]);
                     return false;
                 }
                 
@@ -1129,33 +1111,20 @@ class ScheduleController extends Controller
             ->when($excludeId, function ($query, $excludeId) {
                 return $query->where('id', '!=', $excludeId);
             })
-            ->with(['subject', 'section.strand']) // Load related data for detailed conflict info
+            ->with(['subject', 'section.strand'])
             ->get()
             ->filter(function ($schedule) use ($startTime, $endTime) {
-                // Handle different time formats from database
-                $scheduleStartTime = $schedule->start_time;
-                $scheduleEndTime = $schedule->end_time;
+                // Normalize schedule times for comparison
+                $scheduleStart = $this->normalizeTimeForComparison($schedule->start_time);
+                $scheduleEnd = $this->normalizeTimeForComparison($schedule->end_time);
                 
-                try {
-                    $scheduleStart = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleStartTime);
-                } catch (\Exception $e) {
-                    try {
-                        $scheduleStart = \Carbon\Carbon::createFromFormat('H:i', $scheduleStartTime);
-                    } catch (\Exception $e2) {
-                        Log::warning('Invalid start time format: ' . $scheduleStartTime);
-                        return false;
-                    }
-                }
-                
-                try {
-                    $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleEndTime);
-                } catch (\Exception $e) {
-                    try {
-                        $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i', $scheduleEndTime);
-                    } catch (\Exception $e2) {
-                        Log::warning('Invalid end time format: ' . $scheduleEndTime);
-                        return false;
-                    }
+                if (!$scheduleStart || !$scheduleEnd) {
+                    Log::warning('Invalid faculty schedule time format', [
+                        'schedule_id' => $schedule->id,
+                        'start_time' => $schedule->start_time,
+                        'end_time' => $schedule->end_time
+                    ]);
+                    return false;
                 }
                 
                 return $startTime->lt($scheduleEnd) && $endTime->gt($scheduleStart);
@@ -1185,30 +1154,17 @@ class ScheduleController extends Controller
                 ->with(['subject', 'section.strand', 'faculty'])
                 ->get()
                 ->filter(function ($schedule) use ($startTime, $endTime) {
-                    // Handle different time formats from database
-                    $scheduleStartTime = $schedule->start_time;
-                    $scheduleEndTime = $schedule->end_time;
+                    // Normalize schedule times for comparison
+                    $scheduleStart = $this->normalizeTimeForComparison($schedule->start_time);
+                    $scheduleEnd = $this->normalizeTimeForComparison($schedule->end_time);
                     
-                    try {
-                        $scheduleStart = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleStartTime);
-                    } catch (\Exception $e) {
-                        try {
-                            $scheduleStart = \Carbon\Carbon::createFromFormat('H:i', $scheduleStartTime);
-                        } catch (\Exception $e2) {
-                            Log::warning('Invalid start time format: ' . $scheduleStartTime);
-                            return false;
-                        }
-                    }
-                    
-                    try {
-                        $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i:s', $scheduleEndTime);
-                    } catch (\Exception $e) {
-                        try {
-                            $scheduleEnd = \Carbon\Carbon::createFromFormat('H:i', $scheduleEndTime);
-                        } catch (\Exception $e2) {
-                            Log::warning('Invalid end time format: ' . $scheduleEndTime);
-                            return false;
-                        }
+                    if (!$scheduleStart || !$scheduleEnd) {
+                        Log::warning('Invalid room schedule time format', [
+                            'schedule_id' => $schedule->id,
+                            'start_time' => $schedule->start_time,
+                            'end_time' => $schedule->end_time
+                        ]);
+                        return false;
                     }
                     
                     return $startTime->lt($scheduleEnd) && $endTime->gt($scheduleStart);
@@ -1456,6 +1412,23 @@ class ScheduleController extends Controller
         } catch (\Exception $e) {
             Log::warning('Failed to normalize time format: ' . $timeString);
             throw new \InvalidArgumentException('Invalid time format: ' . $timeString);
+        }
+    }
+
+    /**
+     * Normalize time for comparison - returns Carbon instance or null if invalid
+     */
+    private function normalizeTimeForComparison($timeString)
+    {
+        try {
+            // First normalize to H:i format
+            $normalizedTime = $this->normalizeTimeFormat($timeString);
+            
+            // Then create Carbon instance for comparison
+            return \Carbon\Carbon::createFromFormat('H:i', $normalizedTime);
+        } catch (\Exception $e) {
+            Log::warning('Failed to normalize time for comparison: ' . $timeString);
+            return null;
         }
     }
 }

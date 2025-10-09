@@ -209,21 +209,18 @@ export const AuthManager = {
       return '/login';
     }
     
-    // Check if there's a stored page to return to
-    const storedPage = this.getCurrentPage();
-    if (storedPage && storedPage !== '/login') {
-      // Validate that stored page is appropriate for user role
-      if (this.isValidPageForUser(storedPage, user.role)) {
-        console.log('AuthManager.getRedirectUrl(): Using stored page:', storedPage);
-        return storedPage;
-      } else {
-        console.log('AuthManager.getRedirectUrl(): Stored page invalid for user role, clearing:', storedPage);
-        this.clearCurrentPage();
-      }
+    // Simple redirect to dashboard based on role
+    switch (user.role.toLowerCase()) {
+      case 'student':
+        return '/student/dashboard';
+      case 'registrar':
+        return '/registrar/dashboard';
+      case 'faculty':
+      case 'coordinator':
+        return '/faculty/dashboard';
+      default:
+        return '/login';
     }
-    
-    // Fallback to dashboard
-    return this.getDashboardUrl();
   },
 
   // Get dashboard URL based on user role
@@ -269,6 +266,9 @@ export const AuthManager = {
     console.log('Current page stored:', this.getCurrentPage());
     console.log('Last activity updated:', new Date().toLocaleString());
     
+    // Clear any stuck redirect flags
+    this.clearRedirectFlags();
+    
     // Set up axios auth headers
     this.setAxiosAuth();
     
@@ -276,6 +276,13 @@ export const AuthManager = {
     if (this.isAuthenticated()) {
       this.updateLastActivity();
     }
+  },
+
+  // Clear redirect flags to prevent infinite loops
+  clearRedirectFlags() {
+    sessionStorage.removeItem('auth_redirect_in_progress');
+    sessionStorage.removeItem('login_redirect_in_progress');
+    sessionStorage.removeItem('redirect_count');
   },
 
   // Login method to store authentication data

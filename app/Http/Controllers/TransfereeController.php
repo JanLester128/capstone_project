@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use App\Models\Subject;
 use App\Models\Strand;
@@ -15,6 +16,11 @@ use App\Models\Enrollment;
 
 class TransfereeController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware('auth:sanctum');
+    }
+
     /**
      * Store previous school information for a transferee student
      */
@@ -295,6 +301,269 @@ class TransfereeController extends Controller
                 'success' => false,
                 'message' => 'Failed to retrieve statistics'
             ], 500);
+        }
+    }
+
+    /**
+     * Enroll transferee student with credited subjects in one action
+     */
+    public function enrollWithCreditedSubjects(Request $request)
+    {
+        // Debug authentication
+        Log::info('TransfereeController::enrollWithCreditedSubjects called', [
+            'user_id' => Auth::id(),
+            'user_role' => Auth::user()->role,
+            'request_data' => $request->all()
+        ]);
+        
+        // Debug: Check if student exists
+        $studentExists = User::where('id', $request->student_id)->where('role', 'student')->first();
+        Log::info('Student existence check', [
+            'requested_student_id' => $request->student_id,
+            'student_exists' => $studentExists ? 'yes' : 'no',
+            'student_name' => $studentExists ? $studentExists->name : 'N/A'
+        ]);
+
+        if (!$studentExists) {
+            return redirect()->back()->with([
+                'swal' => [
+                    'type' => 'error',
+                    'title' => 'Student Not Found',
+                    'text' => 'The student with ID ' . $request->student_id . ' does not exist.',
+                    'icon' => 'error',
+                    'confirmButtonText' => 'OK'
+                ]
+            ]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'student_id' => 'required|exists:users,id',
+            'section_id' => 'required|exists:sections,id',
+            'strand_id' => 'required|exists:strands,id',
+            'credited_subjects' => 'required|array|min:1',
+            'credited_subjects.*.subject_id' => 'required|exists:subjects,id',
+            'credited_subjects.*.grade' => 'required|numeric|min:75|max:100',
+            'credited_subjects.*.semester' => 'required|in:1st Semester,2nd Semester',
+            'school_year' => 'required|string|max:20',
+            'remarks' => 'nullable|string'
+        ]);
+
+        if ($validator->fails()) {
+            Log::error('TransfereeController validation failed', [
+                'errors' => $validator->errors()->toArray(),
+                'request_data' => $request->all()
+            ]);
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $studentId = $request->student_id;
+            $student = User::find($studentId);
+
+            // Verify this is a transferee student
+            $studentPersonalInfo = DB::table('student_personal_info')
+                ->where('user_id', $studentId)
+                ->first();
+            
+            $isTransferee = ($student && $student->student_type === 'transferee') || 
+                           ($studentPersonalInfo && $studentPersonalInfo->student_status === 'Transferee');
+            
+            if (!$isTransferee) {
+                return redirect()->back()->with([
+                    'swal' => [
+                        'type' => 'error',
+                        'title' => 'Access Denied',
+                        'text' => 'This function is only available for transferee students',
+                        'icon' => 'error',
+                        'confirmButtonText' => 'OK'
+                    ]
+                ]);
+            }
+
+            // Get active school year
+            $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+            if (!$activeSchoolYear) {
+                return redirect()->back()->with([
+                    'swal' => [
+                        'type' => 'error',
+                        'title' => 'No Active School Year',
+                        'text' => 'No active school year found. Please contact the registrar.',
+                        'icon' => 'error',
+                        'confirmButtonText' => 'OK'
+                    ]
+                ]);
+            }
+
+            // 1. Create or update enrollment record
+            Log::info('Creating enrollment record', [
+                'student_id' => $studentId,
+                'school_year_id' => $activeSchoolYear->id,
+                'section_id' => $request->section_id,
+                'strand_id' => $request->strand_id
+            ]);
+            
+            $enrollment = Enrollment::updateOrCreate(
+                [
+                    'student_id' => $studentId,
+                    'school_year_id' => $activeSchoolYear->id
+                ],
+                [
+                    'assigned_section_id' => $request->section_id,
+                    'strand_id' => $request->strand_id,
+                    'status' => 'enrolled',
+                    'enrollment_date' => now(),
+                    'enrolled_by' => Auth::id(),
+                    'student_type' => 'transferee'
+                ]
+            );
+            
+            Log::info('Enrollment record created/updated', [
+                'enrollment_id' => $enrollment->id,
+                'status' => $enrollment->status,
+                'assigned_section_id' => $enrollment->assigned_section_id
+            ]);
+
+            // 2. Store credited subjects with grades
+            $creditedSubjects = [];
+            
+            Log::info('Processing credited subjects', [
+                'student_id' => $studentId,
+                'credited_subjects_count' => count($request->credited_subjects),
+                'credited_subjects_data' => $request->credited_subjects
+            ]);
+            
+            foreach ($request->credited_subjects as $subjectData) {
+                Log::info('Processing individual credited subject', [
+                    'student_id' => $studentId,
+                    'subject_data' => $subjectData
+                ]);
+                
+                // Remove existing credit for this subject if any
+                $deletedCount = TransfereeCreditedSubject::where([
+                    'student_id' => $studentId,
+                    'subject_id' => $subjectData['subject_id']
+                ])->delete();
+                
+                Log::info('Deleted existing credits', [
+                    'student_id' => $studentId,
+                    'subject_id' => $subjectData['subject_id'],
+                    'deleted_count' => $deletedCount
+                ]);
+
+                // Create new credit record
+                try {
+                    $creditedSubject = TransfereeCreditedSubject::create([
+                        'student_id' => $studentId,
+                        'subject_id' => $subjectData['subject_id'],
+                        'grade' => $subjectData['grade'],
+                        'semester' => $subjectData['semester'],
+                        'school_year' => $request->school_year,
+                        'remarks' => $request->remarks
+                    ]);
+
+                    Log::info('Created credited subject record', [
+                        'credited_subject_id' => $creditedSubject->id,
+                        'student_id' => $studentId,
+                        'subject_id' => $subjectData['subject_id'],
+                        'grade' => $subjectData['grade'],
+                        'semester' => $subjectData['semester']
+                    ]);
+
+                    $creditedSubjects[] = $creditedSubject;
+                } catch (\Exception $e) {
+                    Log::error('Failed to create credited subject record', [
+                        'student_id' => $studentId,
+                        'subject_data' => $subjectData,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    throw $e;
+                }
+            }
+
+            // 3. Create class details for non-credited subjects in the assigned section
+            $sectionSubjects = \App\Models\ClassSchedule::where('section_id', $request->section_id)
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->pluck('subject_id')
+                ->unique();
+
+            $creditedSubjectIds = collect($request->credited_subjects)->pluck('subject_id');
+
+            foreach ($sectionSubjects as $subjectId) {
+                if (!$creditedSubjectIds->contains($subjectId)) {
+                    // Find the class for this subject and section
+                    $class = \App\Models\ClassSchedule::where('section_id', $request->section_id)
+                        ->where('subject_id', $subjectId)
+                        ->where('school_year_id', $activeSchoolYear->id)
+                        ->first();
+
+                    if ($class) {
+                        // Create class detail for non-credited subject
+                        \App\Models\ClassDetail::updateOrCreate(
+                            [
+                                'class_id' => $class->id,
+                                'enrollment_id' => $enrollment->id
+                            ],
+                            [
+                                'student_id' => $studentPersonalInfo->id, // Use student_personal_info ID for foreign key
+                                'section_id' => $request->section_id,
+                                'is_enrolled' => true,
+                                'enrolled_at' => now()
+                            ]
+                        );
+                    }
+                }
+            }
+
+            Log::info('About to commit transaction', [
+                'student_id' => $studentId,
+                'enrollment_id' => $enrollment->id,
+                'credited_subjects_created' => count($creditedSubjects)
+            ]);
+            
+            DB::commit();
+            
+            Log::info('Transaction committed successfully', [
+                'student_id' => $studentId,
+                'enrollment_id' => $enrollment->id
+            ]);
+
+            Log::info('Transferee student enrolled with credited subjects', [
+                'student_id' => $studentId,
+                'section_id' => $request->section_id,
+                'credited_subjects_count' => count($creditedSubjects),
+                'enrollment_id' => $enrollment->id
+            ]);
+
+            return redirect()->back()->with([
+                'swal' => [
+                    'type' => 'success',
+                    'title' => 'Enrollment Successful!',
+                    'text' => 'Transferee student enrolled successfully with ' . count($creditedSubjects) . ' credited subjects.',
+                    'icon' => 'success',
+                    'timer' => 3000,
+                    'showConfirmButton' => false
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error enrolling transferee with credited subjects: ' . $e->getMessage(), [
+                'student_id' => $request->student_id ?? 'unknown',
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return redirect()->back()->with([
+                'swal' => [
+                    'type' => 'error',
+                    'title' => 'Enrollment Failed',
+                    'text' => 'Failed to enroll student with credited subjects: ' . $e->getMessage(),
+                    'icon' => 'error',
+                    'confirmButtonText' => 'OK'
+                ]
+            ]);
         }
     }
 }

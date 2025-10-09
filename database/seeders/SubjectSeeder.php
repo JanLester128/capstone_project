@@ -53,7 +53,7 @@ class SubjectSeeder extends Seeder
     private function createABMSubjects($strandId, $schoolYearId = null)
     {
         $subjects = [
-            // Grade 11 - 1st Semester
+            // Grade 11 - 1st Semester (1st and 2nd qrtr)
             ['name' => 'Oral Communication', 'code' => 'ABM-OC-11', 'semester' => 1, 'year_level' => '11'],
             ['name' => 'Komunikasyon at Pananaliksik sa Wika at Kulturang Pilipino', 'code' => 'ABM-KPWKP-11', 'semester' => 1, 'year_level' => '11'],
             ['name' => 'General Mathematics', 'code' => 'ABM-GM-11', 'semester' => 1, 'year_level' => '11'],
@@ -64,7 +64,7 @@ class SubjectSeeder extends Seeder
             ['name' => 'Organization and Management', 'code' => 'ABM-OM-11', 'semester' => 1, 'year_level' => '11'],
             ['name' => 'Business Math', 'code' => 'ABM-BM-11', 'semester' => 1, 'year_level' => '11'],
 
-            // Grade 11 - 2nd Semester
+            // Grade 11 - 2nd Semester (3rd and 4th qrtr)
             ['name' => 'Reading and Writing', 'code' => 'ABM-RW-11', 'semester' => 2, 'year_level' => '11'],
             ['name' => 'Pagbasa at Pagsusuri ng Iba\'t ibang Teksto Tungo sa Pananaliksik', 'code' => 'ABM-PPITSP-11', 'semester' => 2, 'year_level' => '11'],
             ['name' => 'Statistics and Probability', 'code' => 'ABM-SP-11', 'semester' => 2, 'year_level' => '11'],

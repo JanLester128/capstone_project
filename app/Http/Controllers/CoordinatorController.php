@@ -1111,7 +1111,13 @@ class CoordinatorController extends Controller
         try {
             $validated = $request->validate([
                 'strand' => 'required|string',
-                'section_id' => 'required|exists:sections,id'
+                'section_id' => 'required|exists:sections,id',
+                'student_type' => 'nullable|string',
+                'credited_subjects' => 'nullable|array',
+                'credited_subjects.*.subject_id' => 'required_with:credited_subjects|exists:subjects,id',
+                'credited_subjects.*.grade' => 'required_with:credited_subjects|numeric|min:75|max:100',
+                'credited_subjects.*.semester_completed' => 'nullable|string',
+                'credited_subjects.*.is_credited' => 'nullable|boolean'
             ]);
             
             $student = Student::findOrFail($studentId);
@@ -1125,7 +1131,7 @@ class CoordinatorController extends Controller
             ]);
             
             // Create enrollment record
-            Enrollment::create([
+            $enrollment = Enrollment::create([
                 'student_id' => $studentId,
                 'school_year_id' => SchoolYear::where('is_active', true)->first()->id,
                 'section_id' => $validated['section_id'],
@@ -1134,10 +1140,34 @@ class CoordinatorController extends Controller
                 'enrollment_date' => now()
             ]);
             
+            // Create class_details records for all classes in the student's section and strand
+            $this->createClassDetailsForEnrolledStudent($enrollment->id, $validated['section_id'], $section->strand_id, SchoolYear::where('is_active', true)->first()->id);
+            
+            // Handle transferee credited subjects if provided
+            if (!empty($validated['credited_subjects'])) {
+                foreach ($validated['credited_subjects'] as $creditedSubject) {
+                    \App\Models\TransfereeCreditedSubject::create([
+                        'student_id' => $student->user_id, // Use user_id as student_id
+                        'subject_id' => $creditedSubject['subject_id'],
+                        'grade' => $creditedSubject['grade'],
+                        'semester' => $creditedSubject['semester_completed'] ?? '1st Semester',
+                        'school_year' => SchoolYear::where('is_active', true)->first()->year_start . '-' . SchoolYear::where('is_active', true)->first()->year_end,
+                        'remarks' => 'Credited during enrollment'
+                    ]);
+                }
+                
+                Log::info('Transferee credits saved', [
+                    'student_id' => $studentId,
+                    'credited_subjects_count' => count($validated['credited_subjects']),
+                    'credited_subjects' => $validated['credited_subjects']
+                ]);
+            }
+            
             Log::info('Student enrollment finalized', [
                 'student_id' => $studentId,
                 'section_id' => $validated['section_id'],
-                'coordinator_id' => $request->user()->id
+                'coordinator_id' => $request->user()->id,
+                'credited_subjects_count' => count($validated['credited_subjects'] ?? [])
             ]);
             
             return redirect()->back()->with('success', 'Student enrollment has been finalized successfully.');
@@ -1158,12 +1188,16 @@ class CoordinatorController extends Controller
     private function createClassDetailsForEnrolledStudent($enrollmentId, $sectionId, $strandId, $schoolYearId)
     {
         try {
-            // Get all class schedules for the student's section and strand
+            // Get all class schedules for the student's section (both core and strand-specific subjects)
             $classSchedules = DB::table('class')
                 ->join('subjects', 'class.subject_id', '=', 'subjects.id')
                 ->where('class.section_id', $sectionId)
                 ->where('class.school_year_id', $schoolYearId)
-                ->where('subjects.strand_id', $strandId)
+                ->where(function($query) use ($strandId) {
+                    // Include both core subjects (strand_id = NULL) and strand-specific subjects
+                    $query->whereNull('subjects.strand_id')
+                          ->orWhere('subjects.strand_id', $strandId);
+                })
                 ->where('class.is_active', true)
                 ->select('class.id as class_id')
                 ->get();

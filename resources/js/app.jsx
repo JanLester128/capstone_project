@@ -5,14 +5,22 @@ import { createRoot } from 'react-dom/client';
 import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { AuthManager } from './auth';
-import { AuthCheck } from './middleware/AuthCheck';
+import AuthPersistence from './components/AuthPersistence';
 import { setupPagePersistence } from './utils/pageAuth';
 import axios from 'axios';
 import { router } from '@inertiajs/react';
 
-// Configure axios globally
+// Configure axios globally for Laravel web authentication
 axios.defaults.withCredentials = true;
 axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+
+// Set CSRF token from meta tag
+const token = document.head.querySelector('meta[name="csrf-token"]');
+if (token) {
+    axios.defaults.headers.common['X-CSRF-TOKEN'] = token.content;
+} else {
+    console.error('CSRF token not found: https://laravel.com/docs/csrf#csrf-x-csrf-token');
+}
 
 // Make axios available globally
 window.axios = axios;
@@ -21,42 +29,23 @@ window.axios = axios;
 AuthManager.init();
 setupPagePersistence();
 
-// Set up axios request interceptor to add auth headers
-axios.interceptors.request.use(
-  (config) => {
-    const token = AuthManager.getCurrentToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
 // Set up axios response interceptor to handle auth errors
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      console.log('Axios: 401 Unauthorized - clearing auth and redirecting to login');
-      AuthManager.clearAuth();
-      if (window.location.pathname !== '/login') {
+      console.log('Axios: 401 Unauthorized detected');
+      
+      // Only redirect if not already on login page and user is not authenticated
+      if (window.location.pathname !== '/login' && !AuthManager.isAuthenticated()) {
+        console.log('Axios: Clearing auth and redirecting to login');
+        AuthManager.clearAuth();
         window.location.href = '/login';
       }
     }
     return Promise.reject(error);
   }
 );
-
-// Get CSRF cookie on app startup
-axios.get('/sanctum/csrf-cookie').then(() => {
-    // CSRF cookie is now set
-    console.log('CSRF cookie set');
-}).catch(error => {
-    console.error('Failed to set CSRF cookie:', error);
-});
 
 // Track page changes with Inertia router
 router.on('navigate', (event) => {
@@ -84,9 +73,9 @@ createInertiaApp({
     const root = createRoot(el);
 
     root.render(
-      <AuthCheck>
+      <AuthPersistence>
         <App {...props} />
-      </AuthCheck>
+      </AuthPersistence>
     );
   },
 });

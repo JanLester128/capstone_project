@@ -65,6 +65,40 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [subjects, setSubjects] = useState([]);
   const [isStudentEnrolled, setIsStudentEnrolled] = useState(false);
+
+  // Auto-fetch schedules when COR modal opens and strand/section are available
+  useEffect(() => {
+    if (showCORModal && selectedStudentForCOR && selectedStrand && selectedSection) {
+      console.log('Auto-fetching schedules for COR modal:', {
+        studentId: selectedStudentForCOR.id,
+        strand: selectedStrand,
+        section: selectedSection
+      });
+      fetchClassSchedulesForStudent(selectedStudentForCOR.id, selectedStrand, selectedSection);
+    } else if (showCORModal && selectedStudentForCOR) {
+      console.log('COR modal opened but missing strand/section:', {
+        studentId: selectedStudentForCOR.id,
+        strand: selectedStrand,
+        section: selectedSection,
+        studentData: {
+          strand_preferences: selectedStudentForCOR.strand_preferences,
+          assigned_section_id: selectedStudentForCOR.assigned_section_id
+        }
+      });
+    }
+  }, [showCORModal, selectedStudentForCOR, selectedStrand, selectedSection]);
+
+  // Additional useEffect to handle cases where strand/section are set after modal opens
+  useEffect(() => {
+    if (showCORModal && selectedStudentForCOR && selectedStrand && selectedSection && classSchedules.length === 0) {
+      console.log('Schedules empty, triggering fetch:', {
+        studentId: selectedStudentForCOR.id,
+        strand: selectedStrand,
+        section: selectedSection
+      });
+      fetchClassSchedulesForStudent(selectedStudentForCOR.id, selectedStrand, selectedSection);
+    }
+  }, [selectedStrand, selectedSection]);
   
   // Transferee credit management states
   const [creditedSubjects, setCreditedSubjects] = useState([]);
@@ -161,7 +195,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           return {
             subject_id: subjectId,
             grade: subjectGrades[subjectId],
-            semester: subject?.semester || '1st',
+            semester: subject?.semester || '1st Semester',
             school_year: '2023-2024', // Previous school year
             remarks: 'Credited from previous school'
           };
@@ -221,6 +255,142 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
   };
 
+  // Enroll transferee student with credited subjects in one action
+  const enrollTransfereeWithCredits = async () => {
+    if (!selectedStudentForCOR || !selectedSection || !selectedStrand) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Missing Information',
+        text: 'Please select strand and section, and add at least one credited subject.',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
+    // Check if credited subjects are selected
+    if (creditedSubjects.length === 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'No Credited Subjects',
+        text: 'Please select at least one credited subject with a valid grade.',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
+    // Validate that all credited subjects have valid grades
+    const missingGrades = creditedSubjects.filter(subjectId => 
+      !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
+    );
+    
+    if (missingGrades.length > 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Invalid Grades',
+        text: 'Please enter valid grades (75-100) for all credited subjects.',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      // Prepare credited subjects data
+      const creditData = creditedSubjects.map(subjectId => {
+        const subject = subjects.find(s => s.id === subjectId);
+        return {
+          subject_id: subjectId,
+          grade: subjectGrades[subjectId],
+          semester: subject?.semester || '1st Semester'
+        };
+      });
+
+      // Find the strand ID from the selected strand code
+      const strandObj = availableStrands.find(s => s.code === selectedStrand);
+      const strandId = strandObj ? strandObj.id : null;
+
+      if (!strandId) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Invalid Strand',
+          text: 'Please select a valid strand.',
+          confirmButtonColor: '#3b82f6'
+        });
+        return;
+      }
+
+      console.log('Enrolling transferee with data:', {
+        student_id: selectedStudentForCOR.user.id,
+        section_id: selectedSection,
+        strand_id: strandId,
+        strand_code: selectedStrand,
+        credited_subjects: creditData,
+        credited_subjects_count: creditData.length,
+        creditedSubjects_array: creditedSubjects,
+        creditedSubjects_length: creditedSubjects.length,
+        subjectGrades: subjectGrades,
+        school_year: '2023-2024'
+      });
+
+      // Use Inertia router for proper authentication handling
+      router.post('/faculty/transferee/enroll-with-credits', {
+        student_id: selectedStudentForCOR.user.id,
+        section_id: selectedSection,
+        strand_id: strandId, // Use strand ID instead of code
+        credited_subjects: creditData,
+        school_year: '2023-2024', // Previous school year for credits
+        remarks: 'Transferred student with credited subjects'
+      }, {
+        onSuccess: (response) => {
+          // Remove student from transferee list
+          setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+          
+          // Close modal and reset states
+          setShowCORModal(false);
+          setSelectedStudentForCOR(null);
+          setSelectedStrand("");
+          setSelectedSection("");
+          setSelectedSubjects([]);
+          setClassSchedules([]);
+          setCreditedSubjects([]);
+          setSubjectGrades({});
+          setIsStudentEnrolled(false);
+
+          // Show success message
+          Swal.fire({
+            icon: 'success',
+            title: 'Enrollment Successful!',
+            text: `Student enrolled successfully with credited subjects.`,
+            timer: 3000,
+            showConfirmButton: false
+          });
+        },
+        onError: (errors) => {
+          console.error('Error enrolling transferee student:', errors);
+          Swal.fire({
+            icon: 'error',
+            title: 'Enrollment Failed',
+            text: errors.message || 'Failed to enroll student. Please try again.',
+            confirmButtonColor: '#3b82f6'
+          });
+        },
+        onFinish: () => {
+          setIsSubmitting(false);
+        }
+      });
+
+    } catch (error) {
+      console.error('Error enrolling transferee student:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Enrollment Failed',
+        text: error.message || 'Failed to enroll student. Please try again.',
+        confirmButtonColor: '#3b82f6'
+      });
+      setIsSubmitting(false);
+    }
+  };
 
   // Print handler - removes student from pending list after successful print
   const handlePrintCOR = () => {
@@ -244,6 +414,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       setSelectedStrand("");
       setSelectedSection("");
       setSelectedSubjects([]);
+      setClassSchedules([]); // Clear schedules
       setIsStudentEnrolled(false); // Reset enrollment status
       
       // Show completion message
@@ -281,6 +452,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
     
     // Clear credited subjects when strand changes (since available subjects change)
+    console.log('Clearing credited subjects due to strand change. Previous count:', creditedSubjects.length);
     setCreditedSubjects([]);
     setSubjectGrades({});
   }, [selectedStrand]);
@@ -342,7 +514,15 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
 
   // Fetch subjects for a specific strand from API
   const fetchSubjectsForStrand = async (strandCode) => {
-    if (!strandCode) {
+    if (!strandCode || strandCode === 'No preferences specified' || strandCode === 'all') {
+      setSubjects([]);
+      return;
+    }
+
+    // Check if strandCode is a valid strand from availableStrands
+    const validStrand = availableStrands.find(strand => strand.code === strandCode);
+    if (!validStrand) {
+      console.log('Invalid strand code, skipping subject fetch:', strandCode);
       setSubjects([]);
       return;
     }
@@ -433,7 +613,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
   };
 
-  const handleApproveStudent = (studentId) => {
+  const handleApproveStudent = async (studentId) => {
     let student = null;
     if (activeTab === 'new') {
       student = newStudents.find(s => s.id === studentId);
@@ -444,17 +624,139 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
     
     if (student) {
-      // Debug logging to see what student data we have
-      console.log('Selected student for COR:', {
-        id: student.id,
-        name: student.user?.firstname + ' ' + student.user?.lastname,
-        user_student_type: student.user?.student_type,
-        student_status: student.student_status,
-        student_type: student.student_type,
-        activeTab: activeTab
-      });
+      // For transferee students, fetch complete data including previous school info
+      // TEMPORARILY DISABLED - Skip API call due to JSON parsing error
+      if (false && (activeTab === 'transferee' || student.student_status === 'Transferee')) {
+        try {
+          const response = await fetch(`/faculty/student-details/${studentId}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('Student details API response:', data);
+            // Merge the complete data with the existing student object
+            const completeStudent = {
+              ...student,
+              ...(data.student || data),
+              credited_subjects: data.credited_subjects || [],
+              is_transferee: data.is_transferee || false,
+              previous_school: data.previous_school || data.last_school,
+              last_school: data.last_school || student.last_school,
+              // Convert credited subjects to IDs for easy lookup
+              credited_subject_ids: (data.credited_subjects || []).map(cs => cs.id)
+            };
+            
+            setSelectedStudentForCOR(completeStudent);
+            
+            // Auto-select strand and section if available in student data
+            console.log('Complete student data for auto-selection:', completeStudent);
+            
+            // Try multiple ways to get strand information
+            let strandToSelect = null;
+            if (completeStudent.strand_preferences && completeStudent.strand_preferences.length > 0) {
+              const firstStrand = completeStudent.strand_preferences[0];
+              const potentialStrand = typeof firstStrand === 'object' ? firstStrand.code : firstStrand;
+              // Don't use if it's the default "No preferences specified" text
+              if (potentialStrand && potentialStrand !== 'No preferences specified') {
+                strandToSelect = potentialStrand;
+              }
+            } else if (completeStudent.strand_code) {
+              strandToSelect = completeStudent.strand_code;
+            } else if (completeStudent.strand_name) {
+              // Find strand code by name
+              const strand = availableStrands.find(s => s.name === completeStudent.strand_name);
+              strandToSelect = strand ? strand.code : null;
+            }
+            
+            if (strandToSelect) {
+              console.log('Auto-selecting strand:', strandToSelect);
+              setSelectedStrand(strandToSelect);
+            }
+            
+            // Try multiple ways to get section information
+            let sectionToSelect = null;
+            if (completeStudent.assigned_section_id) {
+              sectionToSelect = completeStudent.assigned_section_id;
+            } else if (completeStudent.section_id) {
+              sectionToSelect = completeStudent.section_id;
+            }
+            
+            if (sectionToSelect) {
+              console.log('Auto-selecting section:', sectionToSelect);
+              setSelectedSection(sectionToSelect);
+            }
+          } else {
+            // Log the error response
+            console.error('API request failed:', {
+              status: response.status,
+              statusText: response.statusText,
+              url: response.url
+            });
+            
+            try {
+              const errorText = await response.text();
+              console.error('Error response body:', errorText.substring(0, 500));
+            } catch (e) {
+              console.error('Could not read error response:', e);
+            }
+            
+            // Fallback to original student data if fetch fails
+            setSelectedStudentForCOR(student);
+            
+            // Try to auto-select from original student data
+            if (student.strand_preferences && student.strand_preferences.length > 0) {
+              const firstStrand = student.strand_preferences[0];
+              const strandCode = typeof firstStrand === 'object' ? firstStrand.code : firstStrand;
+              // Don't auto-select if it's the default "No preferences specified" text
+              if (strandCode && strandCode !== 'No preferences specified') {
+                setSelectedStrand(strandCode);
+              }
+            }
+            
+            if (student.assigned_section_id) {
+              setSelectedSection(student.assigned_section_id);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching complete student data:', error);
+          console.error('Response status:', response?.status);
+          console.error('Response headers:', response?.headers);
+          
+          // Try to get the response text to see what was returned
+          try {
+            const responseText = await response?.text();
+            console.error('Response text:', responseText?.substring(0, 500));
+          } catch (textError) {
+            console.error('Could not read response text:', textError);
+          }
+          
+          // Fallback to original student data
+          setSelectedStudentForCOR(student);
+        }
+      } else {
+        // For non-transferee students, use original data
+        setSelectedStudentForCOR(student);
+        
+        // Auto-select strand and section for non-transferee students too
+        if (student.strand_preferences && student.strand_preferences.length > 0) {
+          const firstStrand = student.strand_preferences[0];
+          const strandCode = typeof firstStrand === 'object' ? firstStrand.code : firstStrand;
+          // Don't auto-select if it's the default "No preferences specified" text
+          if (strandCode && strandCode !== 'No preferences specified') {
+            setSelectedStrand(strandCode);
+          }
+        }
+        
+        if (student.assigned_section_id) {
+          setSelectedSection(student.assigned_section_id);
+        }
+      }
       
-      setSelectedStudentForCOR(student);
       setIsStudentEnrolled(false); // Reset enrollment status
       setShowCORModal(true);
     }
@@ -507,7 +809,13 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       });
 
       if (response.ok) {
-        const student = await response.json();
+        const data = await response.json();
+        // Handle both old format (direct student) and new format (with credited_subjects)
+        const student = data.student || data;
+        student.credited_subjects = data.credited_subjects || [];
+        student.is_transferee = data.is_transferee || false;
+        student.previous_school = data.previous_school || student.last_school;
+        
         setSelectedStudent(student);
         setShowModal(true);
       } else {
@@ -625,22 +933,44 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       return;
     }
 
-    // For transferee students, save credits first if any are selected
-    if ((selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') && creditedSubjects.length > 0) {
-      await saveCreditedSubjects();
+    // Validate transferee credits if any are selected
+    const isTransferee = selectedStudentForCOR?.student_type === 'transferee' || 
+                        selectedStudentForCOR?.user?.student_type === 'transferee' || 
+                        selectedStudentForCOR?.student_status === 'Transferee';
+    
+    if (isTransferee && creditedSubjects.length > 0) {
+      // Check if all credited subjects have valid grades
+      const missingGrades = creditedSubjects.filter(subjectId => 
+        !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
+      );
+      
+      if (missingGrades.length > 0) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Missing Grades',
+          text: 'Please enter valid grades (75-100) for all credited subjects before enrolling the student.',
+          confirmButtonColor: '#3b82f6'
+        });
+        return;
+      }
     }
 
     try {
       setIsSubmitting(true);
 
       router.post(`/coordinator/students/${selectedStudentForCOR.id}/finalize`, {
-        strand: selectedStrand,
+        strand: selectedStrand, // Keep as strand code for regular enrollment
         section_id: selectedSection,
         // Include subjects only if selected; backend accepts nullable array
         subjects: selectedSubjects && selectedSubjects.length > 0 ? selectedSubjects : undefined,
         // Include transferee credit information
         student_type: selectedStudentForCOR.user?.student_type || selectedStudentForCOR.student_status,
-        credited_subjects: (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? creditedSubjects : []
+        credited_subjects: isTransferee ? creditedSubjects.map(subjectId => ({
+          subject_id: subjectId,
+          grade: subjectGrades[subjectId],
+          semester_completed: subjects.find(s => s.id === subjectId)?.semester || '1st Semester',
+          is_credited: true
+        })) : []
       }, {
         onSuccess: () => {
           Swal.fire({
@@ -971,166 +1301,341 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
 
             <div className="p-8 space-y-8">
               {/* Personal Information */}
-              <div className="bg-gray-50 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                  <FaUser className="mr-3 text-purple-600" />
-                  Personal Information
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Full Name</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.user?.firstname} {selectedStudent.user?.lastname}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Name Extension</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.extension_name || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Email</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.user?.email}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">LRN</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.lrn || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Grade Level</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.grade_level || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Student Status</label>
-                    <div className="mt-1">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
-                        selectedStudent.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
-                          selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
-                            'bg-gray-100 text-gray-800'
-                        }`}>
-                        {selectedStudent.student_status || 'New Student'}
-                      </span>
+              <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 px-6 py-4 rounded-t-xl">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                      <FaUser className="text-blue-600 text-sm" />
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Age</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.age || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Sex</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.sex || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Birthdate</label>
-                    <p className="text-gray-800 font-medium mt-1">
-                      {selectedStudent.birthdate ?
-                        new Date(selectedStudent.birthdate).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        }) : 'N/A'
-                      }
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Birth Place</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.birth_place || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Religion</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.religion || 'N/A'}</p>
-                  </div>
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Address</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.address || 'N/A'}</p>
+                    Personal Information
+                  </h3>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Row 1 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Full Name</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900 font-medium">{selectedStudent.user?.firstname} {selectedStudent.user?.lastname}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Name Extension</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.extension_name || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 2 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Email Address</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.user?.email}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Learner Reference Number (LRN)</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900 font-mono">{selectedStudent.lrn || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 3 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Grade Level</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900 font-medium">{selectedStudent.grade_level || 'N/A'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Student Status</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                          selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
+                          selectedStudent.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
+                          selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {selectedStudent.student_status || 'New Student'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 4 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Age</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.age || 'N/A'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Sex</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.sex || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 5 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Date of Birth</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">
+                          {selectedStudent.birthdate ?
+                            new Date(selectedStudent.birthdate).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            }) : 'N/A'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Place of Birth</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.birth_place || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 6 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Religion</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.religion || 'N/A'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Complete Address</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.address || 'N/A'}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Academic Information */}
-              <div className="bg-blue-50 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                  <FaGraduationCap className="mr-3 text-blue-600" />
-                  Academic Information
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Strand Preferences</label>
-                    <div className="mt-2 space-y-2">
-                      {selectedStudent.strand_preferences && selectedStudent.strand_preferences.length > 0 ? (
-                        selectedStudent.strand_preferences.map((preference, index) => (
-                          <div key={index} className="flex items-center space-x-2">
-                            <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-semibold">
-                              {index + 1}
-                            </span>
-                            <span className="text-gray-800 font-medium">
-                              {typeof preference === 'object' ? preference.name : preference}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-gray-500 italic">No strand preferences submitted</p>
-                      )}
+              <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-gray-200 px-6 py-4 rounded-t-xl">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+                      <FaGraduationCap className="text-green-600 text-sm" />
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Last Grade Completed</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.last_grade || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Last School Year</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.last_sy || 'N/A'}</p>
+                    Academic Information
+                  </h3>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Strand Preferences</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg min-h-[120px]">
+                        <div className="space-y-2">
+                          {selectedStudent.strand_preferences && selectedStudent.strand_preferences.length > 0 ? (
+                            selectedStudent.strand_preferences.map((preference, index) => (
+                              <div key={index} className="flex items-center space-x-3 p-2 bg-white rounded-lg border border-gray-100">
+                                <span className="w-6 h-6 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold flex items-center justify-center">
+                                  {index + 1}
+                                </span>
+                                <span className="text-gray-800 font-medium">
+                                  {typeof preference === 'object' ? preference.name : preference}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="flex items-center justify-center h-full">
+                              <span className="text-gray-500 italic">No strand preferences submitted</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">Last Grade Completed</label>
+                        <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <span className="text-gray-900 font-medium">{selectedStudent.last_grade || 'N/A'}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">Last School Year</label>
+                        <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <span className="text-gray-900 font-medium">{selectedStudent.last_sy || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Additional Information */}
-              <div className="bg-purple-50 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                  <FaInfoCircle className="mr-3 text-purple-600" />
-                  Additional Information
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">IP Community Member</label>
-                    <p className="text-gray-800 font-medium mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedStudent.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+              <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-gray-200 px-6 py-4 rounded-t-xl">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                      <FaInfoCircle className="text-purple-600 text-sm" />
+                    </div>
+                    Additional Information
+                  </h3>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Row 1 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">IP Community Member</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                          selectedStudent.ip_community === 'Yes' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                         }`}>
-                        {selectedStudent.ip_community || 'Not specified'}
-                      </span>
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">4Ps Beneficiary</label>
-                    <p className="text-gray-800 font-medium mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedStudent.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                          {selectedStudent.ip_community || 'Not specified'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">4Ps Beneficiary</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                          selectedStudent.four_ps === 'Yes' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
                         }`}>
-                        {selectedStudent.four_ps || 'Not specified'}
-                      </span>
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">PWD ID</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.pwd_id || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Guardian Name</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.guardian_name || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Guardian Contact</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.guardian_contact || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Last School Attended</label>
-                    <p className="text-gray-800 font-medium mt-1">{selectedStudent.last_school || 'N/A'}</p>
+                          {selectedStudent.four_ps || 'Not specified'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 2 */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">PWD ID</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.pwd_id || 'N/A'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Last School Attended</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900">{selectedStudent.last_school || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Row 3 - Guardian Information */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Guardian Name</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900 font-medium">{selectedStudent.guardian_name || 'N/A'}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Guardian Contact</label>
+                      <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <span className="text-gray-900 font-mono">{selectedStudent.guardian_contact || 'N/A'}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
+              {/* Transferee Credit Management - Only show for transferee students */}
+              {selectedStudent.is_transferee && (
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border-b border-gray-200 px-6 py-4 rounded-t-xl">
+                    <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                      <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center mr-3">
+                        <FaExchangeAlt className="text-indigo-600 text-sm" />
+                      </div>
+                      Transferee Credit Management
+                    </h3>
+                  </div>
+                  <div className="p-6">
+                    {/* Previous School Information */}
+                    <div className="mb-6">
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">Previous School</label>
+                        <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <span className="text-gray-900 font-medium">{selectedStudent.previous_school || selectedStudent.last_school || 'Not specified'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Credited Subjects */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-md font-semibold text-gray-800">Credited Subjects</h4>
+                        <span className="text-sm text-gray-600">
+                          {selectedStudent.credited_subjects?.length || 0} subjects credited
+                        </span>
+                      </div>
+                      
+                      {selectedStudent.credited_subjects && selectedStudent.credited_subjects.length > 0 ? (
+                        <div className="space-y-3">
+                          {selectedStudent.credited_subjects.map((subject, index) => (
+                            <div key={index} className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex-1">
+                                <div className="flex items-center space-x-3">
+                                  <span className="w-6 h-6 bg-green-100 text-green-800 rounded-full text-xs font-semibold flex items-center justify-center">
+                                    ✓
+                                  </span>
+                                  <div>
+                                    <p className="font-medium text-gray-900">{subject.name}</p>
+                                    <p className="text-sm text-gray-600">Code: {subject.code}</p>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="flex items-center space-x-4">
+                                  {subject.grade && (
+                                    <div className="text-center">
+                                      <p className="text-sm font-medium text-gray-700">Grade</p>
+                                      <p className="text-lg font-bold text-green-600">{subject.grade}</p>
+                                    </div>
+                                  )}
+                                  {subject.semester_completed && (
+                                    <div className="text-center">
+                                      <p className="text-sm font-medium text-gray-700">Semester</p>
+                                      <p className="text-sm text-gray-900">{subject.semester_completed}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                          <FaInfoCircle className="mx-auto text-4xl text-gray-400 mb-4" />
+                          <p className="text-gray-600 font-medium">No credited subjects found</p>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Credited subjects will be excluded from the student's COR when enrolled.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Note about COR exclusion */}
+                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-start space-x-3">
+                        <FaInfoCircle className="text-blue-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm text-blue-800 font-medium">Important Note</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            Credited subjects will automatically be excluded from this student's Certificate of Registration (COR) 
+                            when they are enrolled. Only remaining subjects for their chosen strand will appear in their schedule.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Documents & Images */}
-              <div className="bg-green-50 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                  <FaEye className="mr-3 text-green-600" />
-                  Submitted Documents
-                </h3>
+              <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-gray-200 px-6 py-4 rounded-t-xl">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center mr-3">
+                      <FaFileAlt className="text-orange-600 text-sm" />
+                    </div>
+                    Submitted Documents
+                  </h3>
+                </div>
+                <div className="p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {/* Student Photo */}
                   {selectedStudent.image && (
@@ -1218,6 +1723,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1253,14 +1759,14 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                   </div>
                   <div>
                     <p><strong>Student Type:</strong> <span className={`ml-1 px-2 py-1 rounded text-xs font-medium ${
-                      (selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New' || selectedStudentForCOR.student_type === 'New') ? 'bg-blue-100 text-blue-800' :
-                      (selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing' || selectedStudentForCOR.student_type === 'Continuing') ? 'bg-green-100 text-green-800' :
-                      (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee' || selectedStudentForCOR.student_type === 'Transferee') ? 'bg-purple-100 text-purple-800' :
+                      (selectedStudentForCOR.student_type === 'new' || selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New Student') ? 'bg-blue-100 text-blue-800' :
+                      (selectedStudentForCOR.student_type === 'continuing' || selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing') ? 'bg-green-100 text-green-800' :
+                      (selectedStudentForCOR.student_type === 'transferee' || selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? 'bg-purple-100 text-purple-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {(selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New' || selectedStudentForCOR.student_type === 'New') ? '🆕 New Student' :
-                       (selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing' || selectedStudentForCOR.student_type === 'Continuing') ? '🔄 Continuing Student' :
-                       (selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee' || selectedStudentForCOR.student_type === 'Transferee') ? '🎓 Transferee Student' :
+                      {(selectedStudentForCOR.student_type === 'new' || selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New Student') ? '🆕 New Student' :
+                       (selectedStudentForCOR.student_type === 'continuing' || selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing') ? '🔄 Continuing Student' :
+                       (selectedStudentForCOR.student_type === 'transferee' || selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? '🎓 Transferee Student' :
                        'Student'}
                     </span></p>
                     <p><strong>LRN:</strong> {selectedStudentForCOR.lrn || 'N/A'}</p>
@@ -1335,8 +1841,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                   </div>
                 </div>
 
-                {/* Transferee Credit Management Section - Only show for transferee students */}
-                {(selectedStudentForCOR?.user?.student_type === 'transferee' || selectedStudentForCOR?.student_status === 'Transferee' || selectedStudentForCOR?.student_type === 'Transferee') && (
+                {/* Transferee Credit Management Section - Integrated into Enrollment Process */}
+                {(selectedStudentForCOR?.student_type === 'transferee' || selectedStudentForCOR?.user?.student_type === 'transferee' || selectedStudentForCOR?.student_status === 'Transferee') && (
                   <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg print:hidden">
                     <h4 className="text-sm font-semibold mb-3 text-purple-800 flex items-center">
                       <FaUserGraduate className="mr-2" />
@@ -1347,9 +1853,9 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       <h5 className="text-sm font-medium text-purple-800 mb-2">Previous School Information</h5>
                       
                       {/* Show existing data if available */}
-                      {selectedStudentForCOR?.previous_schools && selectedStudentForCOR.previous_schools.length > 0 ? (
+                      {(selectedStudentForCOR?.previous_school || selectedStudentForCOR?.last_school) ? (
                         <div className="text-sm text-gray-700 bg-gray-50 p-2 rounded mb-2">
-                          <strong>Last School:</strong> {selectedStudentForCOR.previous_schools[0].last_school}
+                          <strong>Last School:</strong> {selectedStudentForCOR.previous_school || selectedStudentForCOR.last_school}
                         </div>
                       ) : (
                         /* Input form for new previous school info */
@@ -1369,7 +1875,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                                   console.log('Saving previous school for student:', selectedStudentForCOR.user.id);
                                   console.log('School name:', previousSchoolData.last_school.trim());
                                   
-                                  const response = await fetch('/coordinator/transferee/previous-school', {
+                                  const response = await fetch(`/faculty/transferee-previous-school/${selectedStudentForCOR.id}`, {
                                     method: 'POST',
                                     headers: {
                                       'Content-Type': 'application/json',
@@ -1378,8 +1884,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                                     },
                                     credentials: 'same-origin',
                                     body: JSON.stringify({
-                                      student_id: selectedStudentForCOR.user.id,
-                                      last_school: previousSchoolData.last_school.trim()
+                                      previous_school: previousSchoolData.last_school.trim()
                                     })
                                   });
 
@@ -1395,6 +1900,12 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                                       timer: 2000,
                                       showConfirmButton: false
                                     });
+                                    
+                                    // Update the student data to show the saved school
+                                    setSelectedStudentForCOR(prev => ({
+                                      ...prev,
+                                      previous_school: previousSchoolData.last_school.trim()
+                                    }));
                                     
                                     // Clear the input after successful save
                                     setPreviousSchoolData({last_school: ''});
@@ -1430,7 +1941,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       {subjects.filter(subject => 
                         !selectedStrand || subject.strand_code === selectedStrand || subject.strand_id === selectedStrand
                       ).map(subject => {
-                        const isAlreadyCredited = selectedStudentForCOR?.credited_subject_ids?.includes(subject.id);
+                        const isAlreadyCredited = creditedSubjects.includes(subject.id);
                         return (
                         <div key={subject.id} className={`flex items-center justify-between p-2 border rounded ${
                           isAlreadyCredited ? 'bg-green-50 border-green-200' : 'bg-white border-purple-200'
@@ -1440,9 +1951,34 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                               type="checkbox"
                               id={`credit-${subject.id}`}
                               className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                              onChange={(e) => handleSubjectCreditToggle(subject.id, e.target.checked)}
-                              disabled={isAlreadyCredited}
-                              checked={isAlreadyCredited || creditedSubjects.includes(subject.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  console.log('Adding subject to credited subjects:', subject.id, subject.name);
+                                  setCreditedSubjects(prev => {
+                                    const newArray = [...prev, subject.id];
+                                    console.log('New credited subjects array:', newArray);
+                                    return newArray;
+                                  });
+                                  // Set default grade if not set
+                                  if (!subjectGrades[subject.id]) {
+                                    setSubjectGrades(prev => ({...prev, [subject.id]: 85}));
+                                  }
+                                } else {
+                                  console.log('Removing subject from credited subjects:', subject.id, subject.name);
+                                  setCreditedSubjects(prev => {
+                                    const newArray = prev.filter(id => id !== subject.id);
+                                    console.log('New credited subjects array after removal:', newArray);
+                                    return newArray;
+                                  });
+                                  // Remove grade when unchecked
+                                  setSubjectGrades(prev => {
+                                    const newGrades = {...prev};
+                                    delete newGrades[subject.id];
+                                    return newGrades;
+                                  });
+                                }
+                              }}
+                              checked={creditedSubjects.includes(subject.id)}
                             />
                             <label htmlFor={`credit-${subject.id}`} className={`text-sm font-medium ${
                               isAlreadyCredited ? 'text-green-700' : 'text-gray-700'
@@ -1462,14 +1998,19 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                               max="100"
                               step="0.01"
                               value={subjectGrades[subject.id] || ''}
-                              onChange={(e) => handleGradeChange(subject.id, e.target.value)}
+                              onChange={(e) => {
+                                setSubjectGrades(prev => ({
+                                  ...prev, 
+                                  [subject.id]: parseFloat(e.target.value) || ''
+                                }));
+                              }}
                               className={`w-16 px-2 py-1 text-xs border rounded focus:ring-purple-500 focus:border-purple-500 ${
                                 creditedSubjects.includes(subject.id) && !subjectGrades[subject.id] 
                                   ? 'border-red-300 bg-red-50' 
                                   : 'border-gray-300'
                               }`}
                               id={`grade-${subject.id}`}
-                              disabled={isAlreadyCredited || !creditedSubjects.includes(subject.id)}
+                              disabled={!creditedSubjects.includes(subject.id)}
                               required={creditedSubjects.includes(subject.id)}
                             />
                           </div>
@@ -1491,19 +2032,28 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       </div>
                     ) : null}
                     
-                    {/* Save Credits Button */}
+                    {/* Credits Summary */}
                     {creditedSubjects.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-purple-200">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm text-purple-700">
-                            <strong>{creditedSubjects.length}</strong> subject(s) selected for credit
-                          </div>
-                          <button
-                            onClick={saveCreditedSubjects}
-                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
-                          >
-                            Save Credits
-                          </button>
+                        <div className="text-sm text-purple-700 mb-2">
+                          <strong>{creditedSubjects.length}</strong> subject(s) selected for credit:
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          {creditedSubjects.map(subjectId => {
+                            const subject = subjects.find(s => s.id === subjectId);
+                            const grade = subjectGrades[subjectId];
+                            return (
+                              <div key={subjectId} className="flex justify-between items-center bg-green-50 px-2 py-1 rounded">
+                                <span>{subject?.name} ({subject?.code})</span>
+                                <span className={`font-medium ${grade >= 75 && grade <= 100 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {grade || 'No grade'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 text-xs text-purple-600">
+                          ℹ️ These subjects will be marked as completed and excluded from the class schedule.
                         </div>
                       </div>
                     )}
@@ -1513,22 +2063,33 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                 {/* Class Schedules Section - Always show for printing */}
                 <div className="mt-2">
                   <h4 className="text-xs font-semibold mb-1 text-gray-800">Class Schedule</h4>
-                  {/* Show note for transferee students about credited subjects */}
-                  {(selectedStudentForCOR?.user?.student_type === 'transferee' || 
-                    selectedStudentForCOR?.student_status === 'Transferee' || 
-                    selectedStudentForCOR?.student_type === 'Transferee') && 
-                   selectedStudentForCOR?.credited_subject_ids?.length > 0 && (
-                    <div className="mb-2 p-2 bg-green-50 border border-green-200 rounded text-xs">
-                      <p className="text-green-800">
-                        <strong>Note:</strong> {selectedStudentForCOR.credited_subject_ids.length} credited subject(s) from previous school are excluded from this schedule.
-                      </p>
-                    </div>
-                  )}
+                  {/* Transferee credit notes disabled - functionality removed */}
                   {!selectedStrand && (
                     <div className="text-center py-4 text-gray-500 border border-gray-300 rounded-lg print:hidden">
                       <p className="text-sm">Please select a strand to view class schedules</p>
                     </div>
                   )}
+                  
+                  {/* Manual Load Schedule Button - Show if no schedules loaded */}
+                  {selectedStrand && selectedSection && classSchedules.length === 0 && !loadingSchedules && (
+                    <div className="text-center py-4 bg-yellow-50 border border-yellow-200 rounded-lg print:hidden mb-4">
+                      <p className="text-sm text-yellow-800 mb-3">No schedules loaded. Click below to load the class schedule.</p>
+                      <button
+                        onClick={() => {
+                          console.log('Manual schedule load triggered:', {
+                            studentId: selectedStudentForCOR?.id,
+                            strand: selectedStrand,
+                            section: selectedSection
+                          });
+                          fetchClassSchedulesForStudent(selectedStudentForCOR?.id, selectedStrand, selectedSection);
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Load Class Schedule
+                      </button>
+                    </div>
+                  )}
+                  
                   {/* Always show schedule table structure for printing */}
                   <div className="bg-white border rounded-lg overflow-hidden">
                     <div className="overflow-x-auto">
@@ -1579,15 +2140,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                                         s.start_time === slot.start
                                       );
                                       
-                                      // For transferee students, exclude credited subjects from COR display
-                                      if (selectedStudentForCOR?.credited_subject_ids && 
-                                          (selectedStudentForCOR?.user?.student_type === 'transferee' || 
-                                           selectedStudentForCOR?.student_status === 'Transferee' || 
-                                           selectedStudentForCOR?.student_type === 'Transferee')) {
-                                        schedules = schedules.filter(s => 
-                                          !selectedStudentForCOR.credited_subject_ids.includes(s.subject_id)
-                                        );
-                                      }
+                                      // Transferee credit marking disabled - functionality removed
+                                      // All subjects will display normally without credit markings
 
                                       return (
                                         <td key={day} className="border border-gray-400 px-1 py-0.5 text-xs text-center">
@@ -1671,6 +2225,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                             setSelectedStrand("");
                             setSelectedSection("");
                             setSelectedSubjects([]);
+                            setClassSchedules([]); // Clear schedules
                             setIsStudentEnrolled(false);
                             
                             Swal.fire({
@@ -1690,6 +2245,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                         setSelectedStrand("");
                         setSelectedSection("");
                         setSelectedSubjects([]);
+                        setClassSchedules([]); // Clear schedules
                         setIsStudentEnrolled(false);
                       }
                     }}
@@ -1699,7 +2255,30 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                     Cancel
                   </button>
                   <button
-                    onClick={handleFinalizeEnrollment}
+                    onClick={() => {
+                      // Check if this is a transferee student
+                      const isTransferee = selectedStudentForCOR?.student_type === 'transferee' || 
+                                          selectedStudentForCOR?.user?.student_type === 'transferee' || 
+                                          selectedStudentForCOR?.student_status === 'Transferee';
+                      
+                      console.log('Enrollment button clicked:', {
+                        isTransferee,
+                        creditedSubjectsLength: creditedSubjects.length,
+                        creditedSubjects: creditedSubjects,
+                        selectedStrand,
+                        selectedSection
+                      });
+                      
+                      if (isTransferee && creditedSubjects.length > 0) {
+                        console.log('Calling enrollTransfereeWithCredits for transferee with credits');
+                        // Use new combined enrollment for transferees with credits
+                        enrollTransfereeWithCredits();
+                      } else {
+                        console.log('Calling handleFinalizeEnrollment for regular enrollment');
+                        // Use existing enrollment for other students
+                        handleFinalizeEnrollment();
+                      }
+                    }}
                     disabled={isSubmitting || !selectedStrand || !selectedSection}
                     className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1"
                   >

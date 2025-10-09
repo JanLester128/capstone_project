@@ -23,13 +23,13 @@ export default function RegistrarSettings() {
 
   // Check if enrollment is actually available based on dates
   const isEnrollmentDateActive = () => {
-    if (!activeSchoolYear?.enrollment_start_date || !activeSchoolYear?.enrollment_end_date) {
+    if (!enrollmentSettings?.enrollment_start || !enrollmentSettings?.enrollment_end) {
       return false;
     }
     
     const now = new Date();
-    const startDate = new Date(activeSchoolYear.enrollment_start_date);
-    const endDate = new Date(activeSchoolYear.enrollment_end_date);
+    const startDate = new Date(enrollmentSettings.enrollment_start);
+    const endDate = new Date(enrollmentSettings.enrollment_end);
     
     return now >= startDate && now <= endDate;
   };
@@ -43,7 +43,7 @@ export default function RegistrarSettings() {
       isOpen: isToggleOpen && isDateActive,
       toggleStatus: isToggleOpen,
       dateStatus: isDateActive,
-      canToggle: isDateActive // Can only toggle if we're within the date range
+      canToggle: true // Always allow toggle when there's an active school year
     };
   };
 
@@ -117,37 +117,8 @@ export default function RegistrarSettings() {
   const handleToggleEnrollment = async () => {
     if (processing) return;
 
-    // Check if we're outside the enrollment date range
-    if (!enrollmentStatus.dateStatus) {
-      const startDate = activeSchoolYear?.enrollment_start_date ? new Date(activeSchoolYear.enrollment_start_date).toLocaleDateString() : 'Not set';
-      const endDate = activeSchoolYear?.enrollment_end_date ? new Date(activeSchoolYear.enrollment_end_date).toLocaleDateString() : 'Not set';
-      
-      await Swal.fire({
-        title: 'Enrollment Period Not Active',
-        html: `
-          <div class="text-left">
-            <p class="mb-3">
-              Enrollment can only be opened during the scheduled enrollment period.
-            </p>
-            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              <p class="text-sm text-yellow-800 font-medium mb-2">📅 Enrollment Period:</p>
-              <ul class="text-sm text-yellow-700 space-y-1">
-                <li>• Start Date: ${startDate}</li>
-                <li>• End Date: ${endDate}</li>
-                <li>• Current Status: Outside enrollment period</li>
-              </ul>
-            </div>
-            <p class="text-sm text-gray-600 mt-3">
-              Please wait until the enrollment period begins or update the enrollment dates in the school year settings.
-            </p>
-          </div>
-        `,
-        icon: 'warning',
-        confirmButtonColor: '#f59e0b',
-        confirmButtonText: 'Understood'
-      });
-      return;
-    }
+    // Remove date restriction - allow toggle anytime when there's an active school year
+    // The date range is for information only, not for restricting toggle functionality
 
     const result = await Swal.fire({
       title: enrollmentSettings.enrollment_open ? 'Close Enrollment?' : 'Open Enrollment?',
@@ -267,36 +238,27 @@ export default function RegistrarSettings() {
                   <div>
                     <h4 className="font-semibold text-gray-900">Grade 11 Enrollment</h4>
                     <p className="text-sm text-gray-600">
-                      {enrollmentStatus.dateStatus 
-                        ? "Allow new students to enroll in Grade 11" 
-                        : "Enrollment period not active"}
+                      Control whether new students can enroll in Grade 11
                     </p>
                   </div>
                   <button
                     onClick={handleToggleEnrollment}
-                    disabled={processing || !activeSchoolYear || !enrollmentStatus.dateStatus}
+                    disabled={processing || !activeSchoolYear}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-                      enrollmentStatus.isOpen
+                      enrollmentStatus.toggleStatus
                         ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                        : enrollmentStatus.dateStatus
-                        ? 'bg-red-100 text-red-800 hover:bg-red-200'
-                        : 'bg-gray-100 text-gray-600'
-                    } ${processing || !activeSchoolYear || !enrollmentStatus.dateStatus ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
+                        : 'bg-red-100 text-red-800 hover:bg-red-200'
+                    } ${processing || !activeSchoolYear ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
                   >
-                    {enrollmentStatus.isOpen ? (
+                    {enrollmentStatus.toggleStatus ? (
                       <>
                         <FaToggleOn className="text-xl" />
-                        Open
-                      </>
-                    ) : enrollmentStatus.dateStatus ? (
-                      <>
-                        <FaToggleOff className="text-xl" />
-                        Closed
+                        Enabled
                       </>
                     ) : (
                       <>
                         <FaToggleOff className="text-xl" />
-                        Inactive
+                        Disabled
                       </>
                     )}
                   </button>
@@ -321,13 +283,13 @@ export default function RegistrarSettings() {
                           </p>
                         </div>
                       )}
-                      
                       <div className="border-t pt-2 mt-2">
                         <p className="font-medium mb-1">How it works:</p>
                         <ul className="space-y-1 text-xs">
-                          <li>• Enrollment must be both <strong>enabled</strong> and <strong>within the date period</strong></li>
-                          <li>• Students can only enroll when both conditions are met</li>
-                          <li>• Grade 12 progression is always handled by coordinators</li>
+                          <li>• <strong>Toggle Status:</strong> Controls whether enrollment is enabled/disabled</li>
+                          <li>• <strong>Date Status:</strong> Shows if current date is within enrollment period</li>
+                          <li>• <strong>Actual Status:</strong> Students can enroll only when both toggle is enabled AND within date period</li>
+                          <li>• You can toggle enrollment anytime, but students can only enroll during the date period</li>
                         </ul>
                       </div>
                     </div>
