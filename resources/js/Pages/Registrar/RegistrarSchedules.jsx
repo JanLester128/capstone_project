@@ -66,8 +66,8 @@ const ScheduleModal = ({ isOpen, onClose, schedule, subjects, faculties, section
     
     // Return teachers assigned to this section or teachers with matching strand expertise
     return faculties.filter(faculty => {
-      // Include section's assigned teacher
-      if (section.teacher_id && faculty.id == section.teacher_id) return true;
+      // Include section's assigned adviser
+      if (section.adviser_id && faculty.id == section.adviser_id) return true;
       
       // Include teachers who can teach subjects in this section's strand
       const sectionStrand = section.strand_id;

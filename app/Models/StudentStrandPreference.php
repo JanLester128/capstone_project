@@ -10,11 +10,9 @@ class StudentStrandPreference extends Model
     use HasFactory;
 
     protected $fillable = [
-        'student_id',
-        'enrollment_id',
+        'student_personal_info_id',  // Reference to student personal info
         'strand_id',
-        'preference_order',
-        'school_year_id'
+        'preference_order'
     ];
 
     protected $casts = [
@@ -22,14 +20,9 @@ class StudentStrandPreference extends Model
     ];
 
     // Relationships
-    public function student()
+    public function studentPersonalInfo()
     {
-        return $this->belongsTo(User::class, 'student_id');
-    }
-
-    public function enrollment()
-    {
-        return $this->belongsTo(Enrollment::class);
+        return $this->belongsTo(StudentPersonalInfo::class, 'student_personal_info_id');
     }
 
     public function strand()
@@ -37,25 +30,23 @@ class StudentStrandPreference extends Model
         return $this->belongsTo(Strand::class);
     }
 
-    public function schoolYear()
+    // Get student via studentPersonalInfo relationship
+    public function student()
     {
-        return $this->belongsTo(SchoolYear::class);
+        return $this->hasOneThrough(User::class, StudentPersonalInfo::class, 'id', 'id', 'student_personal_info_id', 'user_id');
     }
 
     // Scopes
+    public function scopeForStudentPersonalInfo($query, $studentPersonalInfoId)
+    {
+        return $query->where('student_personal_info_id', $studentPersonalInfoId);
+    }
+
     public function scopeForStudent($query, $studentId)
     {
-        return $query->where('student_id', $studentId);
-    }
-
-    public function scopeForEnrollment($query, $enrollmentId)
-    {
-        return $query->where('enrollment_id', $enrollmentId);
-    }
-
-    public function scopeForSchoolYear($query, $schoolYearId)
-    {
-        return $query->where('school_year_id', $schoolYearId);
+        return $query->whereHas('studentPersonalInfo', function($q) use ($studentId) {
+            $q->where('user_id', $studentId);
+        });
     }
 
     public function scopeOrderedByPreference($query)

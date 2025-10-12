@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Head, usePage, router } from "@inertiajs/react";
 import FacultySidebar from "../layouts/Faculty_Sidebar";
 import Swal from "sweetalert2";
+import { AuthManager } from '../../auth';
 import {
   FaUser,
   FaEnvelope,
@@ -27,6 +28,38 @@ export default function Faculty_ManualEnrollment({ strands = [], sections = [], 
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
+
+  // Authentication check on component mount
+  useEffect(() => {
+    const checkAuth = () => {
+      const user = AuthManager.getUser();
+      const token = AuthManager.getToken();
+      
+      if (!user || !token) {
+        console.log('🚨 Faculty_ManualEnrollment: No authentication found, redirecting to login');
+        window.location.href = '/login';
+        return;
+      }
+      
+      // Check if user is faculty/coordinator and has coordinator privileges
+      if (user.role !== 'faculty' && user.role !== 'coordinator') {
+        console.log('🚨 Faculty_ManualEnrollment: Invalid role for coordinator access:', user.role);
+        window.location.href = '/login';
+        return;
+      }
+      
+      // Check if faculty user has coordinator privileges
+      if (user.role === 'faculty' && !user.is_coordinator) {
+        console.log('🚨 Faculty_ManualEnrollment: Faculty user lacks coordinator privileges');
+        window.location.href = '/faculty/dashboard';
+        return;
+      }
+      
+      console.log('✅ Faculty_ManualEnrollment: Authentication verified for coordinator access');
+    };
+    
+    checkAuth();
+  }, []);
 
   const [formData, setFormData] = useState({
     // Personal Information

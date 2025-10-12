@@ -12,7 +12,8 @@ import {
   FaSave,
   FaUsers,
   FaFileAlt,
-  FaPrint
+  FaPrint,
+  FaClock
 } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 
@@ -431,6 +432,65 @@ export default function RegistrarSettings() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Enrollment Day Restrictions */}
+            <div className="bg-white rounded-lg shadow-sm border">
+              <div className="p-6 border-b">
+                <div className="flex items-center gap-3">
+                  <FaClock className="text-blue-600 text-xl" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800">Enrollment Day Restrictions</h3>
+                    <p className="text-gray-600 text-sm">Control which days students can submit enrollment applications</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <FaInfoCircle className="text-blue-500 mt-0.5" />
+                    <div className="text-sm text-blue-700">
+                      <p className="font-medium mb-2">Current Enrollment Schedule:</p>
+                      <ul className="space-y-1">
+                        <li>• <strong>Available Days:</strong> Monday through Saturday</li>
+                        <li>• <strong>Restricted Days:</strong> Sundays</li>
+                        <li>• <strong>Current Day:</strong> {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</li>
+                        <li>• <strong>Status:</strong> {
+                          new Date().getDay() === 0 
+                            ? <span className="text-red-600 font-medium">Enrollment Not Available (Sunday)</span>
+                            : <span className="text-green-600 font-medium">Enrollment Available</span>
+                        }</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <FaInfoCircle className="text-gray-500 mt-0.5" />
+                    <div className="text-sm text-gray-700">
+                      <p className="font-medium mb-2">How it works:</p>
+                      <ul className="space-y-1">
+                        <li>• Students can only submit enrollment applications Monday through Saturday</li>
+                        <li>• Sunday enrollments are automatically blocked with informative messages</li>
+                        <li>• Students see clear notifications about next available enrollment day</li>
+                        <li>• This helps manage enrollment workload and provides staff rest days</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-3">
+                    <FaCheckCircle className="text-green-500" />
+                    <div className="text-sm text-green-700">
+                      <p className="font-medium">Day restrictions are automatically enforced</p>
+                      <p>No additional configuration required. The system automatically blocks Sunday enrollments and provides helpful guidance to students.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

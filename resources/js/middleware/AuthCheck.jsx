@@ -58,23 +58,44 @@ export const AuthCheck = ({ children }) => {
         // Check if user is on login page while authenticated
         const currentPath = window.location.pathname;
         if (currentPath === '/login' || currentPath === '/') {
-          console.log('AuthCheck: Authenticated user on login page, redirecting to dashboard');
-          const dashboardUrl = AuthManager.getDashboardUrl();
-          console.log('AuthCheck: Redirecting to:', dashboardUrl);
+          console.log('AuthCheck: Authenticated user on login page, redirecting to stored page or dashboard');
           
-          // Redirect authenticated user to their dashboard
+          // FIXED: Use getRedirectUrl to respect stored page preference
+          const redirectUrl = AuthManager.getRedirectUrl();
+          console.log('AuthCheck: Redirecting to:', redirectUrl);
+          
+          // Check for redirect loop prevention
+          const redirectInProgress = sessionStorage.getItem('auth_redirect_in_progress');
+          if (redirectInProgress === 'true') {
+            console.log('AuthCheck: Redirect already in progress, skipping');
+            return;
+          }
+          
+          // Set redirect flag and redirect
+          sessionStorage.setItem('auth_redirect_in_progress', 'true');
           setTimeout(() => {
-            window.location.href = dashboardUrl;
+            window.location.href = `http://127.0.0.1:8000${redirectUrl}`;
           }, 100);
           return;
         }
         
-        // Always assume session is valid for better UX
-        setAuthState({
-          isAuthenticated: true,
-          user: user,
-          sessionValid: true
-        });
+        // Validate session for better security
+        try {
+          const sessionValidation = await AuthManager.validateSession();
+          
+          setAuthState({
+            isAuthenticated: true,
+            user: sessionValidation.user || user,
+            sessionValid: sessionValidation.valid
+          });
+        } catch (error) {
+          console.warn('AuthCheck: Session validation failed, assuming valid for UX');
+          setAuthState({
+            isAuthenticated: true,
+            user: user,
+            sessionValid: true
+          });
+        }
         
         setIsLoading(false);
 

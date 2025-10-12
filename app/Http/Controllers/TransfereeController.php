@@ -419,10 +419,14 @@ class TransfereeController extends Controller
                 ]
             );
             
-            Log::info('Enrollment record created/updated', [
+            Log::info('Transferee enrollment created/updated', [
                 'enrollment_id' => $enrollment->id,
+                'student_id' => $studentId,
                 'status' => $enrollment->status,
-                'assigned_section_id' => $enrollment->assigned_section_id
+                'assigned_section_id' => $enrollment->assigned_section_id,
+                'enrolled_by' => Auth::id(),
+                'source' => 'transferee_enrollment_by_coordinator',
+                'timestamp' => now()
             ]);
 
             // 2. Store credited subjects with grades

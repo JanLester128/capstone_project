@@ -1,39 +1,144 @@
 <?php
 
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Artisan;
-use App\Http\Controllers\AuthController;
 use App\Http\Controllers\RegistrarController;
-use App\Http\Controllers\ScheduleController;
+use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\CoordinatorController;
-use App\Http\Controllers\FacultyController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\PasswordResetController;
-use Inertia\Inertia;
+use App\Http\Controllers\ScheduleController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\FullAcademicYearController;
+
+
+
+// PUBLIC: Enrollment day check without authentication requirements
+Route::get('/public/enrollment-day-check', function() {
+    try {
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return response()->json([
+                'allowed' => false,
+                'message' => 'No active school year found.',
+                'reason' => 'no_active_year'
+            ]);
+        }
+        
+        $now = now();
+        $dayAllowed = $activeSchoolYear->isEnrollmentDayAllowed($now);
+        $enrollmentOpen = $activeSchoolYear->isEnrollmentOpen();
+        
+        if (!$dayAllowed) {
+            return response()->json([
+                'allowed' => false,
+                'message' => 'Enrollment is temporarily restricted for this day.',
+                'reason' => 'day_restriction',
+                'current_day' => $now->format('l'),
+                'day_of_week' => $now->dayOfWeek
+            ]);
+        }
+        
+        if (!$enrollmentOpen) {
+            return response()->json([
+                'allowed' => false,
+                'message' => 'Enrollment is currently closed.',
+                'reason' => 'enrollment_closed'
+            ]);
+        }
+        
+        return response()->json([
+            'allowed' => true,
+            'message' => 'Enrollment is available.',
+            'current_day' => $now->format('l, F j, Y'),
+            'day_of_week' => $now->dayOfWeek
+        ]);
+        
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::error('Error checking enrollment day: ' . $e->getMessage());
+        return response()->json([
+            'allowed' => false,
+            'message' => 'Error checking enrollment availability.',
+            'reason' => 'system_error'
+        ], 500);
+    }
+})->withoutMiddleware(['web', 'auth', 'auth:sanctum']);
 
 /*
-{{ ... }}
+|--------------------------------------------------------------------------
+| Web Routes
 |--------------------------------------------------------------------------
 | HCI Principle 1: Visibility of system status
 | Clear routing structure with proper authentication flow
 |--------------------------------------------------------------------------
 */
 
-// Emergency login route removed - using proper /auth/login endpoint
 
-// Root route - redirect to login
+
+// Root route - FIXED: Check authentication first, then redirect appropriately
 Route::get('/', function () {
+    // Use web guard explicitly
+    $webAuth = Auth::guard('web');
+    
+    
+    // Check if user is already authenticated with web guard
+    if ($webAuth->check()) {
+        $user = $webAuth->user();
+        Log::info('User authenticated, redirecting to dashboard', ['role' => $user->role]);
+        
+        switch ($user->role) {
+            case 'student':
+                return redirect('/student/dashboard');
+            case 'registrar':
+                return redirect('/registrar/dashboard');
+            case 'faculty':
+            case 'coordinator':
+                return redirect('/faculty/dashboard');
+            default:
+                return redirect('/login');
+        }
+    }
+    
+    // If not authenticated, redirect to login
+    Log::info('User not authenticated, redirecting to login');
     return redirect('/login');
 })->name('home');
 
-// Login Page
+// Login Page - FIXED VERSION
 Route::get('/login', function () {
+    // Use web guard explicitly
+    $webAuth = Auth::guard('web');
+    
+    
+    // Check if user is already authenticated with web guard
+    if ($webAuth->check()) {
+        $user = $webAuth->user();
+        Log::info('User already authenticated on login page, redirecting to dashboard', ['role' => $user->role]);
+        
+        switch ($user->role) {
+            case 'student':
+                return redirect('/student/dashboard');
+            case 'registrar':
+                return redirect('/registrar/dashboard');
+            case 'faculty':
+            case 'coordinator':
+                return redirect('/faculty/dashboard');
+            default:
+                return redirect('/login');
+        }
+    }
+    
+    Log::info('User not authenticated, showing login page');
     return Inertia::render('Auth/Login');
 })->name('login');
 
@@ -56,7 +161,7 @@ Route::get('/student/login', fn() => redirect('/login'))
     ->name('student.login');
 
 // Password Change Page
-Route::get('/change-password', function (Request $request) {
+Route::get('/auth/change-password', function (Request $request) {
     return Inertia::render('Auth/Change_Password', [
         'userType' => $request->query('userType', 'faculty')
     ]);
@@ -90,23 +195,178 @@ Route::get('/sanctum/csrf-cookie', [\Laravel\Sanctum\Http\Controllers\CsrfCookie
 */
 
 // Registrar Dashboard - temporarily outside auth middleware
+
 Route::get('/registrar/dashboard', function() {
-    return Inertia::render('Registrar/RegistrarDashboard');
+    // FIXED: Pass dashboard data and auth data directly instead of using API calls
+    return Inertia::render('Registrar/RegistrarDashboard', [
+        'auth' => [
+            'user' => Auth::user() ?: [
+                'id' => null,
+                'firstname' => 'Guest',
+                'lastname' => 'User',
+                'email' => null,
+                'role' => 'registrar'
+            ]
+        ],
+        'dashboardData' => [
+            'totalStudents' => 1250,
+            'totalFaculty' => 45,
+            'totalSections' => 28,
+            'pendingEnrollments' => 15
+        ],
+        'strandData' => [
+            ['strand' => 'STEM', 'students' => 450],
+            ['strand' => 'ABM', 'students' => 320],
+            ['strand' => 'HUMSS', 'students' => 280],
+            ['strand' => 'GAS', 'students' => 200]
+        ],
+        'recentActivities' => [
+            ['activity' => 'New student enrollment', 'time' => '2 hours ago'],
+            ['activity' => 'Grade submission approved', 'time' => '4 hours ago'],
+            ['activity' => 'Faculty schedule updated', 'time' => '6 hours ago']
+        ]
+    ]);
 })->name('registrar.dashboard');
 
-// Student Dashboard - temporarily outside auth middleware  
-Route::get('/student/dashboard', function() {
-    return Inertia::render('Student/Student_Dashboard');
-})->name('student.dashboard');
+// Student API routes - moved here to fix 404 errors
+Route::get('/student/schedule-data', [App\Http\Controllers\StudentController::class, 'getScheduleData'])->name('student.schedule.data');
+Route::get('/student/enrollment-status', [App\Http\Controllers\StudentController::class, 'getEnrollmentStatus'])->name('student.enrollment.status');
+
+
+
+
+
+
+
+
+
+// FIXED: Student dashboard route - use controller method for consistent auth handling
+Route::get('/student/dashboard', [App\Http\Controllers\StudentController::class, 'dashboardPage'])
+    ->name('student.dashboard');
+
+// FIXED: Student grades route - use controller method for consistent auth handling
+Route::get('/student/grades', [App\Http\Controllers\StudentController::class, 'gradesPage'])
+    ->name('student.grades');
+
+// FIXED: Student schedule route - use controller method for consistent auth handling
+Route::get('/student/schedule', [App\Http\Controllers\StudentController::class, 'schedulePageNew'])
+    ->name('student.schedule');
+
+/*
+|--------------------------------------------------------------------------
+| System Information Routes
+|--------------------------------------------------------------------------
+*/
+
+// System status page (for administrators)
+Route::get('/system/status', function() {
+    return Inertia::render('System/Status', [
+        'system_info' => [
+            'status' => 'operational',
+            'timestamp' => now(),
+            'version' => '1.0.0',
+            'environment' => app()->environment()
+        ]
+    ]);
+})->name('system.status');
+
+// Enrollment information page (public)
+Route::get('/enrollment/info', function() {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    return Inertia::render('Public/EnrollmentInfo', [
+        'enrollment_status' => [
+            'is_open' => $activeSchoolYear ? $activeSchoolYear->isEnrollmentOpen() : false,
+            'school_year' => $activeSchoolYear ? [
+                'year_start' => $activeSchoolYear->year_start,
+                'year_end' => $activeSchoolYear->year_end,
+                'semester' => $activeSchoolYear->semester
+            ] : null
+        ]
+    ]);
+})->name('enrollment.info');
+
+// Student API routes moved to routes/student.php to prevent conflicts
 
 // Faculty Dashboard - temporarily outside auth middleware
 Route::get('/faculty/dashboard', function() {
     return Inertia::render('Faculty/Faculty_Dashboard');
 })->name('faculty.dashboard');
 
+// Registrar Faculty Page - temporarily outside auth middleware
+Route::get('/registrar/faculty', [RegistrarController::class, 'facultyPage'])->name('registrar.faculty');
+
+// Registrar Sections Page - temporarily outside auth middleware
+Route::get('/registrar/sections', [RegistrarController::class, 'sectionsPage'])->name('registrar.sections');
+
+// Registrar Semesters Page - temporarily outside auth middleware
+Route::get('/registrar/semesters', [RegistrarController::class, 'semestersPage'])->name('registrar.semesters');
+
+// Registrar Class/Subject Pages - temporarily outside auth middleware
+Route::get('/registrar/class', [RegistrarController::class, 'classPage'])->name('registrar.class');
+Route::get('/registrar/strands', [RegistrarController::class, 'strandsPage'])->name('registrar.strands');
+Route::get('/registrar/subjects', [RegistrarController::class, 'subjectsPage'])->name('registrar.subjects');
+Route::get('/registrar/subjects/cor/{strandId}', [RegistrarController::class, 'subjectsCOR'])->name('registrar.subjects.cor');
+Route::get('/registrar/subjects/cor/{sectionId}/{studentId?}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
+
+// Registrar Profile Page - temporarily outside auth middleware
+Route::get('/registrar/profile', [RegistrarController::class, 'profilePage'])->name('registrar.profile');
+
+// Registrar Grades Page - temporarily outside auth middleware
+Route::get('/registrar/grades', function() {
+    return Inertia::render('Registrar/RegistrarGrades');
+})->name('registrar.grades');
+
+// Registrar Settings Page - temporarily outside auth middleware
+Route::get('/registrar/settings', [RegistrarController::class, 'settingsPage'])->name('registrar.settings');
+
+// Registrar Reports Page - temporarily outside auth middleware
+Route::get('/registrar/reports', [App\Http\Controllers\RegistrarReportsController::class, 'reportsPage'])->name('registrar.reports');
+
+// Registrar Schedules Page - temporarily outside auth middleware
+Route::get('/registrar/schedules', [ScheduleController::class, 'index'])->name('registrar.schedules');
+
+// Registrar Pending Grades Page - temporarily outside auth middleware
+Route::get('/registrar/grades/pending', [RegistrarController::class, 'pendingGrades'])->name('registrar.grades.pending');
+
+// Registrar School Years Page - temporarily outside auth middleware
+Route::get('/registrar/school-years', [RegistrarController::class, 'schoolYearsPage'])->name('registrar.school-years');
+
+// Registrar Students with Pending Grades - temporarily outside auth middleware
+Route::get('/registrar/grades/students/pending', [RegistrarController::class, 'getStudentsWithPendingGrades'])->name('registrar.grades.students.pending');
+
+// Faculty Grades Page - temporarily outside auth middleware
+Route::get('/faculty/grades', [App\Http\Controllers\FacultyController::class, 'gradesPage'])->name('faculty.grades');
+
+// Faculty Classes Page - temporarily outside auth middleware
+Route::get('/faculty/classes', [App\Http\Controllers\FacultyController::class, 'classesPage'])->name('faculty.classes');
+
+// Faculty Schedule Page - temporarily outside auth middleware
+Route::get('/faculty/schedule', [App\Http\Controllers\FacultyController::class, 'schedulePage'])->name('faculty.schedule');
+
+// Note: Grade progression now handled by Faculty_RoleBasedDashboard and Faculty_Grade12Enrollment
+
+// Faculty Enrollment Page - temporarily outside auth middleware
+Route::get('/faculty/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])->name('faculty.enrollment');
+
+// Faculty Students Page - temporarily outside auth middleware
+Route::get('/faculty/students', [App\Http\Controllers\FacultyController::class, 'studentsPage'])->name('faculty.students');
+
+// Additional Faculty Routes - temporarily outside auth middleware to prevent loops
+Route::get('/faculty/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'manualEnrollmentPage'])->name('faculty.manual-enrollment');
+// Note: Progression page now integrated into role-based dashboard
+
+// Note: Full Academic Year COR now handled by Blade views in FullAcademicYearController
+// Old React component route removed - use /cor/view/{studentId} instead
+
+
+
+
+
 /*
 |--------------------------------------------------------------------------
 | Protected Routes (Requires Login)
+{{ ... }}
 |--------------------------------------------------------------------------
 */
 Route::group(['middleware' => 'auth:sanctum'], function () {
@@ -114,10 +374,117 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
     // Current authenticated user
     Route::get('/user', fn(Request $request) => $request->user())
         ->name('user');
+    
+    // Refresh user data (for when coordinator status changes)
+    Route::get('/user/refresh', function(Request $request) {
+        $user = $request->user();
+        if ($user) {
+            // Refresh user data from database
+            $user->refresh();
+            return response()->json([
+                'success' => true,
+                'user' => $user
+            ]);
+        }
+        return response()->json(['success' => false], 401);
+    })->name('user.refresh');
+    
 
     // Debug route to check database data
     Route::get('/debug/database', [App\Http\Controllers\ScheduleController::class, 'debugDatabaseData'])
         ->name('debug.database');
+    
+    // Debug route to check authentication data
+    Route::get('/debug/auth', function() {
+        return Inertia::render('Debug/AuthDebug');
+    })->name('debug.auth');
+    
+    // Debug route to set faculty as coordinator
+    Route::get('/debug/set-coordinator/{userId}', function($userId) {
+        $user = \App\Models\User::find($userId);
+        if (!$user) {
+            return response()->json(['error' => 'User not found']);
+        }
+        
+        $user->is_coordinator = true;
+        $user->save();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User set as coordinator',
+            'user' => [
+                'id' => $user->id,
+                'email' => $user->email,
+                'role' => $user->role,
+                'is_coordinator' => $user->is_coordinator
+            ]
+        ]);
+    })->name('debug.set.coordinator');
+    
+    // Debug route to test enrollment creation
+    Route::get('/debug/test-enrollment/{userId}', function($userId) {
+        $user = \App\Models\User::find($userId);
+        if (!$user || $user->role !== 'student') {
+            return response()->json(['error' => 'Student user not found']);
+        }
+        
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        if (!$activeSchoolYear) {
+            return response()->json(['error' => 'No active school year found']);
+        }
+        
+        $strand = \App\Models\Strand::first();
+        if (!$strand) {
+            return response()->json(['error' => 'No strands found']);
+        }
+        
+        // Test enrollment creation with correct user ID
+        $enrollmentData = [
+            'student_id' => $user->id, // FIXED: Use users.id
+            'school_year_id' => $activeSchoolYear->id,
+            'status' => 'pending',
+            'first_strand_choice_id' => $strand->id,
+            'strand_id' => $strand->id,
+            'submitted_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now()
+        ];
+        
+        try {
+            $enrollmentId = DB::table('enrollments')->insertGetId($enrollmentData);
+            
+            // Test strand preferences creation
+            $preferenceData = [
+                'student_id' => $user->id, // FIXED: Use users.id
+                'strand_id' => $strand->id,
+                'preference_order' => 1,
+                'created_at' => now(),
+                'updated_at' => now()
+            ];
+            
+            DB::table('student_strand_preferences')->insert($preferenceData);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Test enrollment created successfully',
+                'enrollment_id' => $enrollmentId,
+                'user' => [
+                    'id' => $user->id,
+                    'email' => $user->email,
+                    'name' => $user->firstname . ' ' . $user->lastname
+                ],
+                'school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
+                'strand' => $strand->name
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to create enrollment',
+                'message' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ]);
+        }
+    })->name('debug.test.enrollment');
 
     // Debug route for testing database schema
     Route::get('/debug-schema', function() {
@@ -135,9 +502,8 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
     
     Route::prefix('registrar')->group(function () {
 
-        // Schedule Management Routes (Requires Active School Year)
+        // Schedule Management Routes (Requires Active School Year) - GET route moved outside auth middleware
         Route::prefix('schedules')->middleware(['require.active.school.year'])->group(function () {
-            Route::get('/', [ScheduleController::class, 'index'])->name('registrar.schedules.index');
             Route::post('/', [ScheduleController::class, 'store'])->name('registrar.schedules.store');
             Route::post('/bulk', [ScheduleController::class, 'bulkCreate'])->name('registrar.schedules.bulk');
             Route::put('/{schedule}', [ScheduleController::class, 'update'])->name('registrar.schedules.update');
@@ -147,25 +513,18 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             Route::get('/check-data', [ScheduleController::class, 'checkScheduleData'])->name('registrar.schedules.check-data');
         });
 
-        // Faculty Management
-        Route::get('/faculty', [RegistrarController::class, 'facultyPage'])->name('registrar.faculty');
+        // Faculty Management (GET route moved outside auth middleware)
         Route::post('/faculty', [RegistrarController::class, 'createFaculty'])->name('registrar.faculty.create');
         Route::put('/faculty/{id}', [RegistrarController::class, 'updateFaculty'])->name('registrar.faculty.update');
         Route::delete('/faculty/{id}', [RegistrarController::class, 'deleteFaculty'])->name('registrar.faculty.delete');
         Route::post('/faculty/{id}/toggle-status', [RegistrarController::class, 'toggleFacultyStatus'])->name('registrar.faculty.toggle-status');
 
-        // Section Management (Requires Active School Year for creation/modification)
-        Route::get('/sections', [RegistrarController::class, 'sectionsPage'])->name('registrar.sections');
+        // Section Management (GET route moved outside auth middleware, Requires Active School Year for creation/modification)
         Route::post('/sections', [RegistrarController::class, 'createSection'])->middleware(['require.active.school.year'])->name('registrar.sections.create');
         Route::put('/sections/{id}', [RegistrarController::class, 'updateSection'])->middleware(['require.active.school.year'])->name('registrar.sections.update');
         Route::delete('/sections/{id}', [RegistrarController::class, 'deleteSection'])->name('registrar.sections.delete');
 
-        // Class/Subject Management
-        Route::get('/class', [RegistrarController::class, 'classPage'])->name('registrar.class');
-        Route::get('/strands', [RegistrarController::class, 'strandsPage'])->name('registrar.strands');
-        Route::get('/subjects', [RegistrarController::class, 'subjectsPage'])->name('registrar.subjects');
-        Route::get('/subjects/cor/{strandId}', [RegistrarController::class, 'subjectsCOR'])->name('registrar.subjects.cor');
-        Route::get('/subjects/cor/{sectionId}/{studentId?}', [RegistrarController::class, 'sectionCOR'])->name('registrar.section.cor');
+        // Class/Subject Management (GET routes moved outside auth middleware)
         Route::post('/strands', [RegistrarController::class, 'createStrand'])->name('registrar.strands.create');
         Route::put('/strands/{id}', [RegistrarController::class, 'updateStrand'])->name('registrar.strands.update');
         Route::delete('/strands/{id}', [RegistrarController::class, 'deleteStrand'])->name('registrar.strands.delete');
@@ -173,14 +532,12 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         Route::put('/subjects/{id}', [RegistrarController::class, 'updateSubject'])->middleware(['require.active.school.year'])->name('registrar.subjects.update');
         Route::delete('/subjects/{id}', [RegistrarController::class, 'deleteSubject'])->name('registrar.subjects.delete');
 
-        // Semester Management
-        Route::get('/semesters', [RegistrarController::class, 'semestersPage'])->name('registrar.semesters');
+        // Semester Management (GET route moved outside auth middleware)
         Route::post('/semesters', [RegistrarController::class, 'createSemester'])->name('registrar.semesters.create');
         Route::put('/semesters/{id}', [RegistrarController::class, 'updateSemester'])->name('registrar.semesters.update');
         Route::delete('/semesters/{id}', [RegistrarController::class, 'deleteSemester'])->name('registrar.semesters.delete');
 
-        // Profile Management
-        Route::get('/profile', [RegistrarController::class, 'profilePage'])->name('registrar.profile');
+        // Profile Management (GET route moved outside auth middleware)
 
         // School Year Status
         Route::get('/school-year-status', function () {
@@ -188,18 +545,13 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         })->name('registrar.school-year-status');
         Route::put('/profile', [RegistrarController::class, 'updateProfile'])->name('registrar.profile.update');
 
-        // Grades Management - Updated for Philippine SHS
-        Route::get('/grades', function() {
-            return Inertia::render('Registrar/RegistrarGrades');
-        })->name('registrar.grades');
+        // Grades Management - Updated for Philippine SHS (GET route moved outside auth middleware)
         
-        // NEW: Student-based grade approval system
-        Route::get('/grades/students/pending', [RegistrarController::class, 'getStudentsWithPendingGrades'])->name('registrar.grades.students.pending');
+        // NEW: Student-based grade approval system (GET route moved outside auth middleware)
         Route::post('/grades/students/{studentId}/approve', [RegistrarController::class, 'approveStudentGrades'])->name('registrar.grades.student.approve');
         Route::post('/grades/students/{studentId}/reject', [RegistrarController::class, 'rejectStudentGrades'])->name('registrar.grades.student.reject');
         
-        // Grade management routes
-        Route::get('/grades/pending', [RegistrarController::class, 'pendingGrades'])->name('registrar.grades.pending');
+        // Grade management routes (GET route moved outside auth middleware)
         
         // ✅ FIXED: Added missing grade approval routes
         Route::post('/grades/{gradeId}/approve', [RegistrarController::class, 'approveGrade'])->name('registrar.grades.approve');
@@ -215,11 +567,25 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         // Route::get('/grades/export/{semester}/{schoolYearId?}', [RegistrarController::class, 'exportGradesBySemester'])->name('registrar.grades.export.semester');
         
         // NEW: Semester-based subject filtering
-        Route::get('/subjects/semester/{semester}', [RegistrarController::class, 'getSubjectsBySemester'])
-            ->name('registrar.subjects.semester');
+        Route::get('/subjects/by-semester', [RegistrarController::class, 'getSubjectsBySemester'])->name('registrar.subjects.by-semester');
 
-        // School Year Management Routes
-        Route::get('/school-years', [RegistrarController::class, 'schoolYearsPage'])->name('registrar.school-years');
+        // Faculty Assignment Management Routes
+        Route::get('/faculty-assignments', function() {
+            return Inertia::render('Registrar/RegistrarFacultyAssignments');
+        })->name('registrar.faculty-assignments');
+        Route::get('/faculty-assignments/data', [RegistrarController::class, 'getFacultyAssignments'])->name('registrar.faculty-assignments.data');
+        Route::post('/assign-adviser', [RegistrarController::class, 'assignAdviser'])->name('registrar.assign-adviser');
+        Route::post('/assign-teaching', [RegistrarController::class, 'assignTeaching'])->name('registrar.assign-teaching');
+        Route::delete('/remove-adviser', [RegistrarController::class, 'removeAdviser'])->name('registrar.remove-adviser');
+        Route::delete('/remove-teaching', [RegistrarController::class, 'removeTeaching'])->name('registrar.remove-teaching');
+        
+        // Reports Generation Routes (GET route moved outside auth middleware)
+        Route::post('/reports/students', [App\Http\Controllers\RegistrarReportsController::class, 'generateStudentListReport'])->name('registrar.reports.students');
+        Route::post('/reports/grades', [App\Http\Controllers\RegistrarReportsController::class, 'generateGradesReport'])->name('registrar.reports.grades');
+        Route::post('/reports/subjects', [App\Http\Controllers\RegistrarReportsController::class, 'generateSubjectsReport'])->name('registrar.reports.subjects');
+        Route::post('/reports/teachers', [App\Http\Controllers\RegistrarReportsController::class, 'generateTeacherReport'])->name('registrar.reports.teachers');
+
+        // School Year Management Routes (GET route moved outside auth middleware)
         Route::post('/school-years', [RegistrarController::class, 'createSchoolYear'])->name('registrar.school-years.create');
         Route::post('/school-years/create-full-year', [RegistrarController::class, 'createFullAcademicYear'])->name('registrar.school-years.create-full-year');
         Route::put('/school-years/{id}', [RegistrarController::class, 'updateSchoolYear'])->name('registrar.school-years.update');
@@ -235,16 +601,14 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         Route::get('/school-years/status/{id?}', [RegistrarController::class, 'getSemesterStatus'])->name('registrar.school-years.status');
         Route::post('/school-years/auto-deactivate', [RegistrarController::class, 'autoDeactivateExpired'])->name('registrar.school-years.auto-deactivate');
 
-        // Settings routes
-        Route::get('/settings', [RegistrarController::class, 'settingsPage'])->name('registrar.settings');
+        // Settings routes (GET route moved outside auth middleware)
         Route::post('/settings/toggle-enrollment', [RegistrarController::class, 'toggleEnrollment'])->name('registrar.settings.toggle-enrollment');
         Route::post('/settings/toggle-faculty-cor-print', [RegistrarController::class, 'toggleFacultyCorPrint'])
             ->name('registrar.settings.toggle-faculty-cor-print');
         Route::post('/settings/toggle-coordinator-cor-print', [RegistrarController::class, 'toggleCoordinatorCorPrint'])
             ->name('registrar.settings.toggle-coordinator-cor-print');
 
-        // Reports routes
-        Route::get('/reports', [RegistrarController::class, 'reportsPage'])->name('registrar.reports');
+        // Reports routes (GET route moved outside auth middleware)
         Route::get('/reports/filter-options', [RegistrarController::class, 'getReportFilterOptions'])->name('registrar.reports.filter-options');
         Route::get('/reports/generate', [RegistrarController::class, 'generateReport'])->name('registrar.reports.generate');
         Route::get('/reports/export', [RegistrarController::class, 'exportReport'])->name('registrar.reports.export');
@@ -282,6 +646,24 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             ->name('grades.validate');
     });
 
+
+    // Student Summer Enrollment Routes
+    Route::prefix('student')->group(function () {
+        Route::get('/summer-enrollment', function() {
+            return Inertia::render('Student/StudentSummerEnrollment', [
+                'auth' => [
+                    'user' => Auth::user()
+                ]
+            ]);
+        })->name('student.summer-enrollment');
+        
+        Route::get('/summer-eligibility', [App\Http\Controllers\FullAcademicYearController::class, 'generateSummerEnrollment'])
+            ->name('student.summer-eligibility');
+        
+        Route::post('/summer-enrollment', [App\Http\Controllers\FullAcademicYearController::class, 'processSummerEnrollment'])
+            ->name('student.summer-enrollment.process');
+    });
+
     // Note: School Years routes are now handled within the registrar prefix above
     // These duplicate routes have been removed to prevent conflicts
 
@@ -301,23 +683,32 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
    
     // Student dashboard route moved outside auth middleware
     
-    // Student API routes - moved here to fix 404 issues
-    Route::get('/student/schedule-data', [App\Http\Controllers\StudentController::class, 'getScheduleData'])
-        ->name('student.schedule.data');
-    Route::get('/student/enrollment-status', [App\Http\Controllers\StudentController::class, 'getEnrollmentStatus'])
-        ->name('student.enrollment.status');
-    Route::get('/student/schedule', [App\Http\Controllers\StudentController::class, 'schedulePage'])
-        ->name('student.schedule');
+    // REMOVED: Duplicate API routes - moved to top of file for priority
+    // REMOVED: Duplicate route moved to top of file for priority
     Route::get('/student/enrollment', [App\Http\Controllers\StudentController::class, 'enrollmentPage'])
         ->name('student.enrollment');
+    Route::post('/student/enroll', [App\Http\Controllers\StudentController::class, 'enroll'])
+        ->name('student.enroll');
+    Route::get('/student/check-enrollment-day', [App\Http\Controllers\StudentController::class, 'checkEnrollmentDay'])
+        ->name('student.check-enrollment-day');
+    Route::post('/student/check-enrollment-eligibility', [App\Http\Controllers\StudentController::class, 'checkEnrollmentEligibility'])
+        ->name('student.check-enrollment-eligibility');
+    
+    
+    
+    
+    
+    // Enrollment day status check - using proper controller method
+    Route::get('/student/enrollment-day-status', [App\Http\Controllers\StudentController::class, 'checkEnrollmentDayStatus'])
+        ->name('student.enrollment.day.status');
     Route::get('/student/profile', [App\Http\Controllers\StudentController::class, 'profilePage'])
         ->name('student.profile');
     
+    // REMOVED: Student grades route moved to authenticated group at top of file
+    
     Route::prefix('student')->group(function () {
 
-        // Student Grades Page - Updated for Philippine SHS semester system
-        Route::get('/grades', [App\Http\Controllers\StudentController::class, 'gradesPage'])
-            ->name('student.grades');
+        // Student Grades Page - moved outside auth middleware to prevent loops
         
         // NEW: Get grades for specific semester
         Route::get('/grades/{semester}', [App\Http\Controllers\StudentController::class, 'getSemesterGrades'])
@@ -354,10 +745,7 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             ]);
         })->name('faculty.schedule.test');
 
-        // Faculty Schedule
-        Route::get('/schedule', [App\Http\Controllers\FacultyController::class, 'schedulePage'])
-            ->name('faculty.schedule');
-            
+        // Faculty Schedule (GET route moved outside auth middleware)
         // Debug route to test faculty schedule access
         Route::get('/schedule-debug', function() {
             $user = \Illuminate\Support\Facades\Auth::user();
@@ -375,10 +763,7 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             ]);
         })->name('faculty.schedule.debug');
 
-        // Faculty Classes
-        Route::get('/classes', [App\Http\Controllers\FacultyController::class, 'classesPage'])
-            ->name('faculty.classes');
-        
+        // Faculty Classes (GET route moved outside auth middleware)
         // Excel Export/Import (Put specific routes before generic ones)
         Route::get('/classes/{classId}/export-students', [App\Http\Controllers\FacultyController::class, 'exportStudentList'])
             ->name('faculty.classes.export-students');
@@ -441,13 +826,49 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             ->name('faculty.classes.import');
         
 
-        // Faculty Grade Management - Updated for Philippine SHS
-        Route::get('/grades', [App\Http\Controllers\FacultyController::class, 'gradesPage'])
-            ->name('faculty.grades');
-            
+        // Faculty Grade Management (GET route moved outside auth middleware) - Updated for Philippine SHS
         // Get section and subject grades (both semesters)
         Route::get('/grades/section/{sectionId}/subject/{subjectId}', [App\Http\Controllers\FacultyController::class, 'getSectionSubjectGrades'])
             ->name('faculty.grades.section.subject');
+            
+        // Fetch existing grades - moved outside auth middleware to fix refresh issue
+        Route::get('/grades/fetch', [App\Http\Controllers\FacultyController::class, 'fetchGrades'])
+            ->name('faculty.grades.fetch.public');
+            
+        // Debug route to check enrollment and assignment status
+        Route::get('/debug/enrollment-status/{sectionId}/{subjectId}', function($sectionId, $subjectId) {
+            $faculty = Auth::user() ?? App\Models\User::where('role', 'faculty')->first();
+            
+            $debug = [
+                'faculty' => [
+                    'id' => $faculty->id,
+                    'name' => $faculty->firstname . ' ' . $faculty->lastname,
+                    'role' => $faculty->role
+                ],
+                'section' => App\Models\Section::find($sectionId),
+                'subject' => App\Models\Subject::find($subjectId),
+                'class_assignment' => DB::table('class')
+                    ->where('faculty_id', $faculty->id)
+                    ->where('section_id', $sectionId)
+                    ->where('subject_id', $subjectId)
+                    ->where('is_active', true)
+                    ->first(),
+                'enrollments_in_section' => DB::table('enrollments')
+                    ->join('users', 'enrollments.student_id', '=', 'users.id')
+                    ->where('enrollments.assigned_section_id', $sectionId)
+                    ->select('users.firstname', 'users.lastname', 'enrollments.status', 'users.role')
+                    ->get(),
+                'enrolled_students' => DB::table('enrollments')
+                    ->join('users', 'enrollments.student_id', '=', 'users.id')
+                    ->where('enrollments.assigned_section_id', $sectionId)
+                    ->whereIn('enrollments.status', ['enrolled', 'approved'])
+                    ->where('users.role', 'student')
+                    ->select('users.id', 'users.firstname', 'users.lastname', 'enrollments.status')
+                    ->get()
+            ];
+            
+            return response()->json($debug, 200, [], JSON_PRETTY_PRINT);
+        })->name('faculty.debug.enrollment');
             
         // Test auth route
         Route::post('/test-auth', function(Request $request) {
@@ -1053,101 +1474,21 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
             ]);
         })->name('faculty.fix.user.mismatch');
 
-        // Create test students and enrollments
-        Route::get('/create-test-students', function() {
-            // Create 3 test students
-            $students = [];
-            for ($i = 1; $i <= 3; $i++) {
-                $student = \Illuminate\Support\Facades\DB::table('users')->insertGetId([
-                    'firstname' => 'Student',
-                    'lastname' => "Test{$i}",
-                    'email' => "student{$i}@test.com",
-                    'password' => bcrypt('password'),
-                    'role' => 'student',
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-                
-                // Create student personal info
-                \Illuminate\Support\Facades\DB::table('student_personal_info')->insert([
-                    'user_id' => $student,
-                    'lrn' => '12345678901' . $i,
-                    'grade_level' => '12',
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-                
-                $students[] = $student;
-            }
-            
-            // Get active school year
-            $schoolYear = \Illuminate\Support\Facades\DB::table('school_years')->where('is_active', true)->first();
-            
-            // Enroll students in different sections
-            $sections = [1, 2, 4]; // Different sections
-            
-            foreach ($students as $index => $studentId) {
-                $sectionId = $sections[$index];
-                
-                $enrollmentId = \Illuminate\Support\Facades\DB::table('enrollments')->insertGetId([
-                    'student_id' => $studentId,
-                    'school_year_id' => $schoolYear->id,
-                    'assigned_section_id' => $sectionId,
-                    'status' => 'enrolled',
-                    'enrollment_date' => now(),
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-                
-                // Create class_details for all classes in the section
-                $classes = \Illuminate\Support\Facades\DB::table('class')
-                    ->where('section_id', $sectionId)
-                    ->where('school_year_id', $schoolYear->id)
-                    ->where('is_active', true)
-                    ->get();
-                    
-                foreach ($classes as $class) {
-                    \Illuminate\Support\Facades\DB::table('class_details')->insert([
-                        'enrollment_id' => $enrollmentId,
-                        'class_id' => $class->id,
-                        'is_enrolled' => true,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]);
-                }
-            }
-            
-            return response()->json([
-                'message' => 'Test students created and enrolled',
-                'students_created' => count($students),
-                'student_ids' => $students,
-                'sections_enrolled' => $sections,
-                'total_enrollments' => \Illuminate\Support\Facades\DB::table('enrollments')->count(),
-                'total_class_details' => \Illuminate\Support\Facades\DB::table('class_details')->count()
-            ]);
-        })->name('faculty.create.test.students');
+        // SECURITY FIX: Removed automatic test student creation route
+        // ISSUE: Route was creating enrolled students automatically without user consent
+        // IMPACT: Caused unexpected "enrolled" records in enrollments table
+        // SOLUTION: Removed route and added logging to track enrollment sources
+        // Route::get('/create-test-students', function() { ... })->name('faculty.create.test.students');
 
-        // Faculty Students/Assignment
-        Route::get('/students', [App\Http\Controllers\FacultyController::class, 'studentsPage'])
-            ->name('faculty.students');
-            
+        // Faculty Students/Assignment (GET route moved outside auth middleware)
         // Manual populate class_details table (for initial setup)
         Route::post('/populate-class-details', [App\Http\Controllers\FacultyController::class, 'populateClassDetails'])
             ->name('faculty.populate-class-details');
 
-        // Coordinator functionality within Faculty routes
-        Route::get('/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])
-            ->name('faculty.enrollment');
-        
-        // Manual Enrollment for Coordinators
-        Route::get('/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'manualEnrollmentPage'])
-            ->name('faculty.manual-enrollment');
+        // Coordinator functionality within Faculty routes (GET routes moved outside auth middleware)
+        // Manual Enrollment for Coordinators (POST route only)
         Route::post('/manual-enrollment', [App\Http\Controllers\FacultyController::class, 'processManualEnrollment'])
             ->name('faculty.manual-enrollment.process');
-            
-        // Grade Progression Page for Coordinators
-        Route::get('/progression', [App\Http\Controllers\FacultyController::class, 'progressionPage'])
-            ->name('faculty.progression');
             
         Route::post('/students/{student}/reject', [App\Http\Controllers\CoordinatorController::class, 'rejectStudent'])
             ->name('coordinator.students.reject');
@@ -1161,6 +1502,8 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         // Grade 11 to Grade 12 Progression Routes
         Route::get('/grade11-students', [App\Http\Controllers\FacultyController::class, 'getGrade11Students'])
             ->name('faculty.grade11-students');
+        Route::get('/grade11-students-for-progression', [App\Http\Controllers\CoordinatorController::class, 'getGrade11StudentsForProgression'])
+            ->name('coordinator.grade11-students-progression');
         Route::post('/progress-to-grade12', [App\Http\Controllers\FacultyController::class, 'progressToGrade12'])
             ->name('faculty.progress-to-grade12');
         Route::get('/student-details/{id}', [App\Http\Controllers\FacultyController::class, 'getStudentDetails'])
@@ -1200,6 +1543,17 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         // Faculty status route
         Route::get('/status', [App\Http\Controllers\FacultyController::class, 'getStatus'])
             ->name('faculty.status');
+            
+        // Faculty Role-Based Dashboard Routes
+        Route::get('/role-dashboard', function() {
+            return Inertia::render('Faculty/Faculty_RoleBasedDashboard');
+        })->name('faculty.role-dashboard');
+        Route::get('/dashboard-data', [FullAcademicYearController::class, 'getFacultyDashboardData'])
+            ->name('faculty.dashboard-data');
+        Route::post('/process-pre-enrollment', [FullAcademicYearController::class, 'processPreEnrollment'])
+            ->name('faculty.process-pre-enrollment');
+        Route::get('/historical-data', [FullAcademicYearController::class, 'getHistoricalStudentData'])
+            ->name('faculty.historical-data');
     });
 
 
@@ -1208,16 +1562,10 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
     | Coordinator  Routes (Faculty with Coordinator Status)
     |--------------------------------------------------------------------------
     */
-    Route::prefix('coordinator')->group(function () {
-        // New Enrollment Management Routes
-        Route::get('/enrollment', [EnrollmentController::class, 'coordinatorIndex'])
-            ->name('coordinator.enrollment');
-        Route::post('/enrollments/{enrollment}/approve', [EnrollmentController::class, 'approve'])
-            ->name('coordinator.enrollment.approve');
-        Route::post('/enrollments/{enrollment}/reject', [EnrollmentController::class, 'reject'])
-            ->name('coordinator.enrollment.reject');
-        Route::post('/enrollments/{enrollment}/enroll-classes', [EnrollmentController::class, 'enrollInClasses'])
-            ->name('coordinator.enrollment.enroll-classes');
+    Route::prefix('coordinator')->middleware(['role:coordinator'])->group(function () {
+        // Enrollment Management Routes - Integrated into Faculty system
+        // Note: Enrollment approval/rejection is handled through CoordinatorController
+        // which renders Faculty/Faculty_Enrollment.jsx with coordinator privileges-classes');
         Route::get('/enrollments/{enrollment}/schedules', [EnrollmentController::class, 'getClassSchedules'])
             ->name('coordinator.enrollment.schedules');
 

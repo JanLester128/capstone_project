@@ -27,7 +27,22 @@ class RoleMiddleware
                 : redirect()->route('login');
         }
 
-        // If user role is not allowed
+        // Check if coordinator role is requested and user has coordinator privileges
+        if (in_array('coordinator', $roles)) {
+            // Allow if user is a coordinator OR if user is faculty with coordinator privileges
+            $hasCoordinatorAccess = ($user->role === 'coordinator') || 
+                                   ($user->role === 'faculty' && $user->is_coordinator);
+            
+            if (!$hasCoordinatorAccess) {
+                return $request->expectsJson()
+                    ? response()->json(['message' => 'Coordinator access required'], 403)
+                    : abort(403, 'You need coordinator privileges to access this page.');
+            }
+            
+            return $next($request);
+        }
+
+        // If user role is not allowed (standard role check)
         if (!in_array($user->role, $roles)) {
             return $request->expectsJson()
                 ? response()->json(['message' => 'Forbidden'], 403)

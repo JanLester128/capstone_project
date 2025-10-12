@@ -10,37 +10,44 @@ class Enrollment extends Model
     use HasFactory;
 
     protected $fillable = [
-        'student_id',
-        'user_id',
+        'student_personal_info_id',  // Main reference to student data
+        'student_id',                // Backward compatibility
         'school_year_id',
-        'grade_level',
-        'lrn',
-        'strand_id',
-        'assigned_section_id',
-        'student_status',
+        'strand_id',                 // Assigned strand (set when approved)
+        'assigned_section_id',       // Assigned section (set when approved)
+        'status',                    // pending, approved, rejected, enrolled
+        'coordinator_id',            // Who reviewed the enrollment
+        'coordinator_notes',         // Coordinator's review notes
         'enrollment_date',
-        'student_type',
-        'previous_school',
-        'first_strand_choice_id',
-        'second_strand_choice_id',
-        'third_strand_choice_id',
-        'report_card',
-        'documents',
-        'status',
-        'coordinator_id',
         'submitted_at',
+        'reviewed_at',
         // Manual enrollment fields
         'enrolled_by',
         'notes',
+        // Summer enrollment fields
+        'enrollment_type',
+        'summer_subjects',
+        'schedule_preference',
+        'academic_year_status',
     ];
 
     protected $casts = [
         'documents' => 'array',
+        'summer_subjects' => 'array',
         'submitted_at' => 'datetime',
-        'status' => 'string'
+        'reviewed_at' => 'datetime',
+        'enrollment_date' => 'datetime',
+        'status' => 'string',
+        'enrollment_type' => 'string',
+        'academic_year_status' => 'string'
     ];
 
     // Relationships
+    public function studentPersonalInfo()
+    {
+        return $this->belongsTo(StudentPersonalInfo::class, 'student_personal_info_id');
+    }
+
     public function student()
     {
         return $this->belongsTo(User::class, 'student_id');
@@ -54,6 +61,11 @@ class Enrollment extends Model
     public function coordinator()
     {
         return $this->belongsTo(User::class, 'coordinator_id');
+    }
+
+    public function enrolledBy()
+    {
+        return $this->belongsTo(User::class, 'enrolled_by');
     }
 
     public function classDetails()
@@ -77,11 +89,43 @@ class Enrollment extends Model
         return $this->belongsTo(Strand::class, 'third_strand_choice_id');
     }
 
+    public function assignedStrand()
+    {
+        return $this->belongsTo(Strand::class, 'strand_id');
+    }
+
+    public function assignedSection()
+    {
+        return $this->belongsTo(Section::class, 'assigned_section_id');
+    }
+
+    public function strandPreferences()
+    {
+        return $this->hasMany(StudentStrandPreference::class, 'enrollment_id')
+                    ->orderBy('preference_order');
+    }
+
     // Helper method to get the assigned/approved strand
     public function getAssignedStrand()
     {
-        // Return the first strand choice as the assigned strand for enrolled students
-        return $this->firstStrandChoice;
+        // Return the assigned strand for approved enrollments, or first choice for pending
+        return $this->assignedStrand ?: $this->strandPreferences()->first()?->strand;
+    }
+
+    // Helper methods for strand preferences
+    public function getFirstStrandChoice()
+    {
+        return $this->strandPreferences()->where('preference_order', 1)->first()?->strand;
+    }
+
+    public function getSecondStrandChoice()
+    {
+        return $this->strandPreferences()->where('preference_order', 2)->first()?->strand;
+    }
+
+    public function getThirdStrandChoice()
+    {
+        return $this->strandPreferences()->where('preference_order', 3)->first()?->strand;
     }
 
     // Scopes

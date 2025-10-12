@@ -23,7 +23,8 @@ import {
   FaChevronRight,
   FaPalette,
   FaBell,
-  FaCog
+  FaCog,
+  FaLevelUpAlt
 } from "react-icons/fa";
 import Swal from 'sweetalert2';
 import { AuthManager } from '../../auth';
@@ -89,19 +90,85 @@ export default function FacultySidebar({ onToggle }) {
     });
   };
 
+  // Manual refresh function for coordinator status
+  const manualRefreshCoordinatorStatus = async () => {
+    console.log('🔄 Manual refresh triggered...');
+    const currentStatus = isCoordinator;
+    
+    const refreshSuccess = await AuthManager.forceRefreshUser();
+    if (refreshSuccess) {
+      const user = AuthManager.getUser();
+      if (user) {
+        const newCoordinatorStatus = user.role === 'coordinator' || (user.role === 'faculty' && user.is_coordinator === true);
+        
+        console.log('🔄 Manual refresh results:', {
+          currentStatus,
+          newStatus: newCoordinatorStatus,
+          userRole: user.role,
+          is_coordinator: user.is_coordinator
+        });
+        
+        setIsCoordinator(newCoordinatorStatus);
+        setUserInfo(user);
+        setUserRole(user.role);
+        
+        if (currentStatus !== newCoordinatorStatus) {
+          Swal.fire({
+            title: newCoordinatorStatus ? 'Coordinator Access Granted!' : 'Coordinator Access Removed',
+            text: newCoordinatorStatus ? 'You now have coordinator privileges.' : 'Your coordinator privileges have been removed.',
+            icon: newCoordinatorStatus ? 'success' : 'info',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        } else {
+          Swal.fire({
+            title: 'Status Refreshed',
+            text: 'Your coordinator status is up to date.',
+            icon: 'info',
+            timer: 1500,
+            showConfirmButton: false
+          });
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     // Get user info to determine if they have coordinator access
     const fetchUserInfo = async () => {
       try {
-        // Get user data from AuthManager instead of making API call
-        const user = AuthManager.getUser();
+        // Get user data from AuthManager first
+        let user = AuthManager.getUser();
+        
+        // If no user data in AuthManager, try to refresh from server
+        if (!user) {
+          console.log('🔍 Faculty_Sidebar: No user in AuthManager, refreshing from server...');
+          const refreshSuccess = await refreshUserData();
+          if (refreshSuccess) {
+            user = AuthManager.getUser();
+          }
+        }
         
         if (user) {
+          console.log('🔍 Faculty_Sidebar: User data loaded:', {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            is_coordinator: user.is_coordinator,
+            is_coordinator_type: typeof user.is_coordinator,
+            full_user: user
+          });
+          
           setUserInfo(user);
           setUserRole(user.role);
           setIsCoordinator(user.is_coordinator || false);
+          
+          console.log('🔍 Faculty_Sidebar: State set to:', {
+            userRole: user.role,
+            isCoordinator: user.is_coordinator || false
+          });
         } else {
-          console.warn('No user data found in AuthManager');
+          console.warn('No user data found in AuthManager or server');
         }
       } catch (error) {
         console.error('Error fetching user info:', error);
@@ -110,7 +177,135 @@ export default function FacultySidebar({ onToggle }) {
       }
     };
 
+    // Define refreshUserData function before using it
+    const refreshUserData = async () => {
+      try {
+        const token = AuthManager.getToken();
+        if (!token) return false;
+
+        // Try the protected route first
+        let response = await fetch('/user/refresh', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+
+        // If protected route fails, try the unprotected user route
+        if (!response.ok) {
+          console.log('Protected /user/refresh failed, trying /user route');
+          response = await fetch('/user', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            }
+          });
+        }
+
+        // If that also fails, try the debug route
+        if (!response.ok) {
+          console.log('Both protected routes failed, trying debug route');
+          response = await fetch('/debug/user-info', {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            }
+          });
+        }
+
+        if (response.ok) {
+          const data = await response.json();
+          // Handle both response formats
+          const userData = data.success ? data.user : data;
+          if (userData && userData.id) {
+            console.log('🔄 Faculty_Sidebar: Refreshed user data:', {
+              id: userData.id,
+              role: userData.role,
+              is_coordinator: userData.is_coordinator,
+              is_coordinator_type: typeof userData.is_coordinator
+            });
+            AuthManager.setUser(userData);
+            return true;
+          }
+        }
+        return false;
+      } catch (error) {
+        console.error('Error refreshing user data:', error);
+        return false;
+      }
+    };
+
     fetchUserInfo();
+
+    // Function to check coordinator access
+    const hasCoordinatorAccess = () => {
+      const user = AuthManager.getUser();
+      if (!user) return false;
+      return user.role === 'coordinator' || (user.role === 'faculty' && user.is_coordinator === true);
+    };
+    
+    // Set up periodic check for coordinator status changes (every 5 seconds for faster response)
+    const statusCheckInterval = setInterval(async () => {
+      const currentCoordinatorStatus = hasCoordinatorAccess();
+      
+      // Use the new force refresh method from AuthManager
+      const refreshSuccess = await AuthManager.forceRefreshUser();
+      
+      if (refreshSuccess) {
+        const newCoordinatorStatus = hasCoordinatorAccess();
+        
+        // If coordinator status changed, update state immediately
+        if (currentCoordinatorStatus !== newCoordinatorStatus) {
+          console.log('🔄 Coordinator status changed, updating sidebar...', {
+            from: currentCoordinatorStatus,
+            to: newCoordinatorStatus
+          });
+          
+          setIsCoordinator(newCoordinatorStatus);
+          
+          // Update user info state as well
+          const updatedUser = AuthManager.getUser();
+          if (updatedUser) {
+            setUserInfo(updatedUser);
+            setUserRole(updatedUser.role);
+            
+            console.log('🔄 Updated sidebar state:', {
+              userRole: updatedUser.role,
+              isCoordinator: newCoordinatorStatus,
+              is_coordinator_field: updatedUser.is_coordinator
+            });
+          }
+          
+          // Show notification about status change
+          if (newCoordinatorStatus) {
+            Swal.fire({
+              title: 'Coordinator Access Granted!',
+              text: 'You now have coordinator privileges. New menu options are now available.',
+              icon: 'success',
+              timer: 3000,
+              showConfirmButton: false
+            });
+          } else {
+            Swal.fire({
+              title: 'Coordinator Access Removed',
+              text: 'Your coordinator privileges have been removed.',
+              icon: 'info',
+              timer: 3000,
+              showConfirmButton: false
+            });
+          }
+        }
+      }
+    }, 3000); // Check every 3 seconds for faster response
+    
+    return () => {
+      clearInterval(statusCheckInterval);
+    };
   }, []);
 
   // Close dropdown when clicking outside
@@ -237,7 +432,7 @@ export default function FacultySidebar({ onToggle }) {
   const coordinatorMenuItems = [
     { name: "Enrollment Management", href: "/faculty/enrollment", icon: FaUserGraduate, description: "Review student enrollments" },
     { name: "Manual Enrollment", href: "/faculty/manual-enrollment", icon: FaUserPlus, description: "Enroll students manually (for those without internet/email)" },
-    { name: "Grade Progression", href: "/faculty/progression", icon: FaGraduationCap, description: "Progress Grade 11 students to Grade 12" },
+    { name: "Grade Progression", href: "/faculty/grade-progression", icon: FaLevelUpAlt, description: "Progress Grade 11 students to Grade 12" },
     { 
       name: "Student Management", 
       href: "/faculty/students", 
@@ -258,6 +453,15 @@ export default function FacultySidebar({ onToggle }) {
     ...baseMenuItems,
     ...(isCoordinator ? coordinatorMenuItems : []),
   ];
+  
+  // Debug logging for menu items
+  console.log('🔍 Faculty_Sidebar: Menu rendering debug:', {
+    isCoordinator,
+    baseMenuItemsCount: baseMenuItems.length,
+    coordinatorMenuItemsCount: coordinatorMenuItems.length,
+    totalMenuItemsCount: menuItems.length,
+    coordinatorMenuItems: coordinatorMenuItems.map(item => item.name)
+  });
 
   // Enhanced active state detection
   const isActive = (href) => {
@@ -504,6 +708,18 @@ export default function FacultySidebar({ onToggle }) {
                     <FaUser className="text-gray-400 text-sm" />
                     <span>Profile</span>
                   </Link>
+                  
+                  {/* Refresh Coordinator Status Button */}
+                  <button
+                    onClick={() => {
+                      setShowProfileDropdown(false);
+                      manualRefreshCoordinatorStatus();
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200 w-full text-left"
+                  >
+                    <FaCog className="text-gray-400 text-sm" />
+                    <span>Refresh Status</span>
+                  </button>
                 </div>
 
                 {/* Logout Button */}
@@ -566,6 +782,18 @@ export default function FacultySidebar({ onToggle }) {
                     <FaUser className="text-gray-400 text-sm" />
                     <span>Profile</span>
                   </Link>
+                  
+                  {/* Refresh Coordinator Status Button */}
+                  <button
+                    onClick={() => {
+                      setShowProfileDropdown(false);
+                      manualRefreshCoordinatorStatus();
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors duration-200 w-full text-left"
+                  >
+                    <FaCog className="text-gray-400 text-sm" />
+                    <span>Refresh Status</span>
+                  </button>
                 </div>
 
                 {/* Logout Button */}

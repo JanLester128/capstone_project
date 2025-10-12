@@ -276,10 +276,10 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
     section_name: section?.section_name || '',
     year_level: section?.year_level || '11',
     strand_id: section?.strand_id || '',
-    teacher_id: section?.teacher_id || ''
+    adviser_id: section?.adviser_id || ''
   });
   const [processing, setProcessing] = useState(false);
-  const [teacherWarning, setTeacherWarning] = useState('');
+  const [adviserWarning, setAdviserWarning] = useState('');
   const [strandSuggestion, setStrandSuggestion] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
 
@@ -342,31 +342,31 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
     }
   };
 
-  // Check for duplicate teacher assignment
-  const checkTeacherAssignment = (teacherId) => {
-    if (!teacherId) {
-      setTeacherWarning('');
+  // Check for duplicate adviser assignment
+  const checkAdviserAssignment = (adviserId) => {
+    if (!adviserId) {
+      setAdviserWarning('');
       return;
     }
 
     const assignedSection = sections.find(sec => 
-      sec.teacher_id === parseInt(teacherId) && 
+      sec.adviser_id === parseInt(adviserId) && 
       sec.id !== section?.id
     );
 
     if (assignedSection) {
-      const teacher = faculties.find(t => t.id === parseInt(teacherId));
-      setTeacherWarning(`${teacher?.firstname} ${teacher?.lastname} is already assigned to section ${assignedSection.section_name}`);
+      const adviser = faculties.find(t => t.id === parseInt(adviserId));
+      setAdviserWarning(`${adviser?.firstname} ${adviser?.lastname} is already assigned to section ${assignedSection.section_name}`);
     } else {
-      setTeacherWarning('');
+      setAdviserWarning('');
     }
   };
 
-  const handleTeacherChange = (e) => {
-    const teacherId = e.target.value;
-    setFormData({...formData, teacher_id: teacherId});
-    checkTeacherAssignment(teacherId);
-    setValidationErrors(prev => ({...prev, teacher_id: ''}));
+  const handleAdviserChange = (e) => {
+    const adviserId = e.target.value;
+    setFormData({...formData, adviser_id: adviserId});
+    checkAdviserAssignment(adviserId);
+    setValidationErrors(prev => ({...prev, adviser_id: ''}));
   };
 
   const handleStrandChange = (e) => {
@@ -389,8 +389,8 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
       errors.strand_id = 'Please select a strand';
     }
     
-    if (teacherWarning) {
-      errors.teacher_id = 'Please resolve teacher assignment conflict';
+    if (adviserWarning) {
+      errors.adviser_id = 'Please resolve adviser assignment conflict';
     }
     
     setValidationErrors(errors);
@@ -442,8 +442,8 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
         let errorMessage = `Failed to ${section ? 'update' : 'create'} section.`;
         
         // Handle specific validation errors
-        if (errors.teacher_id) {
-          errorMessage = Array.isArray(errors.teacher_id) ? errors.teacher_id[0] : errors.teacher_id;
+        if (errors.adviser_id) {
+          errorMessage = Array.isArray(errors.adviser_id) ? errors.adviser_id[0] : errors.adviser_id;
         } else if (errors.section_name) {
           errorMessage = Array.isArray(errors.section_name) ? errors.section_name[0] : errors.section_name;
         } else if (errors.message) {
@@ -480,7 +480,7 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
                 {section ? 'Edit Section' : 'Add New Section'}
               </h3>
               <p className="text-sm text-gray-600 mt-1">
-                {section ? 'Update section information' : 'Create a new class section with teacher assignment'}
+                {section ? 'Update section information' : 'Create a new class section with faculty adviser assignment'}
               </p>
             </div>
           </div>
@@ -599,18 +599,18 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
           {/* Assigned Teacher */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Assigned Teacher
+              Section Adviser
               <span className="text-xs text-gray-500 ml-1">(Optional)</span>
             </label>
             <select
-              value={formData.teacher_id}
-              onChange={handleTeacherChange}
+              value={formData.adviser_id}
+              onChange={handleAdviserChange}
               className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${
-                teacherWarning ? 'border-amber-300 bg-amber-50' : validationErrors.teacher_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                adviserWarning ? 'border-amber-300 bg-amber-50' : validationErrors.adviser_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
               }`}
               disabled={processing}
             >
-              <option value="">No teacher assigned</option>
+              <option value="">No adviser assigned</option>
               {(() => {
                 // Convert strand_id to string for comparison since object keys are strings
                 const strandId = String(formData.strand_id);
@@ -618,47 +618,47 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
                 // If a strand is selected and has assigned teachers, show only those teachers
                 if (formData.strand_id && facultiesByStrand[strandId] && facultiesByStrand[strandId].length > 0) {
                   console.log(`Showing ${facultiesByStrand[strandId].length} teachers for strand ID ${strandId}`);
-                  return facultiesByStrand[strandId].map(teacher => (
-                    <option key={teacher.id} value={teacher.id}>
-                      {teacher.firstname} {teacher.lastname}
-                      {teacher.role === 'coordinator' && ' (Coordinator)'}
+                  return facultiesByStrand[strandId].map(faculty => (
+                    <option key={faculty.id} value={faculty.id}>
+                      {faculty.firstname} {faculty.lastname}
+                      {faculty.role === 'coordinator' && ' (Coordinator)'}
                     </option>
                   ));
                 }
                 // If no strand selected or no teachers assigned to strand, show all teachers
                 console.log(`Showing all ${faculties.length} teachers (no strand filter or no teachers for strand ${strandId})`);
-                return faculties.map(teacher => (
-                  <option key={teacher.id} value={teacher.id}>
-                    {teacher.firstname} {teacher.lastname}
-                    {teacher.role === 'coordinator' && ' (Coordinator)'}
+                return faculties.map(faculty => (
+                  <option key={faculty.id} value={faculty.id}>
+                    {faculty.firstname} {faculty.lastname}
+                    {faculty.role === 'coordinator' && ' (Coordinator)'}
                   </option>
                 ));
               })()}
             </select>
             {formData.strand_id && facultiesByStrand[String(formData.strand_id)] && facultiesByStrand[String(formData.strand_id)].length > 0 && (
               <p className="mt-1 text-xs text-blue-600">
-                Showing {facultiesByStrand[String(formData.strand_id)].length} teachers assigned to selected strand only
+                Showing {facultiesByStrand[String(formData.strand_id)].length} faculty assigned to selected strand only
               </p>
             )}
             {formData.strand_id && (!facultiesByStrand[String(formData.strand_id)] || facultiesByStrand[String(formData.strand_id)].length === 0) && (
               <p className="mt-1 text-xs text-amber-600">
-                No teachers assigned to this strand. Showing all available teachers.
+                No faculty assigned to this strand. Showing all available faculty.
               </p>
             )}
-            {teacherWarning && (
+            {adviserWarning && (
               <div className="mt-2 flex items-start gap-2 text-amber-700 text-sm bg-amber-50 p-2 rounded-lg border border-amber-200">
                 <FaExclamationTriangle className="text-amber-500 mt-0.5 flex-shrink-0" />
-                <span>{teacherWarning}</span>
+                <span>{adviserWarning}</span>
               </div>
             )}
-            {validationErrors.teacher_id && (
+            {validationErrors.adviser_id && (
               <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
                 <FaExclamationTriangle className="text-xs" />
-                {validationErrors.teacher_id}
+                {validationErrors.adviser_id}
               </p>
             )}
             <p className="mt-1 text-xs text-gray-500">
-              Teachers can be assigned later if not available now
+              Faculty advisers can be assigned later if not available now
             </p>
           </div>
 
@@ -674,7 +674,7 @@ const SectionModal = ({ isOpen, onClose, section, faculties, facultiesByStrand, 
             </button>
             <button
               type="submit"
-              disabled={processing || teacherWarning}
+              disabled={processing || adviserWarning}
               className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {processing ? (

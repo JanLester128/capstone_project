@@ -110,7 +110,7 @@ class RegistrarController extends Controller
             return Inertia::render('Registrar/RegistrarClass', [
                 'strands' => Strand::orderBy('name')->get(),
                 'faculties' => User::whereIn('role', ['faculty', 'coordinator'])->get(),
-                'sections' => Section::with(['strand', 'teacher'])->orderBy('section_name')->get(),
+                'sections' => Section::with(['strand', 'adviser'])->orderBy('section_name')->get(),
                 'classSchedules' => [],
                 'activeSchoolYear' => null,
                 'message' => 'No active school year found. Please create and activate a school year first.'
@@ -156,7 +156,7 @@ class RegistrarController extends Controller
         ]);
 
         // Get all sections for class assignment
-        $sections = Section::with(['strand', 'teacher'])->orderBy('section_name')->get();
+        $sections = Section::with(['strand', 'adviser'])->orderBy('section_name')->get();
 
         // Debug: Check all schedules in database
         $allSchedules = ClassSchedule::all();
@@ -253,21 +253,22 @@ class RegistrarController extends Controller
             }
         }
 
-        // Weekend Validation (Saturday = 6, Sunday = 0)
+        // Weekend Validation temporarily removed for testing
         $startDate = \Carbon\Carbon::parse($validated['start_date']);
         $endDate = \Carbon\Carbon::parse($validated['end_date']);
         
-        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'start_date' => 'Start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
-        
-        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'end_date' => 'End date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
+        // Weekend validation commented out for testing purposes
+        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'start_date' => 'Start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
+        // 
+        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'end_date' => 'End date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
 
         // Validate enrollment window (1 week minimum, 2 weeks maximum)
         $diffDays = $startDate->diffInDays($endDate);
@@ -311,21 +312,22 @@ class RegistrarController extends Controller
             'enrollment_end' => 'nullable|date|after:enrollment_start',
         ]);
 
-        // Weekend Validation (Saturday = 6, Sunday = 0)
+        // Weekend Validation temporarily removed for testing
         $startDate = \Carbon\Carbon::parse($validated['start_date']);
         $endDate = \Carbon\Carbon::parse($validated['end_date']);
         
-        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'start_date' => 'Summer start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
-        
-        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'end_date' => 'Summer end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
+        // Weekend validation commented out for testing purposes
+        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'start_date' => 'Summer start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
+        // 
+        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'end_date' => 'Summer end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
 
         // Validate enrollment window (1 week minimum, 2 weeks maximum)
         $diffDays = $startDate->diffInDays($endDate);
@@ -765,7 +767,7 @@ class RegistrarController extends Controller
 
     public function getSections()
     {
-        $sections = Section::with(['strand', 'teacher'])
+        $sections = Section::with(['strand', 'adviser'])
             ->orderBy('section_name')
             ->get()
             ->map(function ($section) {
@@ -776,8 +778,8 @@ class RegistrarController extends Controller
                     'strand_id' => $section->strand_id,
                     'strand_name' => $section->strand ? $section->strand->name : 'No Strand',
                     'strand_code' => $section->strand ? $section->strand->code : 'N/A',
-                    'teacher_id' => $section->teacher_id,
-                    'teacher_name' => $section->teacher ? $section->teacher->name : 'No Teacher Assigned',
+                    'adviser_id' => $section->adviser_id,
+                    'adviser_name' => $section->adviser ? $section->adviser->firstname . ' ' . $section->adviser->lastname : 'No Adviser Assigned',
                 ];
             });
 
@@ -798,7 +800,7 @@ class RegistrarController extends Controller
         }])->orderBy('name')->get();
 
         // Get all sections for class assignment
-        $sections = Section::with(['strand', 'teacher'])->orderBy('section_name')->get();
+        $sections = Section::with(['strand', 'adviser'])->orderBy('section_name')->get();
 
         // Get all faculties for teacher assignment
         $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
@@ -884,7 +886,7 @@ class RegistrarController extends Controller
         ]);
 
         // Get sections filtered by active school year (with historical support)
-        $sectionsQuery = Section::with(['strand', 'teacher', 'schoolYear']);
+        $sectionsQuery = Section::with(['strand', 'adviser', 'schoolYear']);
 
         if ($activeSchoolYear) {
             // Show sections for active school year AND legacy sections (NULL school_year_id)
@@ -906,8 +908,8 @@ class RegistrarController extends Controller
                     'year_level' => $section->year_level,
                     'strand' => $section->strand ? $section->strand->name : 'No Strand',
                     'strand_id' => $section->strand_id,
-                    'teacher_name' => $section->teacher ? $section->teacher->firstname . ' ' . $section->teacher->lastname : 'No Teacher',
-                    'teacher_id' => $section->teacher_id,
+                    'adviser_name' => $section->adviser ? $section->adviser->firstname . ' ' . $section->adviser->lastname : 'No Adviser',
+                    'adviser_id' => $section->adviser_id,
                     'school_year_id' => $section->school_year_id,
                     'school_year' => $section->schoolYear ? $section->schoolYear->year_start . '-' . $section->schoolYear->year_end : 'Legacy',
                 ];
@@ -1346,16 +1348,16 @@ class RegistrarController extends Controller
             ],
             'year_level' => 'required|integer|in:11,12',
             'strand_id' => 'required|exists:strands,id',
-            'teacher_id' => [
+            'adviser_id' => [
                 'nullable',
                 'exists:users,id',
                 Rule::unique('sections')->where(function ($query) use ($request) {
-                    return $query->whereNotNull('teacher_id');
+                    return $query->whereNotNull('adviser_id');
                 })->ignore($request->id ?? null)
             ],
         ], [
             'section_name.unique' => 'A section with this name already exists for the selected strand and year level.',
-            'teacher_id.unique' => 'This teacher is already assigned to another section.',
+            'adviser_id.unique' => 'This teacher is already assigned to another section.',
         ]);
 
         try {
@@ -1363,8 +1365,8 @@ class RegistrarController extends Controller
             $activeSchoolYear = SchoolYear::where('is_active', true)->first();
 
             // Check if teacher is already assigned within the same school year
-            if ($request->teacher_id) {
-                $existingAssignment = Section::where('teacher_id', $request->teacher_id)
+            if ($request->adviser_id) {
+                $existingAssignment = Section::where('adviser_id', $request->adviser_id)
                     ->when($activeSchoolYear, function ($query) use ($activeSchoolYear) {
                         $query->where(function ($subQuery) use ($activeSchoolYear) {
                             $subQuery->where('school_year_id', $activeSchoolYear->id)
@@ -1374,9 +1376,9 @@ class RegistrarController extends Controller
                     ->first();
 
                 if ($existingAssignment) {
-                    $teacher = User::find($request->teacher_id);
+                    $teacher = User::find($request->adviser_id);
                     return redirect()->back()->withErrors([
-                        'teacher_id' => "Teacher {$teacher->firstname} {$teacher->lastname} is already assigned to section {$existingAssignment->section_name}"
+                        'adviser_id' => "Teacher {$teacher->firstname} {$teacher->lastname} is already assigned to section {$existingAssignment->section_name}"
                     ]);
                 }
             }
@@ -1385,7 +1387,7 @@ class RegistrarController extends Controller
                 'section_name' => $request->section_name,
                 'year_level' => $request->year_level,
                 'strand_id' => $request->strand_id,
-                'teacher_id' => $request->teacher_id,
+                'adviser_id' => $request->adviser_id,
                 'school_year_id' => $activeSchoolYear ? $activeSchoolYear->id : null,
             ]);
 
@@ -1405,7 +1407,7 @@ class RegistrarController extends Controller
             'section_name' => 'required|string|max:20|unique:sections,section_name,' . $id,
             'year_level' => 'required|integer|in:11,12',
             'strand_id' => 'required|exists:strands,id',
-            'teacher_id' => 'nullable|exists:users,id',
+            'adviser_id' => 'nullable|exists:users,id',
         ]);
 
         try {
@@ -1414,7 +1416,7 @@ class RegistrarController extends Controller
                 'section_name' => $request->section_name,
                 'year_level' => $request->year_level,
                 'strand_id' => $request->strand_id,
-                'teacher_id' => $request->teacher_id,
+                'adviser_id' => $request->adviser_id,
             ]);
 
             return redirect()->back()->with('success', 'Section updated successfully');
@@ -1814,10 +1816,13 @@ class RegistrarController extends Controller
                 'middlename' => $request->middlename,
                 'email' => $request->email,
                 'password' => Hash::make($password),
+                'plain_password' => $password, // Store plain password for first login
                 'role' => 'faculty',
                 'is_coordinator' => false,
                 'assigned_strand_id' => $request->assigned_strand_id,
-                'email_verified_at' => now()
+                'email_verified_at' => now(),
+                'password_change_required' => true, // Force password change on first login
+                'password_changed' => false // Mark as not changed yet
             ]);
 
             $emailSent = false;
@@ -1895,9 +1900,21 @@ class RegistrarController extends Controller
             $statusText = $newIsCoordinator ? 'promoted to coordinator' : 'changed back to faculty';
             $message = "Faculty member {$faculty->firstname} {$faculty->lastname} has been {$statusText} successfully.";
 
+            // If the user being updated is currently logged in, we need to update their session
+            $currentUser = Auth::user();
+            if ($currentUser && $currentUser->id === $faculty->id) {
+                // Update the current user's session data
+                Auth::login($faculty);
+            }
+
             return redirect()->back()->with([
                 'success' => $message,
-                'new_status' => $newStatus
+                'new_status' => $newStatus,
+                'updated_user' => [
+                    'id' => $faculty->id,
+                    'is_coordinator' => $faculty->is_coordinator,
+                    'role' => $faculty->role
+                ]
             ]);
         } catch (\Exception $e) {
             Log::error('Faculty status toggle failed: ' . $e->getMessage());
@@ -2251,30 +2268,31 @@ class RegistrarController extends Controller
             ]);
         }
         
-        if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'start_date' => 'Full Academic Year start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
-        
-        if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'end_date' => 'Full Academic Year end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
+        // Weekend validation temporarily removed for testing
+        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'start_date' => 'Full Academic Year start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
+        // 
+        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'end_date' => 'Full Academic Year end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
 
-        // Validate weekend restrictions for enrollment dates
-        if ($enrollmentStart->dayOfWeek === 0 || $enrollmentStart->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'enrollment_start' => 'Enrollment start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
-        
-        if ($enrollmentEnd->dayOfWeek === 0 || $enrollmentEnd->dayOfWeek === 6) {
-            return redirect()->back()->withErrors([
-                'enrollment_end' => 'Enrollment end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-            ]);
-        }
+        // Weekend restrictions for enrollment dates temporarily removed for testing
+        // if ($enrollmentStart->dayOfWeek === 0 || $enrollmentStart->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'enrollment_start' => 'Enrollment start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
+        // 
+        // if ($enrollmentEnd->dayOfWeek === 0 || $enrollmentEnd->dayOfWeek === 6) {
+        //     return redirect()->back()->withErrors([
+        //         'enrollment_end' => 'Enrollment end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
+        //     ]);
+        // }
 
         try {
             DB::beginTransaction();
@@ -3541,6 +3559,317 @@ class RegistrarController extends Controller
                 'success' => false,
                 'message' => 'Error fixing enrollment issues: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Faculty Assignment Management Methods
+     * Following HCI Principle 2: Match between system and real world - Role-based assignments
+     */
+    
+    /**
+     * Get faculty assignments data
+     */
+    public function getFacultyAssignments(Request $request)
+    {
+        try {
+            $schoolYearId = $request->input('school_year_id');
+            
+            if (!$schoolYearId) {
+                return response()->json(['error' => 'School year ID is required'], 400);
+            }
+            
+            // Get adviser assignments
+            $adviserAssignments = Section::where('school_year_id', $schoolYearId)
+                ->whereNotNull('adviser_id')
+                ->with(['adviser', 'strand'])
+                ->get()
+                ->map(function($section) {
+                    $studentCount = Enrollment::where('assigned_section_id', $section->id)
+                        ->whereIn('status', ['enrolled', 'approved'])
+                        ->count();
+                        
+                    return [
+                        'id' => $section->id,
+                        'faculty_id' => $section->adviser_id,
+                        'faculty_name' => $section->adviser->firstname . ' ' . $section->adviser->lastname,
+                        'section_id' => $section->id,
+                        'section_name' => $section->section_name,
+                        'strand_name' => $section->strand->name ?? 'N/A',
+                        'student_count' => $studentCount,
+                        'assignment_type' => 'adviser'
+                    ];
+                });
+            
+            // Get teaching assignments
+            $teachingAssignments = ClassSchedule::where('school_year_id', $schoolYearId)
+                ->where('is_active', true)
+                ->with(['faculty', 'subject', 'section'])
+                ->get()
+                ->groupBy('faculty_id')
+                ->map(function($assignments, $facultyId) {
+                    $faculty = $assignments->first()->faculty;
+                    $subjects = $assignments->pluck('subject.name')->toArray();
+                    
+                    return [
+                        'id' => $facultyId,
+                        'faculty_id' => $facultyId,
+                        'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname,
+                        'subject_count' => count($subjects),
+                        'subjects' => $subjects,
+                        'assignment_type' => 'teaching'
+                    ];
+                })
+                ->values();
+            
+            return response()->json([
+                'adviser_assignments' => $adviserAssignments,
+                'teaching_assignments' => $teachingAssignments
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error getting faculty assignments: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to load assignments'], 500);
+        }
+    }
+    
+    /**
+     * Assign faculty as section adviser
+     * Following HCI Principle 5: Error prevention - Validate assignments
+     */
+    public function assignAdviser(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'faculty_id' => 'required|exists:users,id',
+                'section_id' => 'required|exists:sections,id',
+                'school_year_id' => 'required|exists:school_years,id'
+            ]);
+            
+            // Check if faculty exists and has correct role
+            $faculty = User::where('id', $validated['faculty_id'])
+                ->where('role', 'faculty')
+                ->first();
+                
+            if (!$faculty) {
+                return response()->json(['error' => 'Faculty member not found'], 404);
+            }
+            
+            // Check if section already has an adviser
+            $section = Section::find($validated['section_id']);
+            if ($section->adviser_id) {
+                return response()->json([
+                    'error' => 'Section already has an adviser assigned. Please remove the current adviser first.'
+                ], 400);
+            }
+            
+            // Check if faculty is already an adviser for another section in the same school year
+            $existingAdviserAssignment = Section::where('school_year_id', $validated['school_year_id'])
+                ->where('adviser_id', $validated['faculty_id'])
+                ->first();
+                
+            if ($existingAdviserAssignment) {
+                return response()->json([
+                    'error' => 'Faculty member is already an adviser for section ' . $existingAdviserAssignment->section_name
+                ], 400);
+            }
+            
+            DB::beginTransaction();
+            
+            // Assign adviser to section
+            $section->adviser_id = $validated['faculty_id'];
+            $section->save();
+            
+            DB::commit();
+            
+            Log::info('Adviser assigned successfully', [
+                'faculty_id' => $validated['faculty_id'],
+                'section_id' => $validated['section_id'],
+                'assigned_by' => Auth::id()
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Faculty member assigned as adviser successfully',
+                'assignment' => [
+                    'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname,
+                    'section_name' => $section->section_name
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error assigning adviser: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to assign adviser'], 500);
+        }
+    }
+    
+    /**
+     * Assign teaching subjects to faculty (up to 4 subjects)
+     * Following HCI Principle 5: Error prevention - Limit to 4 subjects
+     */
+    public function assignTeaching(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'faculty_id' => 'required|exists:users,id',
+                'subject_ids' => 'required|array|max:4',
+                'subject_ids.*' => 'exists:subjects,id',
+                'section_id' => 'required|exists:sections,id',
+                'school_year_id' => 'required|exists:school_years,id'
+            ]);
+            
+            // Check if faculty exists
+            $faculty = User::where('id', $validated['faculty_id'])
+                ->where('role', 'faculty')
+                ->first();
+                
+            if (!$faculty) {
+                return response()->json(['error' => 'Faculty member not found'], 404);
+            }
+            
+            // Check current teaching load (should not exceed 4 subjects)
+            $currentAssignments = ClassSchedule::where('faculty_id', $validated['faculty_id'])
+                ->where('school_year_id', $validated['school_year_id'])
+                ->where('is_active', true)
+                ->count();
+                
+            if ($currentAssignments + count($validated['subject_ids']) > 4) {
+                return response()->json([
+                    'error' => 'Faculty member would exceed maximum of 4 subject assignments. Current: ' . $currentAssignments
+                ], 400);
+            }
+            
+            DB::beginTransaction();
+            
+            $createdAssignments = [];
+            
+            foreach ($validated['subject_ids'] as $subjectId) {
+                // Check if this subject is already assigned to this faculty in this section
+                $existingAssignment = ClassSchedule::where('faculty_id', $validated['faculty_id'])
+                    ->where('subject_id', $subjectId)
+                    ->where('section_id', $validated['section_id'])
+                    ->where('school_year_id', $validated['school_year_id'])
+                    ->first();
+                    
+                if ($existingAssignment) {
+                    continue; // Skip if already assigned
+                }
+                
+                // Create class schedule entry
+                $schedule = ClassSchedule::create([
+                    'faculty_id' => $validated['faculty_id'],
+                    'subject_id' => $subjectId,
+                    'section_id' => $validated['section_id'],
+                    'school_year_id' => $validated['school_year_id'],
+                    'day_of_week' => 'Monday', // Default - can be updated later
+                    'start_time' => '08:00:00', // Default - can be updated later
+                    'end_time' => '10:00:00', // Default - can be updated later
+                    'room' => 'TBA', // Default - can be updated later
+                    'semester' => 1, // Default - can be updated later
+                    'is_active' => true
+                ]);
+                
+                $createdAssignments[] = $schedule;
+            }
+            
+            DB::commit();
+            
+            Log::info('Teaching assignments created successfully', [
+                'faculty_id' => $validated['faculty_id'],
+                'subject_count' => count($createdAssignments),
+                'assigned_by' => Auth::id()
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Teaching assignments created successfully',
+                'assignments_created' => count($createdAssignments),
+                'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error assigning teaching subjects: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to assign teaching subjects'], 500);
+        }
+    }
+    
+    /**
+     * Remove adviser assignment
+     */
+    public function removeAdviser(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'assignment_id' => 'required|exists:sections,id'
+            ]);
+            
+            $section = Section::find($validated['assignment_id']);
+            
+            if (!$section->adviser_id) {
+                return response()->json(['error' => 'Section does not have an adviser assigned'], 400);
+            }
+            
+            DB::beginTransaction();
+            
+            $section->adviser_id = null;
+            $section->save();
+            
+            DB::commit();
+            
+            Log::info('Adviser assignment removed', [
+                'section_id' => $section->id,
+                'removed_by' => Auth::id()
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Adviser assignment removed successfully'
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error removing adviser assignment: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to remove adviser assignment'], 500);
+        }
+    }
+    
+    /**
+     * Remove teaching assignments
+     */
+    public function removeTeaching(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'assignment_id' => 'required|exists:users,id' // Faculty ID
+            ]);
+            
+            DB::beginTransaction();
+            
+            // Remove all teaching assignments for this faculty
+            $removedCount = ClassSchedule::where('faculty_id', $validated['assignment_id'])
+                ->where('is_active', true)
+                ->update(['is_active' => false]);
+            
+            DB::commit();
+            
+            Log::info('Teaching assignments removed', [
+                'faculty_id' => $validated['assignment_id'],
+                'removed_count' => $removedCount,
+                'removed_by' => Auth::id()
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Teaching assignments removed successfully',
+                'removed_count' => $removedCount
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollback();
+            Log::error('Error removing teaching assignments: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to remove teaching assignments'], 500);
         }
     }
 

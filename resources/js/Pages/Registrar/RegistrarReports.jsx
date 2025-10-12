@@ -1,657 +1,697 @@
 import React, { useState, useEffect } from 'react';
 import { Head } from '@inertiajs/react';
 import Sidebar from '../layouts/Sidebar';
-import { 
-    FaUsers, 
-    FaGraduationCap, 
-    FaFileExport, 
-    FaFilePdf, 
-    FaFileExcel, 
-    FaFilter,
-    FaSearch,
-    FaDownload,
-    FaEye,
-    FaSpinner,
-    FaChartBar,
-    FaCalendarAlt,
-    FaSchool,
-    FaUserGraduate,
-    FaClipboardList
+import {
+  FaUsers,
+  FaGraduationCap,
+  FaFileExport,
+  FaFilePdf,
+  FaFilter,
+  FaSearch,
+  FaDownload,
+  FaEye,
+  FaSpinner,
+  FaChartBar,
+  FaCalendarAlt,
+  FaSchool,
+  FaUserGraduate,
+  FaClipboardList,
+  FaPrint,
+  FaChalkboardTeacher,
+  FaBook
 } from 'react-icons/fa';
 import Swal from 'sweetalert2';
 
-const RegistrarReports = () => {
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [activeTab, setActiveTab] = useState('students');
-    const [loading, setLoading] = useState(false);
-    const [exporting, setExporting] = useState(false);
+export default function RegistrarReports({ strands, sections, subjects, teachers, schoolYears, auth }) {
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const saved = localStorage.getItem('registrar-sidebar-collapsed');
+    return saved ? JSON.parse(saved) : false;
+  });
 
-    // Filter states
-    const [filters, setFilters] = useState({
-        schoolYear: '',
-        semester: '',
-        section: '',
-        strand: '',
-        faculty: '',
-        gradeLevel: ''
-    });
+  const [activeTab, setActiveTab] = useState('students');
+  const [loading, setLoading] = useState(false);
+  const [reportData, setReportData] = useState(null);
 
-    // Data states
-    const [schoolYears, setSchoolYears] = useState([]);
-    const [sections, setSections] = useState([]);
-    const [strands, setStrands] = useState([]);
-    const [faculty, setFaculty] = useState([]);
-    const [reportData, setReportData] = useState([]);
-    const [statistics, setStatistics] = useState({});
+  // Filter states for each report type
+  const [studentFilters, setStudentFilters] = useState({
+    strand_id: '',
+    section_id: '',
+    subject_id: '',
+    school_year_id: '',
+    year_level: ''
+  });
 
-    // Search state
-    const [searchTerm, setSearchTerm] = useState('');
+  const [gradesFilters, setGradesFilters] = useState({
+    section_id: '',
+    subject_id: '',
+    faculty_id: '',
+    school_year_id: '',
+    semester: '',
+    sort_by: 'name'
+  });
 
-    // Fetch filter options on component mount
-    useEffect(() => {
-        fetchFilterOptions();
-    }, []);
+  const [subjectsFilters, setSubjectsFilters] = useState({
+    section_id: '',
+    strand_id: '',
+    school_year_id: '',
+    semester: ''
+  });
 
-    // Auto-generate initial report to show all students
-    useEffect(() => {
-        // Generate report after component is fully loaded
-        const timer = setTimeout(() => {
-            generateReport();
-        }, 500);
-        
-        return () => clearTimeout(timer);
-    }, []);
+  const [facultyFilters, setFacultyFilters] = useState({
+    faculty_id: '',
+    school_year_id: ''
+  });
 
-    const fetchFilterOptions = async () => {
-        try {
-            setLoading(true);
-            const response = await fetch('/registrar/reports/filter-options');
-            const data = await response.json();
-            
-            setSchoolYears(data.schoolYears || []);
-            setSections(data.sections || []);
-            setStrands(data.strands || []);
-            setFaculty(data.faculty || []);
-        } catch (error) {
-            console.error('Error fetching filter options:', error);
-            Swal.fire('Error', 'Failed to load filter options', 'error');
-        } finally {
-            setLoading(false);
-        }
-    };
+  const handleSidebarToggle = (collapsed) => {
+    setIsCollapsed(collapsed);
+  };
 
-    const handleFilterChange = (key, value) => {
-        setFilters(prev => ({
-            ...prev,
-            [key]: value
-        }));
-    };
+  // Generate report based on active tab
+  const generateReport = async (format = 'view') => {
+    try {
+      setLoading(true);
+      
+      let endpoint = '';
+      let filters = {};
+      
+      switch (activeTab) {
+        case 'students':
+          endpoint = '/registrar/reports/students';
+          filters = { ...studentFilters, format };
+          break;
+        case 'grades':
+          endpoint = '/registrar/reports/grades';
+          filters = { ...gradesFilters, format };
+          break;
+        case 'subjects':
+          endpoint = '/registrar/reports/subjects';
+          filters = { ...subjectsFilters, format };
+          break;
+        case 'teachers':
+          endpoint = '/registrar/reports/teachers';
+          filters = { ...facultyFilters, format };
+          break;
+        default:
+          return;
+      }
 
-    const generateReport = async () => {
-        try {
-            setLoading(true);
-            const queryParams = new URLSearchParams({
-                ...filters,
-                search: searchTerm,
-                type: activeTab
-            });
-
-            const response = await fetch(`/registrar/reports/generate?${queryParams}`);
-            const data = await response.json();
-            
-            console.log('Report generation response:', data);
-            
-            if (data.success) {
-                setReportData(data.data || []);
-                setStatistics(data.statistics || {});
-                console.log('Report data set:', data.data?.length || 0, 'students');
-            } else {
-                console.error('Report generation failed:', data.message);
-                Swal.fire('Error', data.message || 'Failed to generate report', 'error');
-            }
-        } catch (error) {
-            console.error('Error generating report:', error);
-            Swal.fire('Error', 'Failed to generate report', 'error');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const exportReport = async (format) => {
-        try {
-            setExporting(true);
-            const queryParams = new URLSearchParams({
-                ...filters,
-                search: searchTerm,
-                type: activeTab,
-                format: format
-            });
-
-            const response = await fetch(`/registrar/reports/export?${queryParams}`);
-            
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `${activeTab}_report_${new Date().toISOString().split('T')[0]}.${format}`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                
-                Swal.fire('Success', `Report exported as ${format.toUpperCase()}`, 'success');
-            } else {
-                throw new Error('Export failed');
-            }
-        } catch (error) {
-            console.error('Error exporting report:', error);
-            Swal.fire('Error', 'Failed to export report', 'error');
-        } finally {
-            setExporting(false);
-        }
-    };
-
-    const clearFilters = () => {
-        setFilters({
-            schoolYear: '',
-            semester: '',
-            section: '',
-            strand: '',
-            faculty: '',
-            gradeLevel: ''
-        });
-        setSearchTerm('');
-        setReportData([]);
-        setStatistics({});
-    };
-
-    const tabs = [
-        {
-            id: 'students',
-            label: 'Student List',
-            icon: FaUsers,
-            description: 'Generate student enrollment reports'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
         },
-        {
-            id: 'grades',
-            label: 'Grades Report',
-            icon: FaGraduationCap,
-            description: 'Generate student grades reports'
+        body: JSON.stringify(filters)
+      });
+
+      if (response.ok) {
+        if (format === 'pdf') {
+          // Handle PDF download
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = `${activeTab}_report_${new Date().toISOString().split('T')[0]}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          
+          Swal.fire({
+            icon: 'success',
+            title: 'Report Downloaded!',
+            text: 'Your PDF report has been downloaded successfully.',
+            timer: 3000,
+            showConfirmButton: false
+          });
+        } else {
+          const data = await response.json();
+          setReportData(data);
         }
-    ];
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to generate report');
+      }
+    } catch (error) {
+      console.error('Error generating report:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Report Generation Failed',
+        text: error.message || 'Unable to generate report. Please try again.',
+        confirmButtonColor: '#ef4444'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const renderFilters = () => (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-            <div className="flex items-center gap-2 mb-4">
-                <FaFilter className="text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-800">Filters</h3>
-                <button
-                    onClick={clearFilters}
-                    className="ml-auto text-sm text-gray-500 hover:text-gray-700 underline"
-                >
-                    Clear All
-                </button>
+  // Print report
+  const printReport = () => {
+    window.print();
+  };
+
+  // Clear filters
+  const clearFilters = () => {
+    switch (activeTab) {
+      case 'students':
+        setStudentFilters({
+          strand_id: '',
+          section_id: '',
+          subject_id: '',
+          school_year_id: '',
+          year_level: ''
+        });
+        break;
+      case 'grades':
+        setGradesFilters({
+          section_id: '',
+          subject_id: '',
+          faculty_id: '',
+          school_year_id: '',
+          semester: '',
+          sort_by: 'name'
+        });
+        break;
+      case 'subjects':
+        setSubjectsFilters({
+          section_id: '',
+          strand_id: '',
+          school_year_id: '',
+          semester: ''
+        });
+        break;
+      case 'teachers':
+        setFacultyFilters({
+          faculty_id: '',
+          school_year_id: ''
+        });
+        break;
+    }
+    setReportData(null);
+  };
+
+  // Filter sections by selected strand and remove duplicates
+  const getFilteredSections = (strandId) => {
+    let filteredSections = sections;
+    
+    if (strandId) {
+      filteredSections = sections.filter(section => {
+        // Check both strand_id and strand.id for compatibility
+        return section.strand_id == strandId || (section.strand && section.strand.id == strandId);
+      });
+    }
+    
+    // Remove duplicates by section name
+    const uniqueSections = filteredSections.filter((section, index, self) => 
+      index === self.findIndex(s => s.section_name === section.section_name)
+    );
+    
+    return uniqueSections;
+  };
+
+  // Remove duplicates from any array by a specific field
+  const removeDuplicates = (array, field) => {
+    return array.filter((item, index, self) => 
+      index === self.findIndex(i => i[field] === item[field])
+    );
+  };
+
+  // Get unique strands, sections, subjects, and teachers
+  const uniqueStrands = removeDuplicates(strands || [], 'name');
+  const uniqueSubjects = removeDuplicates(subjects || [], 'name');
+  const uniqueTeachers = removeDuplicates(teachers || [], 'email');
+
+  return (
+    <>
+      <Head title="Reports - Registrar Portal" />
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
+        
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
+          {/* Header */}
+          <header className="bg-white shadow-sm border-b px-6 py-4 print:hidden">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">Reports Generation</h1>
+                <p className="text-gray-600">Generate comprehensive reports for students, grades, subjects, and teachers</p>
+              </div>
+              <div className="flex items-center space-x-2 text-sm text-gray-500">
+                <FaCalendarAlt className="w-4 h-4" />
+                <span>{new Date().toLocaleDateString()}</span>
+              </div>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
-                {/* School Year Filter */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        School Year
-                    </label>
-                    <select
-                        value={filters.schoolYear}
-                        onChange={(e) => handleFilterChange('schoolYear', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          </header>
+
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-7xl mx-auto">
+              
+              {/* Report Type Tabs */}
+              <div className="bg-white rounded-lg shadow-sm border mb-6 print:hidden">
+                <div className="border-b border-gray-200">
+                  <nav className="flex space-x-8 px-6">
+                    <button
+                      onClick={() => { setActiveTab('students'); setReportData(null); }}
+                      className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                        activeTab === 'students'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
                     >
+                      <FaUsers className="inline mr-2" />
+                      Student List
+                    </button>
+                    
+                    <button
+                      onClick={() => { setActiveTab('grades'); setReportData(null); }}
+                      className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                        activeTab === 'grades'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <FaGraduationCap className="inline mr-2" />
+                      Grades Report
+                    </button>
+                    
+                    <button
+                      onClick={() => { setActiveTab('subjects'); setReportData(null); }}
+                      className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                        activeTab === 'subjects'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <FaBook className="inline mr-2" />
+                      Subjects Report
+                    </button>
+                    
+                    <button
+                      onClick={() => { setActiveTab('teachers'); setReportData(null); }}
+                      className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                        activeTab === 'teachers'
+                          ? 'border-blue-500 text-blue-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <FaChalkboardTeacher className="inline mr-2" />
+                      Teacher Report
+                    </button>
+                  </nav>
+                </div>
+
+                {/* Filters Section */}
+                <div className="p-6">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                    <FaFilter className="mr-2 text-blue-500" />
+                    Report Filters
+                  </h3>
+                  
+                  {/* Student List Filters */}
+                  {activeTab === 'students' && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+                      <select
+                        value={studentFilters.school_year_id}
+                        onChange={(e) => setStudentFilters({...studentFilters, school_year_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
                         <option value="">All School Years</option>
-                        {schoolYears.map(sy => (
-                            <option key={sy.id} value={sy.id}>
-                                {sy.year_start}-{sy.year_end} ({sy.semester})
-                            </option>
+                        {schoolYears.map(year => (
+                          <option key={year.id} value={year.id}>
+                            {year.year_start}-{year.year_end}
+                          </option>
                         ))}
-                    </select>
-                </div>
+                      </select>
+                      
+                      <select
+                        value={studentFilters.strand_id}
+                        onChange={(e) => setStudentFilters({...studentFilters, strand_id: e.target.value, section_id: ''})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Strands</option>
+                        {uniqueStrands.map(strand => (
+                          <option key={strand.id} value={strand.id}>{strand.name}</option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={studentFilters.section_id}
+                        onChange={(e) => setStudentFilters({...studentFilters, section_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Sections</option>
+                        {getFilteredSections(studentFilters.strand_id).map(section => (
+                          <option key={section.id} value={section.id}>{section.section_name}</option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={studentFilters.subject_id}
+                        onChange={(e) => setStudentFilters({...studentFilters, subject_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Subjects</option>
+                        {uniqueSubjects.map(subject => (
+                          <option key={subject.id} value={subject.id}>{subject.name}</option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={studentFilters.year_level}
+                        onChange={(e) => setStudentFilters({...studentFilters, year_level: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Year Levels</option>
+                        <option value="Grade 11">Grade 11</option>
+                        <option value="Grade 12">Grade 12</option>
+                      </select>
+                    </div>
+                  )}
 
-                {/* Semester Filter */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Semester
-                    </label>
-                    <select
-                        value={filters.semester}
-                        onChange={(e) => handleFilterChange('semester', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                        <option value="">All Semesters</option>
-                        <option value="1st">1st Semester</option>
-                        <option value="2nd">2nd Semester</option>
-                    </select>
-                </div>
-
-                {/* Section Filter */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Section
-                    </label>
-                    <select
-                        value={filters.section}
-                        onChange={(e) => handleFilterChange('section', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
+                  {/* Grades Report Filters */}
+                  {activeTab === 'grades' && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+                      <select
+                        value={gradesFilters.school_year_id}
+                        onChange={(e) => setGradesFilters({...gradesFilters, school_year_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All School Years</option>
+                        {schoolYears.map(year => (
+                          <option key={year.id} value={year.id}>
+                            {year.year_start}-{year.year_end}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={gradesFilters.section_id}
+                        onChange={(e) => setGradesFilters({...gradesFilters, section_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
                         <option value="">All Sections</option>
                         {sections.map(section => (
-                            <option key={section.id} value={section.id}>
-                                {section.section_name}
-                            </option>
+                          <option key={section.id} value={section.id}>{section.section_name}</option>
                         ))}
-                    </select>
-                </div>
+                      </select>
+                      
+                      <select
+                        value={gradesFilters.subject_id}
+                        onChange={(e) => setGradesFilters({...gradesFilters, subject_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Subjects</option>
+                        {uniqueSubjects.map(subject => (
+                          <option key={subject.id} value={subject.id}>{subject.name}</option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={gradesFilters.faculty_id}
+                        onChange={(e) => setGradesFilters({...gradesFilters, faculty_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Faculty</option>
+                        {uniqueTeachers.map(teacher => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher.firstname} {teacher.lastname}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={gradesFilters.semester}
+                        onChange={(e) => setGradesFilters({...gradesFilters, semester: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Both Semesters</option>
+                        <option value="1">1st Semester</option>
+                        <option value="2">2nd Semester</option>
+                      </select>
+                      
+                      <select
+                        value={gradesFilters.sort_by}
+                        onChange={(e) => setGradesFilters({...gradesFilters, sort_by: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="name">Sort by Name</option>
+                        <option value="grade">Sort by Grade</option>
+                      </select>
+                    </div>
+                  )}
 
-                {/* Strand Filter */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Strand
-                    </label>
-                    <select
-                        value={filters.strand}
-                        onChange={(e) => handleFilterChange('strand', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
+                  {/* Subjects Report Filters */}
+                  {activeTab === 'subjects' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <select
+                        value={subjectsFilters.school_year_id}
+                        onChange={(e) => setSubjectsFilters({...subjectsFilters, school_year_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All School Years</option>
+                        {schoolYears.map(year => (
+                          <option key={year.id} value={year.id}>
+                            {year.year_start}-{year.year_end}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={subjectsFilters.strand_id}
+                        onChange={(e) => setSubjectsFilters({...subjectsFilters, strand_id: e.target.value, section_id: ''})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
                         <option value="">All Strands</option>
-                        {strands.map(strand => (
-                            <option key={strand.id} value={strand.id}>
-                                {strand.code} - {strand.name}
-                            </option>
+                        {uniqueStrands.map(strand => (
+                          <option key={strand.id} value={strand.id}>{strand.name}</option>
                         ))}
-                    </select>
-                </div>
-
-                {/* Faculty Filter (for grades report) */}
-                {activeTab === 'grades' && (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Faculty
-                        </label>
-                        <select
-                            value={filters.faculty}
-                            onChange={(e) => handleFilterChange('faculty', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                            <option value="">All Faculty</option>
-                            {faculty.map(f => (
-                                <option key={f.id} value={f.id}>
-                                    {f.firstname} {f.lastname}
-                                </option>
-                            ))}
-                        </select>
+                      </select>
+                      
+                      <select
+                        value={subjectsFilters.section_id}
+                        onChange={(e) => setSubjectsFilters({...subjectsFilters, section_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Sections</option>
+                        {getFilteredSections(subjectsFilters.strand_id).map(section => (
+                          <option key={section.id} value={section.id}>{section.section_name}</option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={subjectsFilters.semester}
+                        onChange={(e) => setSubjectsFilters({...subjectsFilters, semester: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Both Semesters</option>
+                        <option value="1">1st Semester</option>
+                        <option value="2">2nd Semester</option>
+                      </select>
                     </div>
-                )}
+                  )}
 
-                {/* Grade Level Filter */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Grade Level
-                    </label>
-                    <select
-                        value={filters.gradeLevel}
-                        onChange={(e) => handleFilterChange('gradeLevel', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  {/* Teachers Report Filters */}
+                  {activeTab === 'teachers' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      <select
+                        value={teacherFilters.school_year_id}
+                        onChange={(e) => setTeacherFilters({...teacherFilters, school_year_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All School Years</option>
+                        {schoolYears.map(year => (
+                          <option key={year.id} value={year.id}>
+                            {year.year_start}-{year.year_end}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={facultyFilters.faculty_id}
+                        onChange={(e) => setFacultyFilters({...facultyFilters, faculty_id: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Faculty</option>
+                        {uniqueTeachers.map(teacher => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher.firstname} {teacher.lastname}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-4">
+                    <button
+                      onClick={() => generateReport('view')}
+                      disabled={loading}
+                      className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50"
                     >
-                        <option value="">All Grades</option>
-                        <option value="11">Grade 11</option>
-                        <option value="12">Grade 12</option>
-                    </select>
+                      {loading ? (
+                        <FaSpinner className="animate-spin mr-2" />
+                      ) : (
+                        <FaEye className="mr-2" />
+                      )}
+                      Generate Report
+                    </button>
+                    
+                    <button
+                      onClick={() => generateReport('pdf')}
+                      disabled={loading}
+                      className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center disabled:opacity-50"
+                    >
+                      <FaFilePdf className="mr-2" />
+                      Download PDF
+                    </button>
+                    
+                    {reportData && (
+                      <button
+                        onClick={printReport}
+                        className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+                      >
+                        <FaPrint className="mr-2" />
+                        Print Report
+                      </button>
+                    )}
+                    
+                    <button
+                      onClick={clearFilters}
+                      className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-colors"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
                 </div>
-            </div>
+              </div>
 
-            {/* Search Bar */}
-            <div className="flex gap-4">
-                <div className="flex-1 relative">
-                    <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Search students, subjects, or faculty..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                </div>
-                <button
-                    onClick={generateReport}
-                    disabled={loading}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                    {loading ? <FaSpinner className="animate-spin" /> : <FaSearch />}
-                    Generate Report
-                </button>
-                <button
-                    onClick={() => window.open('/test-registrar-reports', '_blank')}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm"
-                >
-                    Test Backend
-                </button>
-            </div>
-        </div>
-    );
+              {/* Report Display */}
+              {reportData && (
+                <div className="bg-white rounded-lg shadow-sm border p-6">
+                  <div className="mb-6 print:mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">{reportData.title}</h2>
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <p>Generated on: {reportData.generated_at}</p>
+                      <p>Generated by: {reportData.generated_by}</p>
+                      <p>Total Records: {reportData.total_students || reportData.total_records || reportData.total_subjects || reportData.total_teachers}</p>
+                    </div>
+                  </div>
 
-    const renderStatistics = () => {
-        if (!statistics || Object.keys(statistics).length === 0) return null;
-
-        return (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                {Object.entries(statistics).map(([key, value]) => (
-                    <div key={key} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-600 capitalize">
-                                    {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                                </p>
-                                <p className="text-2xl font-bold text-gray-900">{value}</p>
-                            </div>
-                            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                                <FaChartBar className="text-blue-600 text-xl" />
-                            </div>
+                  {/* Applied Filters */}
+                  <div className="mb-6 p-4 bg-blue-50 rounded-lg print:bg-white print:border">
+                    <h3 className="font-semibold text-blue-800 mb-2">Applied Filters:</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                      {Object.entries(reportData.filters).map(([key, value]) => (
+                        <div key={key}>
+                          <span className="font-medium capitalize">{key.replace('_', ' ')}:</span> {value}
                         </div>
+                      ))}
                     </div>
-                ))}
-            </div>
-        );
-    };
+                  </div>
 
-    const renderStudentReport = () => (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-800">Student List Report</h3>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => exportReport('pdf')}
-                            disabled={exporting || reportData.length === 0}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                            <FaFilePdf />
-                            PDF
-                        </button>
-                        <button
-                            onClick={() => exportReport('xlsx')}
-                            disabled={exporting || reportData.length === 0}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                            <FaFileExcel />
-                            Excel
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <div className="overflow-x-auto">
-                {reportData.length > 0 ? (
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Student Name
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Type
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Grade Level
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Section
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Strand
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    School Year
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Status
-                                </th>
-                            </tr>
+                  {/* Student List Report Display */}
+                  {activeTab === 'students' && reportData.students && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse border border-gray-300">
+                        <thead>
+                          <tr className="bg-gray-50">
+                            <th className="border border-gray-300 px-4 py-3 text-left">Full Name</th>
+                            <th className="border border-gray-300 px-4 py-3 text-left">LRN</th>
+                            <th className="border border-gray-300 px-4 py-3 text-left">Strand</th>
+                            <th className="border border-gray-300 px-4 py-3 text-left">Year Level</th>
+                            <th className="border border-gray-300 px-4 py-3 text-left">Section</th>
+                            <th className="border border-gray-300 px-4 py-3 text-left">Status</th>
+                          </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {reportData.map((student, index) => (
-                                <tr key={index} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900">
-                                            {student.firstname} {student.lastname}
-                                        </div>
-                                        <div className="text-sm text-gray-500">
-                                            {student.email}
-                                        </div>
-                                        {student.previous_school && (
-                                            <div className="text-xs text-gray-400 mt-1">
-                                                From: {student.previous_school}
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                            student.student_type === 'transferee' 
-                                                ? 'bg-purple-100 text-purple-800'
-                                                : 'bg-blue-100 text-blue-800'
-                                        }`}>
-                                            {student.student_type === 'transferee' ? 'Transferee' : 'Regular'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        Grade {student.grade_level}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {student.section_name || 'N/A'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {student.strand_code} - {student.strand_name}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {student.school_year}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                            student.status === 'enrolled' 
-                                                ? 'bg-green-100 text-green-800'
-                                                : student.status === 'pending'
-                                                ? 'bg-yellow-100 text-yellow-800'
-                                                : 'bg-red-100 text-red-800'
-                                        }`}>
-                                            {student.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                ) : (
-                    <div className="p-12 text-center">
-                        <FaUsers className="mx-auto text-4xl text-gray-400 mb-4" />
-                        <p className="text-gray-500">No student data found. Apply filters and generate report.</p>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-
-    const renderGradesReport = () => (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-800">Grades Report</h3>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => exportReport('pdf')}
-                            disabled={exporting || reportData.length === 0}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                            <FaFilePdf />
-                            PDF
-                        </button>
-                        <button
-                            onClick={() => exportReport('xlsx')}
-                            disabled={exporting || reportData.length === 0}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                            <FaFileExcel />
-                            Excel
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <div className="overflow-x-auto">
-                {reportData.length > 0 ? (
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Student Name
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Subject
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    1st Sem AVG
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    2nd Sem AVG
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Final Grade
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Source
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Remarks
-                                </th>
+                        <tbody>
+                          {reportData.students.map((student, index) => (
+                            <tr key={index} className="hover:bg-gray-50">
+                              <td className="border border-gray-300 px-4 py-3">{student.full_name}</td>
+                              <td className="border border-gray-300 px-4 py-3">{student.lrn}</td>
+                              <td className="border border-gray-300 px-4 py-3">{student.strand}</td>
+                              <td className="border border-gray-300 px-4 py-3">{student.year_level}</td>
+                              <td className="border border-gray-300 px-4 py-3">{student.section}</td>
+                              <td className="border border-gray-300 px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  student.enrollment_status === 'enrolled' || student.enrollment_status === 'approved'
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  {student.enrollment_status}
+                                </span>
+                              </td>
                             </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {reportData.map((grade, index) => (
-                                <tr key={index} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900">
-                                            {grade.student_name}
-                                        </div>
-                                        <div className="text-sm text-gray-500">
-                                            {grade.section_name}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {grade.subject_name}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {grade.first_sem_avg || 'N/A'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {grade.second_sem_avg || 'N/A'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`text-sm font-semibold ${
-                                            grade.final_grade >= 75 
-                                                ? 'text-green-600' 
-                                                : 'text-red-600'
-                                        }`}>
-                                            {grade.final_grade || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm text-gray-900">
-                                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                                grade.grade_source === 'Regular' 
-                                                    ? 'bg-blue-100 text-blue-800'
-                                                    : grade.grade_source === 'Transferee Credit'
-                                                    ? 'bg-purple-100 text-purple-800'
-                                                    : 'bg-orange-100 text-orange-800'
-                                            }`}>
-                                                {grade.grade_source}
-                                            </span>
-                                        </div>
-                                        {grade.previous_school && (
-                                            <div className="text-xs text-gray-500 mt-1">
-                                                From: {grade.previous_school}
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {grade.remarks || 'N/A'}
-                                    </td>
-                                </tr>
-                            ))}
+                          ))}
                         </tbody>
-                    </table>
-                ) : (
-                    <div className="p-12 text-center">
-                        <FaGraduationCap className="mx-auto text-4xl text-gray-400 mb-4" />
-                        <p className="text-gray-500">No grades data found. Apply filters and generate report.</p>
+                      </table>
                     </div>
-                )}
-            </div>
-        </div>
-    );
+                  )}
 
-    return (
-        <div className="min-h-screen bg-gray-50">
-            <Head title="Reports - ONSTS" />
-            
-            <Sidebar onToggle={setSidebarCollapsed} />
-            
-            <div className={`transition-all duration-300 ${
-                sidebarCollapsed ? 'ml-16' : 'ml-64'
-            }`}>
-                <div className="p-6">
-                    {/* Header */}
-                    <div className="mb-8">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
-                                <FaChartBar className="text-white text-xl" />
-                            </div>
-                            <div>
-                                <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
-                                <p className="text-gray-600">Generate and export student and academic reports</p>
-                            </div>
-                        </div>
+                  {/* Empty State */}
+                  {reportData && (
+                    (reportData.students?.length === 0 || 
+                     reportData.grades?.length === 0 || 
+                     reportData.subjects?.length === 0 || 
+                     reportData.teachers?.length === 0) && (
+                    <div className="text-center py-12">
+                      <FaClipboardList className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-700 mb-2">No Data Found</h3>
+                      <p className="text-gray-500">No records match the selected filters. Try adjusting your filter criteria.</p>
                     </div>
-
-                    {/* Tabs */}
-                    <div className="flex space-x-1 mb-6">
-                        {tabs.map((tab) => {
-                            const Icon = tab.icon;
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${
-                                        activeTab === tab.id
-                                            ? 'bg-blue-600 text-white shadow-lg'
-                                            : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
-                                    }`}
-                                >
-                                    <Icon className="text-lg" />
-                                    <span>{tab.label}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {/* Filters */}
-                    {renderFilters()}
-
-                    {/* Statistics */}
-                    {renderStatistics()}
-
-                    {/* Report Content */}
-                    {activeTab === 'students' && renderStudentReport()}
-                    {activeTab === 'grades' && renderGradesReport()}
+                  ))}
                 </div>
-            </div>
-        </div>
-    );
-};
+              )}
 
-export default RegistrarReports;
+              {/* Instructions */}
+              {!reportData && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 print:hidden">
+                  <h3 className="text-lg font-semibold text-blue-800 mb-4">How to Generate Reports</h3>
+                  <div className="space-y-3 text-blue-700">
+                    <p>1. <strong>Select Report Type:</strong> Choose from Student List, Grades, Subjects, or Teacher reports using the tabs above.</p>
+                    <p>2. <strong>Apply Filters:</strong> Use the filter dropdowns to narrow down your report data (optional).</p>
+                    <p>3. <strong>Generate Report:</strong> Click "Generate Report" to view the data or "Download PDF" to save it.</p>
+                    <p>4. <strong>Print Report:</strong> Use the "Print Report" button to print the displayed report.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          .print\\:hidden {
+            display: none !important;
+          }
+          
+          .print\\:mb-4 {
+            margin-bottom: 1rem !important;
+          }
+          
+          .print\\:bg-white {
+            background-color: white !important;
+          }
+          
+          .print\\:border {
+            border: 1px solid #d1d5db !important;
+          }
+          
+          body {
+            font-size: 12px;
+          }
+          
+          table {
+            page-break-inside: avoid;
+          }
+          
+          thead {
+            display: table-header-group;
+          }
+        }
+      `}</style>
+    </>
+  );
+}

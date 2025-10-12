@@ -63,9 +63,7 @@ class EnrollmentController extends Controller
         $enrollmentData = [
             'student_id' => Auth::id(), // This should be the user ID, which is correct
             'grade_level' => $validated['gradeLevel'],
-            'last_school_attended' => 'Previous School', // Default value since not in form
-            'last_grade_completed' => $validated['lastGrade'],
-            'last_school_year' => $validated['lastSY'],
+            'previous_school' => 'Previous School', // Default value since not in form
             'status' => 'pending',
         ];
 

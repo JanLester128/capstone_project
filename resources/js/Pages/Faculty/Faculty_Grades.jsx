@@ -44,6 +44,34 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
     return saved ? JSON.parse(saved) : false;
   });
+
+  // Authentication check on component mount
+  useEffect(() => {
+    const checkAuth = () => {
+      const user = AuthManager.getUser();
+      const token = AuthManager.getToken();
+      
+      if (!user || !token) {
+        console.log('🚨 No authentication found, redirecting to login');
+        window.location.href = '/login';
+        return;
+      }
+      
+      if (user.role !== 'faculty' && user.role !== 'coordinator') {
+        console.log('🚨 Invalid role for faculty grades:', user.role);
+        window.location.href = '/login';
+        return;
+      }
+      
+      console.log('✅ Authentication verified for faculty grades:', {
+        user_id: user.id,
+        role: user.role,
+        name: user.firstname + ' ' + user.lastname
+      });
+    };
+    
+    checkAuth();
+  }, []);
   const [selectedSection, setSelectedSection] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -159,6 +187,16 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
   const loadStudentsAndGrades = (sectionId, subjectId) => {
     setLoading(true);
     
+    // Check authentication before making request
+    const user = AuthManager.getUser();
+    const token = AuthManager.getToken();
+    
+    if (!user || !token) {
+      console.log('🚨 No authentication for loadStudentsAndGrades, redirecting to login');
+      window.location.href = '/login';
+      return;
+    }
+    
     // Use Inertia router for proper authentication
     router.get(`/faculty/grades/section/${sectionId}/subject/${subjectId}`, {}, {
       preserveState: true,
@@ -195,6 +233,15 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
       },
       onError: (errors) => {
         console.error('Failed to load students:', errors);
+        
+        // Check if it's an authentication error
+        if (errors && (errors.status === 401 || errors.status === 403 || errors.message?.includes('Unauthenticated'))) {
+          console.log('🚨 Authentication error in loadStudentsAndGrades, redirecting to login');
+          AuthManager.clearAuth();
+          window.location.href = '/login';
+          return;
+        }
+        
         Swal.fire('Error', 'Failed to load students', 'error');
         setLoading(false);
       }
@@ -236,6 +283,14 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
       });
 
       console.log('📡 Fetch response status:', response.status);
+      
+      // Handle authentication errors
+      if (response.status === 401 || response.status === 403) {
+        console.log('🚨 Authentication failed, redirecting to login');
+        AuthManager.clearAuth();
+        window.location.href = '/login';
+        return;
+      }
       
       if (response.ok) {
         const data = await response.json();
@@ -1089,7 +1144,29 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredStudents.map((student, index) => {
+                    {filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={activeQuarters.length + 4} className="px-6 py-12 text-center">
+                          <div className="flex flex-col items-center justify-center space-y-4">
+                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                              <FaUsers className="w-8 h-8 text-gray-400" />
+                            </div>
+                            <div className="text-center">
+                              <h3 className="text-lg font-semibold text-gray-700 mb-2">No Students Found</h3>
+                              <p className="text-gray-500 mb-4 max-w-md">
+                                There are no enrolled students in this section for grade input. 
+                                Students may need to be enrolled or their enrollment status may need approval.
+                              </p>
+                              <div className="text-sm text-gray-400 bg-gray-50 px-4 py-2 rounded-lg inline-block">
+                                <FaInfoCircle className="inline w-4 h-4 mr-2" />
+                                Contact the registrar to check student enrollment status
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredStudents.map((student, index) => {
                       const grades = studentGrades[student.id] || {};
                       const isEditing = editingGrades[student.id];
                       const isSaving = savingGrades[student.id];
@@ -1290,14 +1367,34 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
                           </td>
                         </tr>
                       );
-                    })}
+                    })
+                    )}
                   </tbody>
                 </table>
               </div>
             ) : (
               // Card View
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredStudents.map((student) => {
+              <div className="p-6">
+                {filteredStudents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                      <FaUsers className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-700 mb-2">No Students Found</h3>
+                      <p className="text-gray-500 mb-4 max-w-md">
+                        There are no enrolled students in this section for grade input. 
+                        Students may need to be enrolled or their enrollment status may need approval.
+                      </p>
+                      <div className="text-sm text-gray-400 bg-gray-50 px-4 py-2 rounded-lg inline-block">
+                        <FaInfoCircle className="inline w-4 h-4 mr-2" />
+                        Contact the registrar to check student enrollment status
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredStudents.map((student) => {
                   const grades = studentGrades[student.id] || {};
                   const isEditing = editingGrades[student.id];
                   const isSaving = savingGrades[student.id];
@@ -1430,7 +1527,9 @@ export default function FacultyGrades({ sections = [], currentSubject = null, au
                       </div>
                     </div>
                   );
-                })}
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

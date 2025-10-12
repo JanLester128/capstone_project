@@ -83,7 +83,7 @@ class ScheduleController extends Controller
         $faculties = User::whereIn('role', ['faculty', 'coordinator'])->orderBy('lastname')->get();
         
         // Get sections filtered by current academic year
-        $sections = Section::with(['strand', 'teacher'])
+        $sections = Section::with(['strand', 'adviser'])
             ->when($currentAcademicYear, function($query) use ($currentAcademicYear) {
                 $query->where('school_year_id', $currentAcademicYear->id);
             })

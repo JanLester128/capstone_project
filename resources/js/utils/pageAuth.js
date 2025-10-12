@@ -60,7 +60,7 @@ export const setupPagePersistence = () => {
   console.log('Page persistence setup complete');
 };
 
-// Auto-initialize when script loads
-if (typeof window !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', setupPagePersistence);
-}
+// DISABLED: Auto-initialize when script loads - AuthPersistence component handles this now
+// if (typeof window !== 'undefined') {
+//   document.addEventListener('DOMContentLoaded', setupPagePersistence);
+// }

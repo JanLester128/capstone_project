@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import FacultySidebar from "../layouts/Faculty_Sidebar";
 import { router } from "@inertiajs/react";
 import Swal from "sweetalert2";
+import { AuthManager } from '../../auth';
 import {
   FaUser,
   FaEnvelope,
@@ -29,7 +30,7 @@ import {
   FaSchool
 } from "react-icons/fa";
 
-export default function Faculty_Enrollment({ newStudents: initialNewStudents = [], continuingStudents: initialContinuingStudents = [], transfereeStudents: initialTransfereeStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, allowFacultyCorPrint = true, auth }) {
+export default function Faculty_Enrollment({ newStudents: initialNewStudents = [], transfereeStudents: initialTransfereeStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, allowFacultyCorPrint = true, auth }) {
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
@@ -37,7 +38,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   });
   
   const [newStudents, setNewStudents] = useState(initialNewStudents);
-  const [continuingStudents, setContinuingStudents] = useState(initialContinuingStudents);
   const [transfereeStudents, setTransfereeStudents] = useState(initialTransfereeStudents);
   const [rejectedStudents, setRejectedStudents] = useState(initialRejectedStudents);
   const [selectedStudentForCOR, setSelectedStudentForCOR] = useState(null);
@@ -49,10 +49,43 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useState("all");
   const [filterStrand, setFilterStrand] = useState("all");
-  const [currentTab, setCurrentTab] = useState("new");
   const [activeTab, setActiveTab] = useState("new");
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Authentication check on component mount
+  useEffect(() => {
+    const checkAuth = () => {
+      const user = AuthManager.getUser();
+      const token = AuthManager.getToken();
+      
+      if (!user || !token) {
+        console.log('🚨 Faculty_Enrollment: No authentication found, redirecting to login');
+        window.location.href = '/login';
+        return;
+      }
+      
+      // Check if user is faculty/coordinator and has coordinator privileges
+      if (user.role !== 'faculty' && user.role !== 'coordinator') {
+        console.log('🚨 Faculty_Enrollment: Invalid role for coordinator access:', user.role);
+        window.location.href = '/login';
+        return;
+      }
+      
+      // Check if faculty user has coordinator privileges
+      if (user.role === 'faculty' && !user.is_coordinator) {
+        console.log('🚨 Faculty_Enrollment: Faculty user lacks coordinator privileges');
+        window.location.href = '/faculty/dashboard';
+        return;
+      }
+      
+      console.log('✅ Faculty_Enrollment: Authentication verified for coordinator access');
+    };
+    
+    checkAuth();
+  }, []);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // COR Modal states (already declared above)
@@ -402,8 +435,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       // Move student from current list to enrolled (remove from current list)
       if (activeTab === 'new') {
         setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
-      } else if (activeTab === 'continuing') {
-        setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
       } else if (activeTab === 'transferee') {
         setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
       }
@@ -438,10 +469,9 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   useEffect(() => {
     // Update state when props change
     setNewStudents(initialNewStudents);
-    setContinuingStudents(initialContinuingStudents);
     setTransfereeStudents(initialTransfereeStudents);
     setRejectedStudents(initialRejectedStudents);
-  }, [initialNewStudents, initialContinuingStudents, initialTransfereeStudents, initialRejectedStudents]);
+  }, [initialNewStudents, initialTransfereeStudents, initialRejectedStudents]);
 
   // NEW: Auto-fetch subjects whenever the selected strand changes
   useEffect(() => {
@@ -613,12 +643,11 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
   };
 
+
   const handleApproveStudent = async (studentId) => {
     let student = null;
     if (activeTab === 'new') {
       student = newStudents.find(s => s.id === studentId);
-    } else if (activeTab === 'continuing') {
-      student = continuingStudents.find(s => s.id === studentId);
     } else if (activeTab === 'transferee') {
       student = transfereeStudents.find(s => s.id === studentId);
     }
@@ -781,9 +810,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           if (activeTab === 'new') {
             student = newStudents.find(s => s.id === studentId);
             setNewStudents(prev => prev.filter(s => s.id !== studentId));
-          } else if (activeTab === 'continuing') {
-            student = continuingStudents.find(s => s.id === studentId);
-            setContinuingStudents(prev => prev.filter(s => s.id !== studentId));
           } else if (activeTab === 'transferee') {
             student = transfereeStudents.find(s => s.id === studentId);
             setTransfereeStudents(prev => prev.filter(s => s.id !== studentId));
@@ -923,6 +949,98 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
   };
 
+  const handleEnrollStudent = async (studentId) => {
+    // Find the student
+    let student = null;
+    if (activeTab === 'new') {
+      student = newStudents.find(s => s.id === studentId);
+    } else if (activeTab === 'transferee') {
+      student = transfereeStudents.find(s => s.id === studentId);
+    }
+
+    if (!student) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Student Not Found',
+        text: 'Unable to find student information.'
+      });
+      return;
+    }
+
+    // Show confirmation dialog
+    const result = await Swal.fire({
+      title: 'Enroll Student',
+      html: `
+        <div class="text-left">
+          <p><strong>Student:</strong> ${student.user?.firstname} ${student.user?.lastname}</p>
+          <p><strong>Email:</strong> ${student.user?.email}</p>
+          <p><strong>Preferred Strand:</strong> ${student.strand_preferences?.[0] || 'Not specified'}</p>
+          <br>
+          <p class="text-sm text-gray-600">This will enroll the student with their complete academic year schedule (1st and 2nd semester subjects) based on the registrar's class assignments.</p>
+        </div>
+      `,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#10b981',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Enroll Student',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      // Get default section and strand for enrollment
+      const defaultStrand = student.strand_preferences?.[0] || 'STEM';
+      const defaultSection = 1; // You may want to make this configurable
+
+      router.post(`/coordinator/students/${student.id}/finalize`, {
+        strand: defaultStrand,
+        section_id: defaultSection,
+        subjects: [] // Backend will automatically assign all subjects
+      }, {
+        onSuccess: () => {
+          Swal.fire({
+            icon: 'success',
+            title: 'Student Enrolled Successfully!',
+            html: `
+              <div class="text-center">
+                <p class="mb-2">${student.user?.firstname} ${student.user?.lastname} has been enrolled!</p>
+                <p class="text-sm text-gray-600">Complete academic year schedule assigned (1st & 2nd semester)</p>
+              </div>
+            `,
+            showConfirmButton: true,
+            confirmButtonText: 'OK',
+            confirmButtonColor: '#10b981'
+          });
+
+          // Remove student from current list
+          if (activeTab === 'new') {
+            setNewStudents(prev => prev.filter(s => s.id !== student.id));
+          } else if (activeTab === 'transferee') {
+            setTransfereeStudents(prev => prev.filter(s => s.id !== student.id));
+          }
+        },
+        onError: (errors) => {
+          console.error('Enrollment error:', errors);
+          Swal.fire({
+            icon: 'error',
+            title: 'Enrollment Failed',
+            text: 'Failed to enroll student. Please try again or contact the registrar.',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error during enrollment:', error);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'An unexpected error occurred. Please try again.'
+      });
+    }
+  };
+
   const handleFinalizeEnrollment = async () => {
     if (!selectedStudentForCOR || !selectedStrand || !selectedSection) {
       Swal.fire({
@@ -1014,9 +1132,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       case 'new':
         students = newStudents;
         break;
-      case 'continuing':
-        students = continuingStudents;
-        break;
       case 'transferee':
         students = transfereeStudents;
         break;
@@ -1037,12 +1152,10 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     });
   };
 
-  const getTabCount = (tab) => {
+  const getStudentCount = (tab) => {
     switch (tab) {
       case 'new':
         return newStudents.length;
-      case 'continuing':
-        return continuingStudents.length;
       case 'transferee':
         return transfereeStudents.length;
       case 'rejected':
@@ -1113,17 +1226,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Continuing</p>
-                <p className="text-2xl font-bold text-green-600">{continuingStudents.length}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <FaUserCheck className="text-green-600 text-xl" />
-              </div>
-            </div>
-          </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
@@ -1186,7 +1288,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
             <nav className="flex space-x-8 px-6">
               {[
                 { key: 'new', label: 'New Students', color: 'blue', icon: 'FaUserPlus' },
-                { key: 'continuing', label: 'Continuing Students', color: 'green', icon: 'FaUserCheck' },
                 { key: 'transferee', label: 'Transferee Students', color: 'purple', icon: 'FaUserGraduate' },
                 { key: 'rejected', label: 'Rejected', color: 'red', icon: 'FaTimes' }
               ].map(tab => (
@@ -1198,7 +1299,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                     }`}
                 >
-                  {tab.label} ({getTabCount(tab.key)})
+                  {tab.label} ({getStudentCount(tab.key)})
                 </button>
               ))}
             </nav>
@@ -1244,15 +1345,15 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                           <FaEye className="text-sm" />
                           <span>View</span>
                         </button>
-                        {(activeTab === 'new' || activeTab === 'continuing' || activeTab === 'transferee') && (
+                        {(activeTab === 'new' || activeTab === 'transferee') && (
                           <>
                             <button
-                              onClick={() => handleApproveStudent(student.id)}
-                              title="Approve and assign strand/section (opens dialog)"
-                              className="px-3 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors duration-200 flex items-center space-x-1"
+                              onClick={() => handleEnrollStudent(student.id)}
+                              title="Enroll student and assign complete academic year schedule (1st & 2nd semester)"
+                              className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors duration-200 flex items-center space-x-2 font-medium"
                             >
-                              <FaCheck className="text-sm" />
-                              <span>Approve</span>
+                              <FaUserCheck className="text-sm" />
+                              <span>Enroll Student</span>
                             </button>
                             <button
                               onClick={() => handleRejectStudent(student.id)}
@@ -1352,7 +1453,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
                           selectedStudent.student_status === 'New Student' ? 'bg-green-100 text-green-800' :
-                          selectedStudent.student_status === 'Continuing' ? 'bg-blue-100 text-blue-800' :
                           selectedStudent.student_status === 'Transferee' ? 'bg-orange-100 text-orange-800' :
                           'bg-gray-100 text-gray-800'
                         }`}>
@@ -1760,12 +1860,10 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                   <div>
                     <p><strong>Student Type:</strong> <span className={`ml-1 px-2 py-1 rounded text-xs font-medium ${
                       (selectedStudentForCOR.student_type === 'new' || selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New Student') ? 'bg-blue-100 text-blue-800' :
-                      (selectedStudentForCOR.student_type === 'continuing' || selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing') ? 'bg-green-100 text-green-800' :
                       (selectedStudentForCOR.student_type === 'transferee' || selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? 'bg-purple-100 text-purple-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
                       {(selectedStudentForCOR.student_type === 'new' || selectedStudentForCOR.user?.student_type === 'new' || selectedStudentForCOR.student_status === 'New Student') ? '🆕 New Student' :
-                       (selectedStudentForCOR.student_type === 'continuing' || selectedStudentForCOR.user?.student_type === 'continuing' || selectedStudentForCOR.student_status === 'Continuing') ? '🔄 Continuing Student' :
                        (selectedStudentForCOR.student_type === 'transferee' || selectedStudentForCOR.user?.student_type === 'transferee' || selectedStudentForCOR.student_status === 'Transferee') ? '🎓 Transferee Student' :
                        'Student'}
                     </span></p>
@@ -2213,8 +2311,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                             // Keep student enrolled and remove from current list
                             if (activeTab === 'new') {
                               setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
-                            } else if (activeTab === 'continuing') {
-                              setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
                             } else if (activeTab === 'transferee') {
                               setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
                             }

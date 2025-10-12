@@ -13,9 +13,13 @@ class StudentPersonalInfo extends Model
 
     protected $fillable = [
         'user_id',
-        'lrn',
-        'grade_level',
+        // Personal information only (no academic/enrollment data)
         'birthdate',
+        'age',
+        'sex',
+        'birth_place',
+        'address',
+        'religion',
         'contact_number',
         'guardian_name',
         'guardian_contact',
@@ -23,12 +27,15 @@ class StudentPersonalInfo extends Model
         'emergency_contact_name',
         'emergency_contact_number',
         'emergency_contact_relationship',
-        'section_id',
-        'strand_id',
-        'school_year_id',
-        'student_status',
+        'ip_community',
+        'four_ps',
+        'special_needs',
+        'pwd_id',
+        'extension_name',
+        'last_grade',
+        'last_sy',
         'psa_birth_certificate',
-        'report_card'
+        'image'
     ];
 
     protected $casts = [
@@ -44,27 +51,12 @@ class StudentPersonalInfo extends Model
     }
 
     /**
-     * Get the section for this student
+     * Get the strand preferences for this student
      */
-    public function section()
+    public function strandPreferences()
     {
-        return $this->belongsTo(Section::class);
-    }
-
-    /**
-     * Get the strand for this student
-     */
-    public function strand()
-    {
-        return $this->belongsTo(Strand::class);
-    }
-
-    /**
-     * Get the school year for this student
-     */
-    public function schoolYear()
-    {
-        return $this->belongsTo(SchoolYear::class);
+        return $this->hasMany(StudentStrandPreference::class, 'student_personal_info_id')
+                    ->orderBy('preference_order');
     }
 
     /**
@@ -72,6 +64,40 @@ class StudentPersonalInfo extends Model
      */
     public function enrollments()
     {
-        return $this->hasMany(Enrollment::class, 'student_id');
+        return $this->hasMany(Enrollment::class, 'student_personal_info_id');
+    }
+
+    /**
+     * Get the current enrollment (most recent active enrollment)
+     */
+    public function currentEnrollment()
+    {
+        return $this->hasOne(Enrollment::class, 'student_personal_info_id')
+                    ->where('status', 'enrolled')
+                    ->latest();
+    }
+
+    /**
+     * Get section via current enrollment
+     */
+    public function getSection()
+    {
+        return $this->currentEnrollment?->assignedSection;
+    }
+
+    /**
+     * Get strand via current enrollment
+     */
+    public function getStrand()
+    {
+        return $this->currentEnrollment?->assignedStrand;
+    }
+
+    /**
+     * Get school year via current enrollment
+     */
+    public function getSchoolYear()
+    {
+        return $this->currentEnrollment?->schoolYear;
     }
 }

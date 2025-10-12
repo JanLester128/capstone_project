@@ -4,6 +4,15 @@ import { AuthManager } from '../../auth';
 import { FaGraduationCap, FaShieldAlt, FaChartLine, FaCalendarAlt, FaUsers, FaEnvelope, FaLock, FaEye, FaEyeSlash, FaSignInAlt, FaSpinner } from 'react-icons/fa';
 
 export default function Login() {
+  // CRITICAL FIX: Immediately check if we should render this component
+  const currentPath = window.location.pathname;
+  
+  // FIXED: Only render Login component on actual login page
+  if (currentPath !== '/login' && currentPath !== '/') {
+    console.log('🚫 Login: Not on login page (' + currentPath + '), not rendering Login component');
+    return null; // Don't render anything
+  }
+  
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -15,22 +24,15 @@ export default function Login() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Check if user is already authenticated and redirect
   useEffect(() => {
-    console.log('🔍 Login: Checking existing authentication...');
+    console.log('🔍 Login: Component loaded - BACKEND HANDLES REDIRECTS NOW');
     
-    // Check if user is already authenticated
-    if (AuthManager.isAuthenticated()) {
-      const user = AuthManager.getUser();
-      console.log('✅ Login: User already authenticated, redirecting to dashboard');
-      
-      // Redirect to appropriate dashboard
-      const dashboardUrl = AuthManager.getDashboardUrl();
-      window.location.href = `http://localhost:8000${dashboardUrl}`;
-      return;
-    }
+    // Clear any stuck redirect flags
+    sessionStorage.removeItem('login_redirect_in_progress');
+    sessionStorage.removeItem('auth_redirect_in_progress');
     
-    console.log('📝 Login: No existing authentication, showing login form');
+    // FIXED: Let backend handle authentication redirects, frontend just shows form
+    console.log('📝 Login: Backend handles auth redirects, showing login form');
     setIsInitializing(false);
   }, []);
   // Page transition animation on mount
@@ -91,17 +93,21 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    console.log('🚀 Login form submitted!', formData);
     
     if (!validateForm()) {
+      console.log('❌ Form validation failed');
       return;
     }
+    
+    console.log('✅ Form validation passed, proceeding with login...');
     
     setIsLoading(true);
     setErrors({});
     
     try {
-      // Use proper auth login endpoint
-      const response = await fetch('/auth/login', {
+      // TEMPORARY: Use simple login with debugging to identify 500 error
+      const response = await fetch('/auth/login-simple', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -120,6 +126,18 @@ export default function Login() {
         data: data,
         headers: Object.fromEntries(response.headers.entries()),
         url: response.url
+      });
+      
+      // DETAILED DEBUGGING: Check every condition
+      console.log('🔍 Detailed response analysis:', {
+        hasSuccess: 'success' in data,
+        successValue: data.success,
+        hasUser: 'user' in data,
+        userValue: data.user,
+        hasToken: 'token' in data,
+        tokenValue: data.token ? data.token.substring(0, 10) + '...' : null,
+        responseOk: response.ok,
+        dataKeys: Object.keys(data)
       });
       
       console.log('Response data details:', {
@@ -150,8 +168,32 @@ export default function Login() {
         responseOk: response.ok
       });
 
-      if (data.success === true || (data.user && data.token) || (response.ok && data.user)) {
-        console.log('✅ Login successful:', data);
+      // SIMPLIFIED: Just check if we have user and token (most reliable)
+      const hasUserAndToken = data.user && data.token;
+      const isResponseOk = response.ok;
+      
+      console.log('🔍 Simplified success check:', {
+        hasUserAndToken: hasUserAndToken,
+        isResponseOk: isResponseOk,
+        willProceed: hasUserAndToken && isResponseOk
+      });
+      
+      if (hasUserAndToken && isResponseOk) {
+        console.log('✅ Login successful - at least one condition met:', data);
+        
+        // Check if password change is required
+        if (data.password_change_required) {
+          console.log('🔐 Password change required, redirecting to change password page');
+          
+          // Store temporary auth data for password change
+          AuthManager.setUser(data.user);
+          AuthManager.setToken(data.token);
+          AuthManager.setSession(data.session_id || `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+          
+          // Redirect to password change page
+          window.location.replace(`http://127.0.0.1:8000${data.redirect}`);
+          return;
+        }
         
         // Store authentication data using AuthManager
         if (data.user && data.token) {
@@ -166,25 +208,12 @@ export default function Login() {
           // Update last activity immediately
           AuthManager.updateLastActivity();
           
-          // Determine redirect URL based on user role
+          // FIXED: Use AuthManager.getRedirectUrl() to respect stored page preference
           let redirectUrl = data.redirect;
           if (!redirectUrl && data.user) {
-            const userRole = data.user.role?.toLowerCase();
-            console.log('🎯 Determining redirect for role:', userRole);
-            switch (userRole) {
-              case 'student':
-                redirectUrl = '/student/dashboard';
-                break;
-              case 'registrar':
-                redirectUrl = '/registrar/dashboard';
-                break;
-              case 'faculty':
-              case 'coordinator':
-                redirectUrl = '/faculty/dashboard';
-                break;
-              default:
-                redirectUrl = '/login';
-            }
+            // Use our enhanced redirect logic that checks for stored pages first
+            redirectUrl = AuthManager.getRedirectUrl();
+            console.log('🎯 Using AuthManager redirect URL:', redirectUrl, 'for user role:', data.user.role);
           }
           
           console.log('🚀 Final redirect URL:', redirectUrl, 'for user role:', data.user.role);
@@ -208,10 +237,10 @@ export default function Login() {
             setErrors({});
             
             // Force redirect with full page reload to ensure clean state
-            console.log('🔄 Performing full page redirect...');
-            setTimeout(() => {
-              window.location.replace(redirectUrl);
-            }, 100);
+            console.log('🔄 Performing immediate redirect...');
+            
+            // FIXED: Immediate redirect without any delays or popups
+            window.location.replace(`http://127.0.0.1:8000${redirectUrl}`);
           } else {
             console.error('❌ No valid redirect URL found');
             setErrors({ general: 'Login successful but redirect failed. Please try refreshing the page.' });
@@ -360,6 +389,7 @@ export default function Login() {
                     }`}
                     placeholder="Enter your email address"
                     required
+                    autoComplete="email"
                     aria-invalid={errors.email ? 'true' : 'false'}
                     aria-describedby={errors.email ? 'email-error' : undefined}
                   />
@@ -389,6 +419,7 @@ export default function Login() {
                     }`}
                     placeholder="Enter your password"
                     required
+                    autoComplete="current-password"
                     aria-invalid={errors.password ? 'true' : 'false'}
                     aria-describedby={errors.password ? 'password-error' : undefined}
                   />

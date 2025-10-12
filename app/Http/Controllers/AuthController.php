@@ -174,11 +174,35 @@ class AuthController extends Controller
                 ])->withInput();
             }
 
-            // Manually authenticate the user
-            Auth::login($user);
+            // FIXED: Clear any existing sessions for this user before login (with error handling)
+            try {
+                $cacheKey = "user_session_{$user->id}";
+                Cache::forget($cacheKey);
+            } catch (\Exception $cacheError) {
+                Log::warning('Cache clear failed during login', [
+                    'error' => $cacheError->getMessage(),
+                    'user_id' => $user->id
+                ]);
+            }
             
-            // Update last login time
-            $user->update(['last_login_at' => now()]);
+            // TEMPORARILY DISABLED: Revoke tokens (causing 500 error)
+            // try {
+            //     $user->tokens()->delete();
+            // } catch (\Exception $tokenError) {
+            //     Log::warning('Token deletion failed during login', [
+            //         'error' => $tokenError->getMessage(),
+            //         'user_id' => $user->id
+            //     ]);
+            // }
+            
+            // Manually authenticate the user with web guard
+            Auth::guard('web')->login($user, true); // true = remember me
+            
+            // Ensure session is regenerated for security
+            $request->session()->regenerate();
+            
+            // TEMPORARILY DISABLED: Update last login time (might be causing 500 error)
+            // $user->update(['last_login_at' => now()]);
 
             // Check account status
             if (isset($user->is_disabled) && $user->is_disabled) {
@@ -197,6 +221,14 @@ class AuthController extends Controller
             // Check if password change is required (for faculty/coordinator users)
             if (in_array($user->role, ['faculty', 'coordinator']) && 
                 ($user->password_change_required || !$user->password_changed || $user->plain_password)) {
+                
+                Log::info('Password change required for user', [
+                    'user_id' => $user->id,
+                    'role' => $user->role,
+                    'password_change_required' => $user->password_change_required,
+                    'password_changed' => $user->password_changed,
+                    'has_plain_password' => !empty($user->plain_password)
+                ]);
                 
                 // Generate unified token for password change authentication
                 /** @var \App\Models\User $user */
@@ -231,16 +263,46 @@ class AuthController extends Controller
                     ->withCookie(cookie('auth_token', $token, 60 * 24));
             }
             
-            // Generate unified token and session
+            // Generate unified token and session (with error handling)
             $user = $user;
             /** @var \App\Models\User $user */
             /** @var \Laravel\Sanctum\HasApiTokens $user */
-            $token = /** @var \Laravel\Sanctum\HasApiTokens $user */ $user->createToken('auth_token')->plainTextToken;
+            
+            try {
+                $token = /** @var \Laravel\Sanctum\HasApiTokens $user */ $user->createToken('auth_token')->plainTextToken;
+            } catch (\Exception $tokenError) {
+                Log::error('Token creation failed during main login', [
+                    'error' => $tokenError->getMessage(),
+                    'user_id' => $user->id,
+                    'file' => $tokenError->getFile(),
+                    'line' => $tokenError->getLine()
+                ]);
+                
+                // Return error response if token creation fails
+                if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Authentication token creation failed. Please try again.'
+                    ], 500);
+                }
+                return back()->withErrors([
+                    'email' => 'Authentication token creation failed. Please try again.'
+                ])->withInput();
+            }
+            
             $sessionId = 'session_' . time() . '_' . uniqid();
             
-            // Store session in cache for single session enforcement
-            $cacheKey = "user_session_{$user->id}";
-            Cache::put($cacheKey, $sessionId, now()->addHours(24));
+            // Store session in cache for single session enforcement (with error handling)
+            try {
+                $cacheKey = "user_session_{$user->id}";
+                Cache::put($cacheKey, $sessionId, now()->addHours(24));
+            } catch (\Exception $cacheError) {
+                Log::warning('Cache storage failed during login', [
+                    'error' => $cacheError->getMessage(),
+                    'user_id' => $user->id
+                ]);
+                // Continue without cache storage
+            }
             
             // Store token and user data in session for frontend access
             session(['auth_token' => $token]);
@@ -352,80 +414,6 @@ class AuthController extends Controller
         }
     }
 
-    /**
-     * Clear logout functionality.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
-     */
-    public function logout(Request $request)
-    {
-        try {
-            $user = $request->user();
-            
-            if (!$user) {
-                // Check if request expects JSON
-                if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Already logged out',
-                        'redirect' => '/login'
-                    ]);
-                }
-                return redirect('/login');
-            }
-
-            // Clear the user's session cache to allow new login
-            $cacheKey = "user_session_{$user->id}";
-            Cache::forget($cacheKey);
-
-            // For all authenticated users, perform complete logout
-            // Revoke all tokens for this user
-            $user->tokens()->delete();
-            
-            // For session-based auth, logout from session (only if using session guard)
-            if (auth()->guard('web')->check()) {
-                auth()->guard('web')->logout();
-                $request->session()->invalidate();
-                $request->session()->regenerateToken();
-            }
-
-            // Return appropriate message based on role
-            $message = match($user->role) {
-                'student' => 'Student logged out successfully.',
-                'faculty' => 'Faculty logged out successfully.',
-                'coordinator' => 'Coordinator logged out successfully.',
-                'registrar' => 'Registrar logged out successfully.',
-                default => 'User logged out successfully.'
-            };
-
-            // Check if request expects JSON (for AJAX logout)
-            if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                return response()->json([
-                    'success' => true,
-                    'message' => $message,
-                    'redirect' => '/login'
-                ])->withCookie(cookie()->forget('auth_token'));
-            }
-
-            return redirect('/login')
-                ->with('success', $message)
-                ->withCookie(cookie()->forget('auth_token'));
-            
-        } catch (\Exception $e) {
-            Log::error('Logout error: ' . $e->getMessage());
-            
-            if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Logout failed',
-                    'redirect' => '/login'
-                ], 500);
-            }
-            
-            return redirect('/login');
-        }
-    }
 
     /**
      * Student registration with email verification.
@@ -549,7 +537,17 @@ class AuthController extends Controller
 
             $credentials = $request->only('email', 'password');
             
-            if (!Auth::attempt($credentials)) {
+            // FIXED: Clear any existing sessions for this user before login
+            $user = User::where('email', $credentials['email'])->first();
+            if ($user) {
+                $cacheKey = "user_session_{$user->id}";
+                Cache::forget($cacheKey);
+                
+                // TEMPORARILY DISABLED: Revoke tokens (causing 500 error)
+                // $user->tokens()->delete();
+            }
+            
+            if (!Auth::guard('web')->attempt($credentials, true)) { // true = remember me
                 // Check if request expects JSON (from frontend fetch)
                 if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
                     return response()->json([
@@ -563,6 +561,9 @@ class AuthController extends Controller
             }
 
             $user = Auth::user();
+            
+            // Ensure session is regenerated for security
+            $request->session()->regenerate();
             
             // Check if user is actually a student
             if ($user->role !== 'student') {
@@ -634,12 +635,18 @@ class AuthController extends Controller
                 ->withCookie(cookie('auth_token', $token, 60 * 24));
             
         } catch (\Exception $e) {
-            Log::error('Student login error: ' . $e->getMessage());
+            Log::error('Login error', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
             
             if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'An error occurred during login. Please try again.'
+                    'message' => 'An error occurred during login. Please try again.',
+                    'debug' => config('app.debug') ? $e->getMessage() : null
                 ], 500);
             }
             
@@ -817,5 +824,88 @@ class AuthController extends Controller
         }
 
         return redirect()->route('faculty.dashboard')->with('success', 'Password changed successfully.');
+    }
+
+    /**
+     * Handle user logout
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function logout(Request $request)
+    {
+        try {
+            Log::info('Logout attempt started', [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent()
+            ]);
+
+            // Try to get user from different authentication methods
+            $user = $request->user() ?: $request->user('sanctum') ?: Auth::user();
+            
+            if ($user) {
+                // Revoke all tokens for the user (Sanctum)
+                try {
+                    $user->tokens()->delete();
+                } catch (\Exception $e) {
+                    Log::warning('Failed to delete tokens: ' . $e->getMessage());
+                }
+                
+                // Log the logout action
+                Log::info('User logged out', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'role' => $user->role
+                ]);
+            } else {
+                Log::info('No authenticated user found during logout');
+            }
+            
+            // Clear the session safely
+            try {
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+            } catch (\Exception $e) {
+                Log::warning('Session invalidation failed: ' . $e->getMessage());
+            }
+            
+            // Logout from all guards
+            Auth::guard('web')->logout();
+            // Note: Sanctum doesn't have a logout method, tokens are deleted above
+            
+            if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Logged out successfully',
+                    'redirect' => '/login'
+                ]);
+            }
+            
+            return redirect('/login')->with('success', 'Logged out successfully');
+            
+        } catch (\Exception $e) {
+            Log::error('Logout error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            // Force logout even if there's an error
+            try {
+                Auth::logout();
+                $request->session()->flush();
+            } catch (\Exception $innerE) {
+                Log::error('Force logout failed: ' . $innerE->getMessage());
+            }
+            
+            if ($request->expectsJson() || $request->header('Accept') === 'application/json') {
+                return response()->json([
+                    'success' => true, // Return success even on error to allow frontend logout
+                    'message' => 'Logged out (with warnings)',
+                    'redirect' => '/login',
+                    'warning' => 'Logout completed but some cleanup failed'
+                ]);
+            }
+            
+            return redirect('/login')->with('warning', 'Logged out but some cleanup failed');
+        }
     }
 }

@@ -54,18 +54,18 @@ const AuthMiddleware = {
         : allowedRoles.toLowerCase() === userRole;
 
       if (!allowed) {
-        console.log('AuthMiddleware: User not authorized for this page, redirecting to dashboard');
-        const dashboardUrl = AuthManager.getDashboardUrl();
-        router.visit(dashboardUrl);
+        console.log('AuthMiddleware: User not authorized for this page, redirecting to appropriate page');
+        const redirectUrl = AuthManager.getRedirectUrl();
+        router.visit(redirectUrl);
         return false;
       }
     }
 
     // Validate current page for user role
     if (!AuthManager.isValidPageForUser(currentPath, user.role)) {
-      console.log('AuthMiddleware: Invalid page for user role, redirecting to dashboard');
-      const dashboardUrl = AuthManager.getDashboardUrl();
-      router.visit(dashboardUrl);
+      console.log('AuthMiddleware: Invalid page for user role, redirecting to appropriate page');
+      const redirectUrl = AuthManager.getRedirectUrl();
+      router.visit(redirectUrl);
       return false;
     }
 

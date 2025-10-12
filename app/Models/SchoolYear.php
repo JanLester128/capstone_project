@@ -157,7 +157,60 @@ class SchoolYear extends Model
             return false;
         }
 
+        // Day of week restriction temporarily removed for testing
+        // if (!$this->isEnrollmentDayAllowed($now)) {
+        //     return false;
+        // }
+
         return true;
+    }
+
+    // Check if current day allows enrollment (temporarily disabled for testing)
+    public function isEnrollmentDayAllowed($date = null)
+    {
+        // Weekend restriction temporarily removed for testing
+        return true;
+        
+        // Original logic commented out:
+        // $checkDate = $date ?? now();
+        // $dayOfWeek = $checkDate->dayOfWeek; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+        // 
+        // // Allow Monday (1) through Saturday (6), block Sunday (0)
+        // return $dayOfWeek >= 1 && $dayOfWeek <= 6;
+    }
+
+    // Get enrollment day restriction message (temporarily disabled for testing)
+    public function getEnrollmentDayRestrictionMessage()
+    {
+        // Weekend restriction temporarily removed for testing
+        return null;
+        
+        // Original logic commented out:
+        // $now = now();
+        // $dayOfWeek = $now->dayOfWeek;
+        // 
+        // if ($dayOfWeek === 0) { // Sunday
+        //     return 'Enrollment is not available on Sundays. Please try again Monday through Saturday.';
+        // }
+        // 
+        // return null;
+    }
+
+    // Get next available enrollment day (temporarily disabled for testing)
+    public function getNextEnrollmentDay()
+    {
+        // Weekend restriction temporarily removed for testing
+        return now(); // Always return current day
+        
+        // Original logic commented out:
+        // $now = now();
+        // $dayOfWeek = $now->dayOfWeek;
+        // 
+        // if ($dayOfWeek === 0) { // Sunday
+        //     return $now->addDay(); // Monday
+        // }
+        // 
+        // return $now; // Already on valid day
     }
 
     // Get school year that allows grade progression

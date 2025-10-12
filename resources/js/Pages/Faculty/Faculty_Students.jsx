@@ -67,10 +67,91 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
   const [showFilters, setShowFilters] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // grid, list
+  
 
 
   const printModalContent = () => {
     window.print();
+  };
+
+  const printModalContent2 = () => {
+    window.print();
+  };
+
+  // Grade Progression Functions
+  const fetchGrade11Students = async () => {
+    try {
+      setLoadingProgression(true);
+      const response = await fetch('/faculty/grade11-students-for-progression', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setGrade11Students(data.students);
+          setProgressionAllowed(data.allow_progression);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching Grade 11 students:', error);
+    } finally {
+      setLoadingProgression(false);
+    }
+  };
+
+  const handleProgressStudent = async (studentId) => {
+    const result = await Swal.fire({
+      title: 'Progress Student to Grade 12?',
+      text: 'This will move the student to Grade 12 and create a new enrollment that requires coordinator approval.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#3085d6',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, Progress Student',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        setLoadingProgression(true);
+        const response = await fetch('/faculty/students/progress-grade', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+          },
+          body: JSON.stringify({
+            student_id: studentId,
+            current_grade: 11
+          })
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
+          Swal.fire('Success!', data.message, 'success');
+          // Refresh the Grade 11 students list
+          fetchGrade11Students();
+        } else {
+          Swal.fire('Error', data.message, 'error');
+        }
+      } catch (error) {
+        console.error('Error progressing student:', error);
+        Swal.fire('Error', 'Failed to progress student', 'error');
+      } finally {
+        setLoadingProgression(false);
+      }
+    }
+  };
+
+  const openProgressionModal = () => {
+    fetchGrade11Students();
+    setShowProgressionModal(true);
   };
 
   // Enhanced filtering and categorization logic
@@ -235,6 +316,15 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
                     >
                       <FaQuestionCircle />
                       Help
+                    </button>
+                    
+                    <button
+                      onClick={() => router.visit('/faculty/grade-progression')}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors duration-200"
+                      title="Progress Grade 11 students to Grade 12"
+                    >
+                      <FaLevelUpAlt />
+                      <span>Grade Progression</span>
                     </button>
                     
                     <button
@@ -845,6 +935,7 @@ export default function Faculty_Students({ enrolledStudents, allowFacultyCorPrin
             }
           }
         `}</style>
+
       </div>
     </>
   );

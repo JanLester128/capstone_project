@@ -70,7 +70,6 @@ export default function StudentDashboard() {
     
     // If it's a 404 error, silently continue with fallback data
     if (error.response && error.response.status === 404) {
-      console.log(`API endpoint not found for ${context}, using fallback data`);
       return;
     }
     
@@ -145,42 +144,35 @@ export default function StudentDashboard() {
       
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      setConnectionStatus('error');
     } finally {
       setLoadingStates(prev => ({ ...prev, dashboard: false }));
     }
   };
 
-  // Fetch today's schedule - real data from backend
+  // Fetch schedule - SECURE: User-specific data only
   const fetchSchedule = async () => {
     if (!user?.id) return;
 
     try {
       setLoadingStates(prev => ({ ...prev, schedule: true }));
       
-      // Get actual schedule data from backend
-      const response = await axios.get('/student/schedule-data', {
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest'
-        }
-      });
+      // SECURITY FIX: Call secure API endpoint that filters by authenticated user
+      const response = await axios.get('/student/schedule-data');
       
-      const data = response.data;
-      if (data.success && data.schedules) {
-        // Format schedule data for dashboard display
-        const formattedSchedule = data.schedules.map(schedule => ({
-          subject: schedule.subject_name,
-          time: `${schedule.start_time} - ${schedule.end_time}`,
-          room: schedule.room || 'TBA',
-          teacher: `${schedule.faculty_firstname} ${schedule.faculty_lastname}`
+      if (response.data && response.data.schedules) {
+        // Transform API data to dashboard format
+        const dashboardSchedule = response.data.schedules.map(item => ({
+          subject: item.subject_name || item.subject,
+          time: `${item.start_time} - ${item.end_time || 'TBD'}`,
+          room: item.room || 'TBD',
+          teacher: `${item.faculty_firstname || ''} ${item.faculty_lastname || ''}`.trim() || 'TBD'
         }));
-        setSchedule(formattedSchedule);
+        
+        setSchedule(dashboardSchedule);
       } else {
-        console.warn('No schedule data available');
         setSchedule([]);
       }
     } catch (error) {
-      console.error('Error loading schedule:', error);
       setSchedule([]);
     } finally {
       setLoadingStates(prev => ({ ...prev, schedule: false }));
@@ -226,30 +218,25 @@ export default function StudentDashboard() {
     }
   };
 
-  // Fetch enrollment status - dynamic from backend
+  // Fetch enrollment status - SECURE: User-specific data only
   const fetchEnrollmentStatus = async () => {
-    if (!user?.id) return;
-
     try {
       setLoadingStates(prev => ({ ...prev, enrollment: true }));
       
-      // Get actual enrollment status from backend
-      const response = await axios.get('/student/enrollment-status', {
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest'
-        }
-      });
+      // SECURITY FIX: Call secure API endpoint that filters by authenticated user
+      const response = await axios.get('/student/enrollment-status');
       
-      const data = response.data;
-      setEnrollmentStatus(data.status || 'pending');
+      if (response.data && response.data.status) {
+        setEnrollmentStatus(response.data.status);
+      } else {
+        setEnrollmentStatus('not_enrolled');
+      }
     } catch (error) {
-      console.error('Error loading enrollment status:', error);
-      setEnrollmentStatus('pending');
+      setEnrollmentStatus('not_enrolled');
     } finally {
       setLoadingStates(prev => ({ ...prev, enrollment: false }));
     }
   };
-
   // HCI Principle 7: Flexibility and efficiency of use - Auto-refresh and manual refresh
   const refreshAllData = async () => {
     await Promise.all([
