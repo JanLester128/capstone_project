@@ -180,30 +180,31 @@ export default function FacultySidebar({ onToggle }) {
     // Define refreshUserData function before using it
     const refreshUserData = async () => {
       try {
-        const token = AuthManager.getToken();
-        if (!token) return false;
-
-        // Try the protected route first
-        let response = await fetch('/user/refresh', {
+        // Try the new auth/user endpoint with session-based auth
+        let response = await fetch('/auth/user', {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          }
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+          },
+          credentials: 'include' // Include session cookies
         });
 
-        // If protected route fails, try the unprotected user route
+        // If that fails, try with token-based auth
         if (!response.ok) {
-          console.log('Protected /user/refresh failed, trying /user route');
-          response = await fetch('/user', {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            }
-          });
+          const token = AuthManager.getToken();
+          if (token) {
+            console.log('Session auth failed, trying token auth');
+            response = await fetch('/auth/user', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+              }
+            });
+          }
         }
 
         // If that also fails, try the debug route
@@ -351,11 +352,15 @@ export default function FacultySidebar({ onToggle }) {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
           },
           credentials: 'include'
         });
+
+        // Don't throw error on 401 - user might already be logged out
+        if (!response.ok && response.status !== 401) {
+          console.warn('Logout request failed, but continuing with local cleanup:', response.status);
+        }
 
         // Clear all authentication data
         localStorage.removeItem('auth_token');

@@ -16,17 +16,16 @@ class Grade extends Model
         'class_id',
         'school_year_id',
         'semester',           // Critical: '1st' or '2nd'
-        'first_quarter',      // Q1 grade
-        'second_quarter',     // Q2 grade
-        'third_quarter',      // Q3 grade - FIXED: Added missing field
-        'fourth_quarter',     // Q4 grade - FIXED: Added missing field
-        'semester_grade',     // Average of all 4 quarters
+        'first_quarter',      // Q1 grade (1st semester only)
+        'second_quarter',     // Q2 grade (1st semester only)
+        'third_quarter',      // Q3 grade (2nd semester only)
+        'fourth_quarter',     // Q4 grade (2nd semester only)
+        'semester_grade',     // Average of semester quarters
         'status',
         'remarks',
         'approval_status',
         'approved_by',
         'approved_at',
-        'approval_notes',
         'submitted_for_approval_at'
     ];
 
@@ -68,38 +67,67 @@ class Grade extends Model
     // Helper methods for Philippine SHS grading system
     
     /**
-     * Calculate semester grade (average of all 4 quarters)
-     * FIXED: Now properly calculates from all 4 quarters for Philippine SHS system
+     * Calculate semester grade based on semester-specific quarters
+     * 1st Semester: Average of Q1 and Q2
+     * 2nd Semester: Average of Q3 and Q4
      */
     public function calculateSemesterGrade()
     {
-        $quarters = collect([
-            $this->first_quarter,
-            $this->second_quarter,
-            $this->third_quarter,    // FIXED: Added missing quarter
-            $this->fourth_quarter    // FIXED: Added missing quarter
-        ])->filter(function($grade) {
-            return $grade !== null && $grade > 0;
-        })->values();
+        $quarters = [];
+        
+        if ($this->semester === '1st') {
+            // 1st Semester: Only Q1 and Q2
+            if ($this->first_quarter !== null && $this->first_quarter > 0) {
+                $quarters[] = $this->first_quarter;
+            }
+            if ($this->second_quarter !== null && $this->second_quarter > 0) {
+                $quarters[] = $this->second_quarter;
+            }
+        } elseif ($this->semester === '2nd') {
+            // 2nd Semester: Only Q3 and Q4
+            if ($this->third_quarter !== null && $this->third_quarter > 0) {
+                $quarters[] = $this->third_quarter;
+            }
+            if ($this->fourth_quarter !== null && $this->fourth_quarter > 0) {
+                $quarters[] = $this->fourth_quarter;
+            }
+        }
 
-        if ($quarters->count() === 0) {
+        if (empty($quarters)) {
             return null;
         }
 
-        return round($quarters->avg(), 2);
+        return round(array_sum($quarters) / count($quarters), 2);
     }
 
     /**
-     * Get the actual quarter numbers for display
-     * FIXED: Now returns all 4 quarters regardless of semester
+     * Get semester-specific quarter details for display
+     * Returns only the quarters valid for the current semester
      */
     public function getQuarterDetails()
     {
+        if ($this->semester === '1st') {
+            return [
+                'q1' => ['number' => 1, 'value' => $this->first_quarter, 'enabled' => true],
+                'q2' => ['number' => 2, 'value' => $this->second_quarter, 'enabled' => true],
+                'q3' => ['number' => 3, 'value' => null, 'enabled' => false],
+                'q4' => ['number' => 4, 'value' => null, 'enabled' => false]
+            ];
+        } elseif ($this->semester === '2nd') {
+            return [
+                'q1' => ['number' => 1, 'value' => null, 'enabled' => false],
+                'q2' => ['number' => 2, 'value' => null, 'enabled' => false],
+                'q3' => ['number' => 3, 'value' => $this->third_quarter, 'enabled' => true],
+                'q4' => ['number' => 4, 'value' => $this->fourth_quarter, 'enabled' => true]
+            ];
+        }
+        
+        // Default: all quarters disabled
         return [
-            'q1' => ['number' => 1, 'value' => $this->first_quarter],
-            'q2' => ['number' => 2, 'value' => $this->second_quarter],
-            'q3' => ['number' => 3, 'value' => $this->third_quarter],   // FIXED: Added Q3
-            'q4' => ['number' => 4, 'value' => $this->fourth_quarter]   // FIXED: Added Q4
+            'q1' => ['number' => 1, 'value' => $this->first_quarter, 'enabled' => false],
+            'q2' => ['number' => 2, 'value' => $this->second_quarter, 'enabled' => false],
+            'q3' => ['number' => 3, 'value' => $this->third_quarter, 'enabled' => false],
+            'q4' => ['number' => 4, 'value' => $this->fourth_quarter, 'enabled' => false]
         ];
     }
 
@@ -277,13 +305,12 @@ class Grade extends Model
     /**
      * Approve grade
      */
-    public function approve($approverId, $notes = null)
+    public function approve($approverId)
     {
         $this->update([
             'approval_status' => 'approved',
             'approved_by' => $approverId,
             'approved_at' => now(),
-            'approval_notes' => $notes,
             'status' => 'approved'
         ]);
         
@@ -293,13 +320,12 @@ class Grade extends Model
     /**
      * Reject grade
      */
-    public function reject($rejectedById, $notes)
+    public function reject($rejectedById)
     {
         $this->update([
             'approval_status' => 'rejected',
             'approved_by' => $rejectedById,
             'approved_at' => now(),
-            'approval_notes' => $notes,
             'status' => 'rejected'
         ]);
         

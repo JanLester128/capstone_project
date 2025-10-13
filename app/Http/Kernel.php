@@ -68,5 +68,6 @@ class Kernel extends HttpKernel
         // ✅ Custom role-based middleware
         'role' => \App\Http\Middleware\RoleMiddleware::class,
         'single.session' => \App\Http\Middleware\SingleSessionMiddleware::class,
+        'hybrid.auth' => \App\Http\Middleware\HybridAuthMiddleware::class,
     ];
 }

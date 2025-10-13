@@ -76,7 +76,6 @@ class RegistrarController extends Controller
                 'class.day_of_week',
                 'class.start_time',
                 'class.end_time',
-                'class.room',
                 'class.semester',
                 'users.name as faculty_name'
             )
@@ -827,7 +826,7 @@ class RegistrarController extends Controller
                     'day_of_week' => $schedule->day_of_week,
                     'start_time' => $schedule->start_time,
                     'end_time' => $schedule->end_time,
-                    'room' => $schedule->room ?? 'TBA',
+                    'room' => 'TBA',
                     'semester' => $schedule->semester,
                     'is_active' => $schedule->is_active ?? true,
                 ];
@@ -1816,13 +1815,10 @@ class RegistrarController extends Controller
                 'middlename' => $request->middlename,
                 'email' => $request->email,
                 'password' => Hash::make($password),
-                'plain_password' => $password, // Store plain password for first login
                 'role' => 'faculty',
                 'is_coordinator' => false,
                 'assigned_strand_id' => $request->assigned_strand_id,
                 'email_verified_at' => now(),
-                'password_change_required' => true, // Force password change on first login
-                'password_changed' => false // Mark as not changed yet
             ]);
 
             $emailSent = false;
@@ -3765,7 +3761,6 @@ class RegistrarController extends Controller
                     'day_of_week' => 'Monday', // Default - can be updated later
                     'start_time' => '08:00:00', // Default - can be updated later
                     'end_time' => '10:00:00', // Default - can be updated later
-                    'room' => 'TBA', // Default - can be updated later
                     'semester' => 1, // Default - can be updated later
                     'is_active' => true
                 ]);

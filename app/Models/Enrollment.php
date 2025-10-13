@@ -29,6 +29,16 @@ class Enrollment extends Model
         'summer_subjects',
         'schedule_preference',
         'academic_year_status',
+        // SHS Grade 11-12 fields
+        'intended_grade_level',      // MISSING FIELD - CRITICAL FIX
+        'grade_level',
+        'has_grade_11_enrollment',
+        'previous_enrollment_id',
+        'enrollment_method',
+        'cor_generated',
+        'cor_generated_at',
+        'cor_subjects',
+        'last_school_attended',
     ];
 
     protected $casts = [
@@ -39,7 +49,11 @@ class Enrollment extends Model
         'enrollment_date' => 'datetime',
         'status' => 'string',
         'enrollment_type' => 'string',
-        'academic_year_status' => 'string'
+        'academic_year_status' => 'string',
+        'cor_generated' => 'boolean',
+        'cor_generated_at' => 'datetime',
+        'cor_subjects' => 'array',
+        'has_grade_11_enrollment' => 'boolean',
     ];
 
     // Relationships
@@ -147,5 +161,34 @@ class Enrollment extends Model
     public function scopeForSchoolYear($query, $schoolYearId)
     {
         return $query->where('school_year_id', $schoolYearId);
+    }
+
+    // SHS Grade 11-12 relationships
+    public function previousEnrollment()
+    {
+        return $this->belongsTo(Enrollment::class, 'previous_enrollment_id');
+    }
+
+    public function grade12Enrollment()
+    {
+        return $this->hasOne(Enrollment::class, 'previous_enrollment_id');
+    }
+
+    // Scopes for Grade 11-12
+    public function scopeGrade11($query)
+    {
+        return $query->where('grade_level', 'Grade 11');
+    }
+
+    public function scopeGrade12($query)
+    {
+        return $query->where('grade_level', 'Grade 12');
+    }
+
+    public function scopeEligibleForGrade12($query)
+    {
+        return $query->where('grade_level', 'Grade 11')
+                    ->where('status', 'enrolled')
+                    ->whereDoesntHave('grade12Enrollment');
     }
 }

@@ -114,6 +114,7 @@ Route::get('/', function () {
     return redirect('/login');
 })->name('home');
 
+
 // Login Page - FIXED VERSION
 Route::get('/login', function () {
     // Use web guard explicitly
@@ -166,6 +167,1292 @@ Route::get('/auth/change-password', function (Request $request) {
         'userType' => $request->query('userType', 'faculty')
     ]);
 })->name('change.password');
+
+// SHS Grade 11-12 Enrollment Routes
+Route::middleware(['auth:sanctum'])->group(function () {
+    // Grade 11 Enrollment
+    Route::get('/enroll/grade-11', [App\Http\Controllers\SHSEnrollmentController::class, 'showGrade11Form'])
+        ->name('shs.grade11.form');
+    Route::post('/enroll/grade-11', [App\Http\Controllers\SHSEnrollmentController::class, 'enrollGrade11'])
+        ->name('shs.grade11.enroll');
+    
+    // Grade 12 Enrollment
+    Route::get('/enroll/grade-12', [App\Http\Controllers\SHSEnrollmentController::class, 'showGrade12Form'])
+        ->name('shs.grade12.form');
+    Route::post('/enroll/grade-12', [App\Http\Controllers\SHSEnrollmentController::class, 'enrollGrade12'])
+        ->name('shs.grade12.enroll');
+    
+    // Faculty Auto-Enrollment Management
+    Route::get('/faculty/auto-enrollments', [App\Http\Controllers\SHSEnrollmentController::class, 'facultyAutoEnrollments'])
+        ->name('faculty.auto.enrollments');
+    Route::post('/faculty/approve-enrollment', [App\Http\Controllers\SHSEnrollmentController::class, 'approveAutoEnrollment'])
+        ->name('faculty.approve.enrollment');
+    
+    // Certificate of Registration (COR)
+    Route::get('/cor/{enrollment}', [App\Http\Controllers\SHSEnrollmentController::class, 'viewCOR'])
+        ->name('cor.view');
+    Route::get('/cor/{enrollment}/pdf', [App\Http\Controllers\SHSEnrollmentController::class, 'generateCORPDF'])
+        ->name('cor.pdf');
+});
+
+// Quick login and redirect to enrollment
+Route::get('/debug/quick-login-enrollment/{userId}', function ($userId) {
+    $user = \App\Models\User::find($userId);
+    if ($user) {
+        Auth::login($user);
+        session()->regenerate();
+        
+        // Immediately redirect to enrollment page
+        return redirect('/faculty/enrollment');
+    }
+    
+    return response()->json(['error' => 'User not found']);
+});
+
+// Manual login for testing
+Route::get('/debug/manual-login/{userId}', function ($userId) {
+    $user = \App\Models\User::find($userId);
+    if ($user) {
+        Auth::login($user);
+        session()->regenerate();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User logged in manually',
+            'user' => $user,
+            'auth_check' => Auth::check(),
+            'session_id' => session()->getId()
+        ]);
+    }
+    
+    return response()->json([
+        'success' => false,
+        'message' => 'User not found'
+    ]);
+});
+
+// Inertia-based login route (with proper session handling)
+Route::post('/auth/login-inertia', function (Request $request) {
+    $credentials = $request->validate([
+        'email' => 'required|email',
+        'password' => 'required'
+    ]);
+
+    $user = \App\Models\User::where('email', $credentials['email'])->first();
+    
+    if (!$user || !\Illuminate\Support\Facades\Hash::check($credentials['password'], $user->password)) {
+        return back()->withErrors([
+            'email' => 'The provided credentials do not match our records.'
+        ])->withInput();
+    }
+
+    if ($user->is_disabled) {
+        return back()->withErrors([
+            'email' => 'Your account has been disabled. Please contact the registrar.'
+        ])->withInput();
+    }
+
+    // Log the user in
+    Auth::login($user, $request->boolean('remember'));
+    
+    // Regenerate session
+    $request->session()->regenerate();
+    
+    // Update last login
+    $user->update(['last_login_at' => now()]);
+    
+    // Check if password change is required
+    $passwordChangeRequired = false;
+    if (in_array($user->role, ['faculty', 'coordinator'])) {
+        $passwordChangeRequiredField = $user->password_change_required ?? false;
+        $plainPasswordField = $user->plain_password ?? '';
+        
+        if ($passwordChangeRequiredField || !empty($plainPasswordField)) {
+            $passwordChangeRequired = true;
+        }
+    }
+    
+    // Redirect based on role and password change requirement
+    if ($passwordChangeRequired) {
+        return redirect('/auth/change-password?userType=' . $user->role);
+    }
+    
+    $redirectUrl = match($user->role) {
+        'student' => '/student/dashboard',
+        'registrar' => '/registrar/dashboard',
+        'faculty', 'coordinator' => '/faculty/dashboard',
+        default => '/dashboard'
+    };
+    
+    return redirect($redirectUrl);
+});
+
+// Logout Route - Allow both authenticated and unauthenticated requests
+Route::post('/auth/logout', function (Request $request) {
+    // Check if user is authenticated
+    if (Auth::check()) {
+        Auth::logout();
+    }
+    
+    // Always invalidate session and regenerate token
+    $request->session()->invalidate();
+    $request->session()->regenerateToken();
+    
+    // Clear any auth-related cookies
+    $response = response()->json([
+        'success' => true,
+        'message' => 'Logged out successfully'
+    ]);
+    
+    // Clear auth cookies
+    $response->withCookie(cookie()->forget('laravel_session'));
+    $response->withCookie(cookie()->forget('XSRF-TOKEN'));
+    
+    return $response;
+})->name('auth.logout');
+
+// User info endpoint for AuthManager
+Route::get('/auth/user', function (Request $request) {
+    $user = $request->user() ?: Auth::user();
+    
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Not authenticated'
+        ], 401);
+    }
+    
+    return response()->json([
+        'success' => true,
+        'user' => [
+            'id' => $user->id,
+            'firstname' => $user->firstname,
+            'lastname' => $user->lastname,
+            'email' => $user->email,
+            'role' => $user->role,
+            'is_coordinator' => $user->is_coordinator ?? false,
+            'student_type' => $user->student_type ?? null,
+            'last_login_at' => $user->last_login_at
+        ]
+    ]);
+})->name('auth.user');
+
+// Favicon routes to prevent 404 errors
+Route::get('/favicon-32x32.png', function () {
+    return response('', 204); // No content response
+});
+
+Route::get('/favicon-16x16.png', function () {
+    return response('', 204); // No content response
+});
+    
+Route::get('/favicon.ico', function () {
+    return response('', 204); // No content response
+});
+
+// COMPLETE FIX: Create all necessary data for Faculty Enrollment
+Route::get('/debug/fix-faculty-enrollment-completely', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    $results = [];
+    
+    // Create test students with all required data
+    $testStudents = [
+        ['firstname' => 'John', 'lastname' => 'Doe', 'email' => 'john.doe@student.com', 'student_type' => 'new'],
+        ['firstname' => 'Jane', 'lastname' => 'Smith', 'email' => 'jane.smith@student.com', 'student_type' => 'transferee'],
+        ['firstname' => 'Bob', 'lastname' => 'Johnson', 'email' => 'bob.johnson@student.com', 'student_type' => 'continuing']
+    ];
+    
+    foreach ($testStudents as $index => $studentData) {
+        // Create or get student user
+        $student = \App\Models\User::updateOrCreate(
+            ['email' => $studentData['email']],
+            [
+                'firstname' => $studentData['firstname'],
+                'lastname' => $studentData['lastname'],
+                'password' => Hash::make('password123'),
+                'role' => 'student',
+                'student_type' => $studentData['student_type']
+            ]
+        );
+        
+        // Create student_personal_info if missing
+        $personalInfo = DB::table('student_personal_info')->where('user_id', $student->id)->first();
+        if (!$personalInfo) {
+            DB::table('student_personal_info')->insert([
+                'user_id' => $student->id,
+                'grade_level' => 'Grade 11',
+                'student_status' => $studentData['student_type'] === 'new' ? 'New' : ($studentData['student_type'] === 'transferee' ? 'Transferee' : 'Continuing'),
+                'address' => '123 Test Street, Test City',
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+        
+        // Create enrollment if missing
+        $enrollment = DB::table('enrollments')
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+            
+        if (!$enrollment) {
+            $enrollmentId = DB::table('enrollments')->insertGetId([
+                'student_id' => $student->id,
+                'school_year_id' => $activeSchoolYear->id,
+                'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending'),
+                'grade_level' => 'Grade 11',
+                'intended_grade_level' => 'Grade 11',
+                'enrollment_method' => 'self',
+                'has_grade_11_enrollment' => false,
+                'cor_generated' => false,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $results[] = [
+                'action' => 'created_enrollment',
+                'student' => $student->only(['id', 'firstname', 'lastname', 'email', 'student_type']),
+                'enrollment_id' => $enrollmentId,
+                'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending')
+            ];
+        } else {
+            $results[] = [
+                'action' => 'enrollment_exists',
+                'student' => $student->only(['id', 'firstname', 'lastname', 'email', 'student_type']),
+                'enrollment_id' => $enrollment->id
+            ];
+        }
+    }
+    
+    // Test the coordinator query
+    $coordinatorResults = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+        ->select([
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname', 
+            'users.email',
+            'users.student_type',
+            'enrollments.status as enrollment_status',
+            'enrollments.id as enrollment_id'
+        ])
+        ->get();
+    
+    return response()->json([
+        'message' => 'Faculty enrollment system completely fixed',
+        'active_school_year' => $activeSchoolYear,
+        'results' => $results,
+        'coordinator_query_test' => [
+            'count' => $coordinatorResults->count(),
+            'results' => $coordinatorResults->toArray()
+        ],
+        'next_step' => 'Now login and access http://127.0.0.1:8000/faculty/enrollment'
+    ]);
+});
+
+// Create complete test data (students + enrollments)
+Route::get('/debug/create-complete-test-data', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    $created = [];
+    
+    // Create test students if they don't exist
+    $testStudents = [
+        ['firstname' => 'John', 'lastname' => 'Doe', 'email' => 'john.doe@student.com', 'student_type' => 'new'],
+        ['firstname' => 'Jane', 'lastname' => 'Smith', 'email' => 'jane.smith@student.com', 'student_type' => 'transferee'],
+        ['firstname' => 'Bob', 'lastname' => 'Johnson', 'email' => 'bob.johnson@student.com', 'student_type' => 'continuing']
+    ];
+    
+    foreach ($testStudents as $index => $studentData) {
+        // Check if student exists
+        $existingStudent = \App\Models\User::where('email', $studentData['email'])->first();
+        
+        if (!$existingStudent) {
+            // Create student user
+            $student = \App\Models\User::create([
+                'firstname' => $studentData['firstname'],
+                'lastname' => $studentData['lastname'],
+                'email' => $studentData['email'],
+                'password' => Hash::make('password123'),
+                'role' => 'student',
+                'student_type' => $studentData['student_type']
+            ]);
+            
+            $created[] = ['type' => 'student', 'data' => $student];
+        } else {
+            $student = $existingStudent;
+            // Update student_type if needed
+            if ($student->student_type !== $studentData['student_type']) {
+                $student->update(['student_type' => $studentData['student_type']]);
+            }
+        }
+        
+        // Check if enrollment exists
+        $existingEnrollment = DB::table('enrollments')
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+        
+        if (!$existingEnrollment) {
+            // Create enrollment
+            $enrollmentId = DB::table('enrollments')->insertGetId([
+                'student_id' => $student->id,
+                'school_year_id' => $activeSchoolYear->id,
+                'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending'),
+                'grade_level' => 'Grade 11',
+                'intended_grade_level' => 'Grade 11',
+                'enrollment_method' => 'self',
+                'has_grade_11_enrollment' => false,
+                'cor_generated' => false,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $created[] = [
+                'type' => 'enrollment',
+                'data' => [
+                    'enrollment_id' => $enrollmentId,
+                    'student' => $student->only(['id', 'firstname', 'lastname', 'email', 'student_type']),
+                    'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending')
+                ]
+            ];
+        }
+    }
+    
+    return response()->json([
+        'message' => 'Complete test data created',
+        'created_items' => $created,
+        'school_year' => $activeSchoolYear
+    ]);
+});
+
+// Create multiple test enrollments for debugging
+Route::get('/debug/create-test-enrollments', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    // Find student users
+    $students = \App\Models\User::where('role', 'student')->limit(3)->get();
+    
+    if ($students->count() === 0) {
+        return response()->json(['error' => 'No student users found']);
+    }
+    
+    $created = [];
+    
+    foreach ($students as $index => $student) {
+        // Check if enrollment already exists
+        $existingEnrollment = DB::table('enrollments')
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+        
+        if (!$existingEnrollment) {
+            // Ensure student has proper student_type
+            if (!$student->student_type) {
+                $studentTypes = ['new', 'transferee', 'continuing'];
+                $student->update(['student_type' => $studentTypes[$index % 3]]);
+            }
+            
+            // Create test enrollment
+            $enrollmentId = DB::table('enrollments')->insertGetId([
+                'student_id' => $student->id,
+                'school_year_id' => $activeSchoolYear->id,
+                'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending'),
+                'grade_level' => 'Grade 11',
+                'intended_grade_level' => 'Grade 11',
+                'enrollment_method' => 'self',
+                'has_grade_11_enrollment' => false,
+                'cor_generated' => false,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $created[] = [
+                'enrollment_id' => $enrollmentId,
+                'student' => $student->only(['id', 'firstname', 'lastname', 'email', 'student_type']),
+                'status' => $index === 0 ? 'pending' : ($index === 1 ? 'approved' : 'pending')
+            ];
+        }
+    }
+    
+    return response()->json([
+        'message' => 'Test enrollments created',
+        'created_count' => count($created),
+        'created_enrollments' => $created,
+        'school_year' => $activeSchoolYear
+    ]);
+});
+
+// Create test enrollment for debugging
+Route::get('/debug/create-test-enrollment', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    // Find a student user
+    $student = \App\Models\User::where('role', 'student')->first();
+    
+    if (!$student) {
+        return response()->json(['error' => 'No student users found']);
+    }
+    
+    // Check if enrollment already exists
+    $existingEnrollment = DB::table('enrollments')
+        ->where('student_id', $student->id)
+        ->where('school_year_id', $activeSchoolYear->id)
+        ->first();
+    
+    if ($existingEnrollment) {
+        return response()->json([
+            'message' => 'Enrollment already exists',
+            'enrollment' => $existingEnrollment,
+            'student' => $student
+        ]);
+    }
+    
+    // Create test enrollment
+    $enrollmentId = DB::table('enrollments')->insertGetId([
+        'student_id' => $student->id,
+        'school_year_id' => $activeSchoolYear->id,
+        'status' => 'pending',
+        'grade_level' => 'Grade 11',
+        'intended_grade_level' => 'Grade 11',
+        'enrollment_method' => 'self',
+        'has_grade_11_enrollment' => false,
+        'cor_generated' => false,
+        'created_at' => now(),
+        'updated_at' => now()
+    ]);
+    
+    return response()->json([
+        'message' => 'Test enrollment created',
+        'enrollment_id' => $enrollmentId,
+        'student' => $student,
+        'school_year' => $activeSchoolYear
+    ]);
+});
+
+// Create test subjects for enrollment and crediting
+Route::get('/debug/create-test-subjects', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    // Get strands
+    $strands = \App\Models\Strand::all();
+    if ($strands->isEmpty()) {
+        return response()->json(['error' => 'No strands found. Create strands first.']);
+    }
+    
+    $results = [];
+    
+    // Core subjects (for all strands)
+    $coreSubjects = [
+        ['subject_code' => 'ENG11', 'subject_name' => 'Oral Communication', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'ENG12', 'subject_name' => 'Reading and Writing Skills', 'units' => 1, 'semester' => '2nd Semester'],
+        ['subject_code' => 'FIL11', 'subject_name' => 'Komunikasyon at Pananaliksik', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'FIL12', 'subject_name' => 'Pagbasa at Pagsusuri ng Iba\'t Ibang Teksto', 'units' => 1, 'semester' => '2nd Semester'],
+        ['subject_code' => 'MATH11', 'subject_name' => 'General Mathematics', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'MATH12', 'subject_name' => 'Statistics and Probability', 'units' => 1, 'semester' => '2nd Semester'],
+        ['subject_code' => 'SCI11', 'subject_name' => 'Earth and Life Science', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'SCI12', 'subject_name' => 'Physical Science', 'units' => 1, 'semester' => '2nd Semester'],
+        ['subject_code' => 'SS11', 'subject_name' => 'Understanding Culture, Society and Politics', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'SS12', 'subject_name' => 'Contemporary Philippine Arts', 'units' => 1, 'semester' => '2nd Semester'],
+        ['subject_code' => 'PE11', 'subject_name' => 'Physical Education and Health 11', 'units' => 1, 'semester' => '1st Semester'],
+        ['subject_code' => 'PE12', 'subject_name' => 'Physical Education and Health 12', 'units' => 1, 'semester' => '2nd Semester']
+    ];
+    
+    foreach ($coreSubjects as $subjectData) {
+        $subject = \App\Models\Subject::updateOrCreate(
+            ['subject_code' => $subjectData['subject_code']],
+            array_merge($subjectData, [
+                'strand_id' => null, // Core subjects have no specific strand
+                'grade_level' => 'Grade 11',
+                'is_active' => true
+            ])
+        );
+        $results['core_subjects'][] = $subject;
+    }
+    
+    // STEM-specific subjects
+    $stemStrand = $strands->where('code', 'STEM')->first();
+    if ($stemStrand) {
+        $stemSubjects = [
+            ['subject_code' => 'STEM11-1', 'subject_name' => 'Pre-Calculus', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'STEM11-2', 'subject_name' => 'Basic Calculus', 'units' => 1, 'semester' => '2nd Semester'],
+            ['subject_code' => 'STEM11-3', 'subject_name' => 'General Biology 1', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'STEM11-4', 'subject_name' => 'General Biology 2', 'units' => 1, 'semester' => '2nd Semester'],
+            ['subject_code' => 'STEM11-5', 'subject_name' => 'General Chemistry 1', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'STEM11-6', 'subject_name' => 'General Chemistry 2', 'units' => 1, 'semester' => '2nd Semester'],
+            ['subject_code' => 'STEM11-7', 'subject_name' => 'General Physics 1', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'STEM11-8', 'subject_name' => 'General Physics 2', 'units' => 1, 'semester' => '2nd Semester']
+        ];
+        
+        foreach ($stemSubjects as $subjectData) {
+            $subject = \App\Models\Subject::updateOrCreate(
+                ['subject_code' => $subjectData['subject_code']],
+                array_merge($subjectData, [
+                    'strand_id' => $stemStrand->id,
+                    'grade_level' => 'Grade 11',
+                    'is_active' => true
+                ])
+            );
+            $results['stem_subjects'][] = $subject;
+        }
+    }
+    
+    // HUMSS-specific subjects
+    $humssStrand = $strands->where('code', 'HUMSS')->first();
+    if ($humssStrand) {
+        $humssSubjects = [
+            ['subject_code' => 'HUMSS11-1', 'subject_name' => 'Creative Writing', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'HUMSS11-2', 'subject_name' => 'Creative Nonfiction', 'units' => 1, 'semester' => '2nd Semester'],
+            ['subject_code' => 'HUMSS11-3', 'subject_name' => 'Introduction to World Religions', 'units' => 1, 'semester' => '1st Semester'],
+            ['subject_code' => 'HUMSS11-4', 'subject_name' => 'Disciplines and Ideas in Social Sciences', 'units' => 1, 'semester' => '2nd Semester']
+        ];
+        
+        foreach ($humssSubjects as $subjectData) {
+            $subject = \App\Models\Subject::updateOrCreate(
+                ['subject_code' => $subjectData['subject_code']],
+                array_merge($subjectData, [
+                    'strand_id' => $humssStrand->id,
+                    'grade_level' => 'Grade 11',
+                    'is_active' => true
+                ])
+            );
+            $results['humss_subjects'][] = $subject;
+        }
+    }
+    
+    return response()->json([
+        'message' => 'Test subjects created successfully',
+        'core_subjects_count' => count($results['core_subjects'] ?? []),
+        'stem_subjects_count' => count($results['stem_subjects'] ?? []),
+        'humss_subjects_count' => count($results['humss_subjects'] ?? []),
+        'total_subjects' => \App\Models\Subject::count()
+    ]);
+});
+
+// Create test sections and strands for enrollment
+Route::get('/debug/create-sections-and-strands', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    $results = [];
+    
+    // Create strands if they don't exist
+    $strands = [
+        ['name' => 'Science, Technology, Engineering and Mathematics', 'code' => 'STEM', 'description' => 'STEM Strand'],
+        ['name' => 'Humanities and Social Sciences', 'code' => 'HUMSS', 'description' => 'HUMSS Strand'],
+        ['name' => 'Accountancy, Business and Management', 'code' => 'ABM', 'description' => 'ABM Strand'],
+        ['name' => 'General Academic Strand', 'code' => 'GAS', 'description' => 'GAS Strand']
+    ];
+    
+    foreach ($strands as $strandData) {
+        $strand = \App\Models\Strand::updateOrCreate(
+            ['code' => $strandData['code']],
+            $strandData
+        );
+        $results['strands'][] = $strand;
+    }
+    
+    // Create sections for each strand
+    $sectionNames = ['Section A', 'Section B', 'Section C'];
+    
+    foreach ($results['strands'] as $strand) {
+        foreach ($sectionNames as $sectionName) {
+            $section = \App\Models\Section::updateOrCreate(
+                [
+                    'section_name' => $strand->code . ' - ' . $sectionName,
+                    'strand_id' => $strand->id,
+                    'school_year_id' => $activeSchoolYear->id
+                ],
+                [
+                    'grade_level' => 'Grade 11',
+                    'max_students' => 40,
+                    'is_active' => true
+                ]
+            );
+            $results['sections'][] = $section;
+        }
+    }
+    
+    return response()->json([
+        'message' => 'Sections and strands created successfully',
+        'strands_count' => count($results['strands']),
+        'sections_count' => count($results['sections']),
+        'strands' => $results['strands'],
+        'sections' => $results['sections']
+    ]);
+});
+
+// Create test class schedules for sections
+Route::get('/debug/create-class-schedules', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    // Get sections and subjects
+    $sections = \App\Models\Section::all();
+    $subjects = \App\Models\Subject::all();
+    
+    if ($sections->isEmpty() || $subjects->isEmpty()) {
+        return response()->json(['error' => 'No sections or subjects found. Create them first.']);
+    }
+    
+    $results = [];
+    $timeSlots = [
+        ['start' => '08:00:00', 'end' => '09:30:00'],
+        ['start' => '09:30:00', 'end' => '11:00:00'],
+        ['start' => '11:00:00', 'end' => '12:30:00'],
+        ['start' => '13:30:00', 'end' => '15:00:00'],
+        ['start' => '15:00:00', 'end' => '16:30:00']
+    ];
+    
+    $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    
+    foreach ($sections as $section) {
+        // Get subjects for this section's strand (core + strand-specific)
+        $sectionSubjects = $subjects->filter(function($subject) use ($section) {
+            return $subject->strand_id === null || $subject->strand_id === $section->strand_id;
+        });
+        
+        $timeIndex = 0;
+        $dayIndex = 0;
+        
+        foreach ($sectionSubjects as $subject) {
+            // Create class schedule
+            $classId = DB::table('class')->insertGetId([
+                'section_id' => $section->id,
+                'subject_id' => $subject->id,
+                'faculty_id' => null, // No faculty assigned yet
+                'school_year_id' => $activeSchoolYear->id,
+                'day_of_week' => $days[$dayIndex % count($days)],
+                'start_time' => $timeSlots[$timeIndex % count($timeSlots)]['start'],
+                'end_time' => $timeSlots[$timeIndex % count($timeSlots)]['end'],
+                'duration' => 90, // 90 minutes
+                'semester' => $subject->semester,
+                'room' => 'Room ' . (100 + ($timeIndex % 10)),
+                'is_active' => true,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $results[] = [
+                'class_id' => $classId,
+                'section' => $section->section_name,
+                'subject' => $subject->subject_code,
+                'day' => $days[$dayIndex % count($days)],
+                'time' => $timeSlots[$timeIndex % count($timeSlots)]['start'] . ' - ' . $timeSlots[$timeIndex % count($timeSlots)]['end']
+            ];
+            
+            $timeIndex++;
+            if ($timeIndex % count($timeSlots) === 0) {
+                $dayIndex++;
+            }
+        }
+    }
+    
+    return response()->json([
+        'message' => 'Class schedules created successfully',
+        'schedules_created' => count($results),
+        'total_classes' => DB::table('class')->count(),
+        'sample_schedules' => array_slice($results, 0, 10)
+    ]);
+});
+
+// Test complete enrollment flow
+Route::get('/debug/test-enrollment-flow/{userId}', function ($userId) {
+    $results = [];
+    
+    try {
+        // Step 1: Check if user exists
+        $user = \App\Models\User::where('id', $userId)->where('role', 'student')->first();
+        if (!$user) {
+            return response()->json(['error' => 'Student not found']);
+        }
+        $results['step1_user'] = ['found' => true, 'name' => $user->firstname . ' ' . $user->lastname];
+        
+        // Step 2: Check enrollment
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        $enrollment = DB::table('enrollments')
+            ->where('student_id', $userId)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+        $results['step2_enrollment'] = [
+            'found' => $enrollment ? true : false,
+            'status' => $enrollment->status ?? 'not_found',
+            'section_id' => $enrollment->assigned_section_id ?? null
+        ];
+        
+        // Step 3: Check class_details records
+        $classDetails = DB::table('class_details')
+            ->where('student_id', $userId)
+            ->where('is_enrolled', true)
+            ->count();
+        $results['step3_class_details'] = [
+            'count' => $classDetails,
+            'has_records' => $classDetails > 0
+        ];
+        
+        // Step 4: Check class records for section
+        if ($enrollment && $enrollment->assigned_section_id) {
+            $classRecords = DB::table('class')
+                ->where('section_id', $enrollment->assigned_section_id)
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->where('is_active', true)
+                ->count();
+            $results['step4_class_records'] = [
+                'section_id' => $enrollment->assigned_section_id,
+                'count' => $classRecords,
+                'has_records' => $classRecords > 0
+            ];
+        }
+        
+        // Step 5: Test schedule query
+        $schedule = DB::table('class_details')
+            ->join('class', 'class_details.class_id', '=', 'class.id')
+            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+            ->join('sections', 'class.section_id', '=', 'sections.id')
+            ->leftJoin('users as faculty', 'class.faculty_id', '=', 'faculty.id')
+            ->where('class_details.student_id', $userId)
+            ->where('class_details.is_enrolled', true)
+            ->where('class.is_active', true)
+            ->select([
+                'subjects.subject_name',
+                'subjects.subject_code',
+                'class.day_of_week',
+                'class.start_time',
+                'class.end_time',
+                'class.room',
+                DB::raw("CONCAT(COALESCE(faculty.firstname, 'No'), ' ', COALESCE(faculty.lastname, 'Faculty')) as faculty_name"),
+                'sections.section_name',
+                'subjects.semester'
+            ])
+            ->get();
+            
+        $results['step5_schedule_query'] = [
+            'count' => $schedule->count(),
+            'has_schedule' => $schedule->count() > 0,
+            'sample_records' => $schedule->take(3)->toArray()
+        ];
+        
+        // Step 6: Recommendations
+        $recommendations = [];
+        if (!$enrollment) {
+            $recommendations[] = 'Student needs to be enrolled first';
+        } elseif ($enrollment->status !== 'enrolled') {
+            $recommendations[] = 'Enrollment status needs to be "enrolled"';
+        }
+        
+        if ($classDetails === 0) {
+            $recommendations[] = 'No class_details records found - enrollment process may be incomplete';
+        }
+        
+        if (isset($results['step4_class_records']) && !$results['step4_class_records']['has_records']) {
+            $recommendations[] = 'No class records found for section - run /debug/create-class-schedules';
+        }
+        
+        if ($schedule->count() === 0) {
+            $recommendations[] = 'Student schedule will be empty - check enrollment and class creation';
+        }
+        
+        $results['recommendations'] = $recommendations;
+        $results['overall_status'] = empty($recommendations) ? 'READY' : 'NEEDS_FIXES';
+        
+        return response()->json($results);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Test failed: ' . $e->getMessage(),
+            'results_so_far' => $results
+        ]);
+    }
+});
+
+// Fix missing student personal info
+Route::get('/debug/fix-student-personal-info/{userId}', function ($userId) {
+    $user = \App\Models\User::where('id', $userId)->where('role', 'student')->first();
+    
+    if (!$user) {
+        return response()->json(['error' => 'Student not found']);
+    }
+    
+    // Check if personal info exists
+    $personalInfo = DB::table('student_personal_info')->where('user_id', $userId)->first();
+    
+    if ($personalInfo) {
+        return response()->json([
+            'message' => 'Personal info already exists',
+            'data' => $personalInfo
+        ]);
+    }
+    
+    // Create basic personal info record
+    $personalInfoId = DB::table('student_personal_info')->insertGetId([
+        'user_id' => $userId,
+        'grade_level' => 'Grade 11', // Default for new students
+        'student_status' => $user->student_type === 'transferee' ? 'Transferee' : 'New Student',
+        'address' => 'To be provided',
+        'created_at' => now(),
+        'updated_at' => now()
+    ]);
+    
+    return response()->json([
+        'message' => 'Personal info created successfully',
+        'personal_info_id' => $personalInfoId,
+        'student' => $user->only(['id', 'firstname', 'lastname', 'email', 'student_type'])
+    ]);
+});
+
+// COR (Certificate of Registration) Routes
+Route::middleware(['auth'])->group(function () {
+    // View COR in browser
+    Route::get('/cor/{studentId}', [App\Http\Controllers\CORController::class, 'viewCOR'])
+        ->name('cor.view');
+    
+    // Download COR as PDF
+    Route::get('/cor/{studentId}/pdf', [App\Http\Controllers\CORController::class, 'generateCORPDF'])
+        ->name('cor.pdf');
+    
+    // API endpoint for section schedules
+    Route::get('/api/sections/{sectionId}/schedules', [App\Http\Controllers\CORController::class, 'getSectionSchedulesAPI'])
+        ->name('api.section.schedules');
+});
+
+// Check student_strand_preferences table structure
+Route::get('/debug/check-strand-preferences-table', function () {
+    try {
+        $columns = Schema::getColumnListing('student_strand_preferences');
+        $sampleData = DB::table('student_strand_preferences')->limit(3)->get();
+        
+        return response()->json([
+            'table_exists' => Schema::hasTable('student_strand_preferences'),
+            'columns' => $columns,
+            'sample_data' => $sampleData->toArray(),
+            'total_records' => DB::table('student_strand_preferences')->count()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'table_exists' => Schema::hasTable('student_strand_preferences')
+        ]);
+    }
+});
+
+// COMPREHENSIVE DEBUG: Check entire enrollment pipeline
+Route::get('/debug/full-enrollment-debug', function () {
+    $debug = [];
+    
+    // Step 1: Check active school year
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    $debug['step1_school_year'] = [
+        'found' => $activeSchoolYear ? true : false,
+        'data' => $activeSchoolYear
+    ];
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year', 'debug' => $debug]);
+    }
+    
+    // Step 2: Check total users and students
+    $totalUsers = DB::table('users')->count();
+    $studentUsers = DB::table('users')->where('role', 'student')->get();
+    $debug['step2_users'] = [
+        'total_users' => $totalUsers,
+        'student_count' => $studentUsers->count(),
+        'students' => $studentUsers->toArray()
+    ];
+    
+    // Step 3: Check enrollments table
+    $totalEnrollments = DB::table('enrollments')->count();
+    $allEnrollments = DB::table('enrollments')->get();
+    $debug['step3_enrollments'] = [
+        'total_enrollments' => $totalEnrollments,
+        'enrollments' => $allEnrollments->toArray()
+    ];
+    
+    // Step 4: Test exact CoordinatorController query
+    $coordinatorQuery = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+        ->select([
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname', 
+            'users.email',
+            'users.student_type',
+            'student_personal_info.grade_level',
+            'student_personal_info.student_status',
+            'student_personal_info.address',
+            'enrollments.status as enrollment_status',
+            'enrollments.id as enrollment_id',
+            'enrollments.created_at as enrollment_date',
+            'enrollments.grade_level as enrollment_grade_level',
+            'enrollments.intended_grade_level'
+        ])
+        ->get();
+    
+    $debug['step4_coordinator_query'] = [
+        'result_count' => $coordinatorQuery->count(),
+        'results' => $coordinatorQuery->toArray(),
+        'raw_sql' => DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->where('users.role', 'student')
+            ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+            ->toSql()
+    ];
+    
+    // Step 5: Check for missing student_personal_info records
+    $studentsWithoutPersonalInfo = [];
+    foreach ($studentUsers as $student) {
+        $personalInfo = DB::table('student_personal_info')->where('user_id', $student->id)->first();
+        if (!$personalInfo) {
+            $studentsWithoutPersonalInfo[] = $student;
+        }
+    }
+    $debug['step5_missing_personal_info'] = $studentsWithoutPersonalInfo;
+    
+    return response()->json([
+        'summary' => [
+            'active_school_year' => $activeSchoolYear ? $activeSchoolYear->id : 'NONE',
+            'total_users' => $totalUsers,
+            'student_users' => $studentUsers->count(),
+            'total_enrollments' => $totalEnrollments,
+            'coordinator_query_results' => $coordinatorQuery->count(),
+            'students_missing_personal_info' => count($studentsWithoutPersonalInfo)
+        ],
+        'debug' => $debug
+    ]);
+});
+
+// Verify test data was created
+Route::get('/debug/verify-test-data', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    $testEmails = ['john.doe@student.com', 'jane.smith@student.com', 'bob.johnson@student.com'];
+    $createdStudents = \App\Models\User::whereIn('email', $testEmails)->get();
+    
+    $enrollments = [];
+    foreach ($createdStudents as $student) {
+        $enrollment = DB::table('enrollments')
+            ->where('student_id', $student->id)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+        if ($enrollment) {
+            $enrollments[] = [
+                'student' => $student->only(['id', 'firstname', 'lastname', 'email', 'student_type']),
+                'enrollment' => $enrollment
+            ];
+        }
+    }
+    
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'created_students' => $createdStudents->count(),
+        'students' => $createdStudents,
+        'enrollments_found' => count($enrollments),
+        'enrollments' => $enrollments
+    ]);
+});
+
+// Check basic database data
+Route::get('/debug/basic-data-check', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    $totalUsers = DB::table('users')->count();
+    $studentUsers = DB::table('users')->where('role', 'student')->count();
+    $totalEnrollments = DB::table('enrollments')->count();
+    $currentYearEnrollments = $activeSchoolYear ? DB::table('enrollments')->where('school_year_id', $activeSchoolYear->id)->count() : 0;
+    
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'total_users' => $totalUsers,
+        'student_users' => $studentUsers,
+        'total_enrollments' => $totalEnrollments,
+        'current_year_enrollments' => $currentYearEnrollments,
+        'sample_students' => DB::table('users')->where('role', 'student')->limit(3)->get(['id', 'firstname', 'lastname', 'email', 'student_type']),
+        'sample_enrollments' => DB::table('enrollments')->limit(3)->get(['id', 'student_id', 'school_year_id', 'status', 'created_at'])
+    ]);
+});
+
+// Test exact CoordinatorController query
+Route::get('/debug/coordinator-query', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    // Exact same query as CoordinatorController
+    $enrollments = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+        ->select([
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname', 
+            'users.email',
+            'users.student_type',
+            'student_personal_info.grade_level',
+            'student_personal_info.student_status',
+            'student_personal_info.address',
+            'enrollments.status as enrollment_status',
+            'enrollments.id as enrollment_id',
+            'enrollments.created_at as enrollment_date',
+            'enrollments.grade_level as enrollment_grade_level',
+            'enrollments.intended_grade_level'
+        ])
+        ->orderBy('enrollments.created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'query_result_count' => $enrollments->count(),
+        'enrollments' => $enrollments,
+        'raw_sql' => DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->where('users.role', 'student')
+            ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+            ->toSql()
+    ]);
+});
+
+// Check enrollment data specifically
+Route::get('/debug/enrollment-data', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    if (!$activeSchoolYear) {
+        return response()->json(['error' => 'No active school year found']);
+    }
+    
+    $enrollments = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->select([
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname', 
+            'users.email',
+            'users.student_type',
+            'student_personal_info.grade_level',
+            'student_personal_info.student_status',
+            'enrollments.status as enrollment_status',
+            'enrollments.id as enrollment_id',
+            'enrollments.created_at as enrollment_date'
+        ])
+        ->get();
+        
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'total_enrollments' => $enrollments->count(),
+        'enrollments' => $enrollments,
+        'enrollment_statuses' => $enrollments->pluck('enrollment_status')->unique(),
+        'student_types' => $enrollments->pluck('student_type')->unique()
+    ]);
+});
+
+// Check current auth status for debugging
+Route::get('/debug/check-auth', function (Request $request) {
+    return response()->json([
+        'auth_check' => Auth::check(),
+        'auth_user' => Auth::user() ? [
+            'id' => Auth::user()->id,
+            'email' => Auth::user()->email,
+            'role' => Auth::user()->role
+        ] : null,
+        'session_id' => session()->getId(),
+        'has_session_token' => session()->has('auth_token'),
+        'cookie_token' => $request->cookie('auth_token') ? 'present' : 'missing',
+        'session_data_keys' => array_keys(session()->all())
+    ]);
+});
+
+// Test authentication status
+Route::get('/debug/auth-status', function (Request $request) {
+    return response()->json([
+        'auth_check' => Auth::check(),
+        'auth_user' => Auth::user(),
+        'session_token' => session('auth_token'),
+        'cookie_token' => $request->cookie('auth_token'),
+        'bearer_token' => $request->bearerToken(),
+        'session_id' => session()->getId(),
+        'session_data' => session()->all()
+    ]);
+});
+
+// Fix faculty password status
+Route::get('/debug/fix-faculty-passwords', function () {
+    $facultyUsers = DB::table('users')
+        ->where('role', 'faculty')
+        ->orWhere('role', 'coordinator')
+        ->get();
+    
+    $updated = 0;
+    foreach ($facultyUsers as $user) {
+        // Set password_changed to true for existing faculty (assume they've already changed it)
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update([
+                'password_changed' => true
+            ]);
+        $updated++;
+    }
+    
+    return response()->json([
+        'message' => 'Fixed faculty password status',
+        'updated_users' => $updated,
+        'faculty_users' => $facultyUsers->pluck('email')
+    ]);
+});
+
+// Check users table structure
+Route::get('/debug/users-structure', function () {
+    $columns = Schema::getColumnListing('users');
+    $sampleUser = DB::table('users')->where('role', 'faculty')->first();
+    
+    return response()->json([
+        'columns' => $columns,
+        'sample_faculty_user' => $sampleUser,
+        'has_password_changed' => in_array('password_changed', $columns),
+        'has_password_change_required' => in_array('password_change_required', $columns)
+    ]);
+});
+
+// Fix enrollment data for existing records
+Route::get('/debug/fix-enrollment-data', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    // Get enrollments that might be missing the new fields
+    $enrollments = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->whereNull('enrollments.grade_level') // Find records missing grade_level
+        ->select('enrollments.id', 'enrollments.intended_grade_level', 'users.student_type')
+        ->get();
+    
+    $updated = 0;
+    foreach ($enrollments as $enrollment) {
+        // Set grade_level based on intended_grade_level or default to Grade 11
+        $gradeLevel = $enrollment->intended_grade_level ?: 'Grade 11';
+        
+        DB::table('enrollments')
+            ->where('id', $enrollment->id)
+            ->update([
+                'grade_level' => $gradeLevel,
+                'enrollment_method' => 'self',
+                'has_grade_11_enrollment' => false,
+                'cor_generated' => false
+            ]);
+        $updated++;
+    }
+    
+    return response()->json([
+        'message' => 'Fixed enrollment data',
+        'updated_records' => $updated,
+        'active_school_year' => $activeSchoolYear->id
+    ]);
+});
+
+// Debug route for enrollment data - check what's in database
+Route::get('/debug/enrollment-check', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    $enrollments = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->select([
+            'enrollments.id as enrollment_id',
+            'enrollments.status',
+            'enrollments.grade_level',
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname',
+            'users.student_type',
+            'student_personal_info.student_status',
+            'enrollments.created_at'
+        ])
+        ->get();
+        
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'total_enrollments' => $enrollments->count(),
+        'enrollments' => $enrollments,
+        'query_used' => 'enrollments JOIN users JOIN student_personal_info WHERE school_year_id = ' . $activeSchoolYear->id
+    ]);
+});
+
+// Debug route for enrollment data
+Route::get('/debug/enrollment', function () {
+    $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+    
+    $enrollments = DB::table('enrollments')
+        ->join('users', 'enrollments.student_id', '=', 'users.id')
+        ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+        ->where('enrollments.school_year_id', $activeSchoolYear->id)
+        ->where('users.role', 'student')
+        ->whereIn('enrollments.status', ['pending', 'approved', 'rejected', 'enrolled'])
+        ->select([
+            'users.id as user_id',
+            'users.firstname',
+            'users.lastname', 
+            'users.email',
+            'users.student_type',
+            'student_personal_info.grade_level',
+            'student_personal_info.student_status',
+            'student_personal_info.address',
+            'enrollments.status as enrollment_status',
+            'enrollments.id as enrollment_id',
+            'enrollments.created_at as enrollment_date'
+        ])
+        ->orderBy('enrollments.created_at', 'desc')
+        ->get();
+        
+    return response()->json([
+        'active_school_year' => $activeSchoolYear,
+        'total_enrollments' => $enrollments->count(),
+        'enrollments' => $enrollments
+    ]);
+});
 
 // Forgot Password Pages
 Route::get('/forgot-password', [App\Http\Controllers\PasswordResetController::class, 'showForgotPasswordForm'])
@@ -346,8 +1633,9 @@ Route::get('/faculty/schedule', [App\Http\Controllers\FacultyController::class, 
 
 // Note: Grade progression now handled by Faculty_RoleBasedDashboard and Faculty_Grade12Enrollment
 
-// Faculty Enrollment Page - temporarily outside auth middleware
-Route::get('/faculty/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])->name('faculty.enrollment');
+// Faculty Enrollment Page - handle auth in controller
+Route::get('/faculty/enrollment', [App\Http\Controllers\CoordinatorController::class, 'enrollmentPage'])
+    ->name('faculty.enrollment');
 
 // Faculty Students Page - temporarily outside auth middleware
 Route::get('/faculty/students', [App\Http\Controllers\FacultyController::class, 'studentsPage'])->name('faculty.students');
@@ -1580,6 +2868,8 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
         // Coordinator data routes 
         Route::get('/sections-and-strands', [App\Http\Controllers\CoordinatorController::class, 'getSectionsAndStrands'])
             ->name('coordinator.sections-and-strands');
+        Route::get('/subjects-for-crediting/{strandCode}', [App\Http\Controllers\CoordinatorController::class, 'getSubjectsForCrediting'])
+            ->name('coordinator.subjects-crediting');
         Route::get('/subjects/{strandCode}', [App\Http\Controllers\CoordinatorController::class, 'getSubjectsByStrand'])
             ->name('coordinator.subjects-by-strand');
         Route::get('/students/{id}', [App\Http\Controllers\CoordinatorController::class, 'getStudentDetails'])
@@ -1744,3 +3034,654 @@ Route::get('/test-export', function() {
         return response('Error: ' . $e->getMessage(), 500);
     }
 })->name('test.export');
+
+// Debug route to check enrollment data
+Route::get('/debug/enrollment-data', function() {
+    try {
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return response()->json([
+                'error' => 'No active school year found',
+                'school_years' => \App\Models\SchoolYear::all()
+            ]);
+        }
+        
+        // Get all enrollments for active school year
+        $enrollments = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->select([
+                'enrollments.*',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.role',
+                'users.student_type',
+                'student_personal_info.grade_level',
+                'student_personal_info.student_status'
+            ])
+            ->get();
+            
+        // Get all users with student role
+        $students = DB::table('users')->where('role', 'student')->get();
+        
+        // Get all student_personal_info records
+        $studentPersonalInfo = DB::table('student_personal_info')->get();
+        
+        return response()->json([
+            'active_school_year' => $activeSchoolYear,
+            'total_enrollments' => $enrollments->count(),
+            'enrollments' => $enrollments,
+            'total_students' => $students->count(),
+            'students' => $students,
+            'total_personal_info' => $studentPersonalInfo->count(),
+            'student_personal_info' => $studentPersonalInfo,
+            'debug_info' => [
+                'enrollments_table_exists' => Schema::hasTable('enrollments'),
+                'student_personal_info_table_exists' => Schema::hasTable('student_personal_info'),
+                'enrollment_columns' => Schema::hasTable('enrollments') ? DB::getSchemaBuilder()->getColumnListing('enrollments') : [],
+            ]
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Debug failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.enrollment.data');
+
+// Debug route to test enrollment submission
+Route::post('/debug/test-enrollment-submission', function(Request $request) {
+    try {
+        Log::info('Debug enrollment submission test', [
+            'request_data' => $request->all(),
+            'files' => $request->allFiles(),
+            'user' => Auth::user()
+        ]);
+        
+        // Test if StudentController enroll method works
+        $controller = new \App\Http\Controllers\StudentController();
+        $result = $controller->enroll($request);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Enrollment submission test completed',
+            'result_type' => get_class($result),
+            'result' => $result
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Debug enrollment submission failed', [
+            'error' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'error' => 'Enrollment submission test failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.test.enrollment.submission');
+
+// Debug route to check coordinator query
+Route::get('/debug/coordinator-query', function() {
+    try {
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return response()->json([
+                'error' => 'No active school year found',
+                'school_years' => \App\Models\SchoolYear::all(),
+                'solution' => 'Activate a school year in registrar settings'
+            ]);
+        }
+        
+        // Run the exact same query as coordinator
+        $enrollments = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->where('users.role', 'student')
+            ->whereIn('enrollments.status', ['pending', 'approved', 'rejected'])
+            ->select([
+                'users.id as user_id',
+                'users.firstname',
+                'users.lastname', 
+                'users.email',
+                'users.student_type',
+                'student_personal_info.grade_level',
+                'student_personal_info.student_status',
+                'student_personal_info.address',
+                'enrollments.status as enrollment_status',
+                'enrollments.id as enrollment_id',
+                'enrollments.created_at as enrollment_date'
+            ])
+            ->orderBy('enrollments.created_at', 'desc')
+            ->get();
+            
+        // Also check what would show without filters
+        $allEnrollments = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->select([
+                'users.id as user_id',
+                'users.firstname',
+                'users.lastname', 
+                'users.email',
+                'users.role',
+                'users.student_type',
+                'student_personal_info.grade_level',
+                'student_personal_info.student_status',
+                'enrollments.status as enrollment_status',
+                'enrollments.id as enrollment_id'
+            ])
+            ->get();
+        
+        return response()->json([
+            'active_school_year' => $activeSchoolYear,
+            'coordinator_query_results' => $enrollments,
+            'coordinator_count' => $enrollments->count(),
+            'all_enrollments_for_year' => $allEnrollments,
+            'all_count' => $allEnrollments->count(),
+            'debug_info' => [
+                'filters_applied' => [
+                    'school_year_id' => $activeSchoolYear->id,
+                    'user_role' => 'student',
+                    'enrollment_status' => ['pending', 'approved', 'rejected']
+                ]
+            ]
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Coordinator query debug failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine()
+        ], 500);
+    }
+})->name('debug.coordinator.query');
+
+// Debug route to test strand preferences insertion
+Route::get('/debug/test-strand-preferences/{userId}', function($userId) {
+    try {
+        $user = \App\Models\User::find($userId);
+        if (!$user || $user->role !== 'student') {
+            return response()->json(['error' => 'Student user not found']);
+        }
+        
+        // Get student personal info
+        $student = \App\Models\Student::where('user_id', $user->id)->first();
+        if (!$student) {
+            return response()->json(['error' => 'Student personal info not found']);
+        }
+        
+        // Get available strands
+        $strands = \App\Models\Strand::all();
+        if ($strands->count() < 3) {
+            return response()->json(['error' => 'Need at least 3 strands for testing']);
+        }
+        
+        // Test data
+        $testChoices = [
+            1 => $strands[0]->id, // First choice
+            2 => $strands[1]->id, // Second choice  
+            3 => $strands[2]->id, // Third choice
+        ];
+        
+        // Clear existing preferences
+        DB::table('student_strand_preferences')
+            ->where('student_personal_info_id', $student->id)
+            ->delete();
+            
+        // Insert test preferences
+        $rows = [];
+        foreach ($testChoices as $order => $strandId) {
+            $rows[] = [
+                'student_personal_info_id' => $student->id,
+                'strand_id' => $strandId,
+                'preference_order' => $order,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+        
+        DB::table('student_strand_preferences')->insert($rows);
+        
+        // Verify insertion
+        $inserted = DB::table('student_strand_preferences')
+            ->join('strands', 'student_strand_preferences.strand_id', '=', 'strands.id')
+            ->where('student_personal_info_id', $student->id)
+            ->select([
+                'student_strand_preferences.*',
+                'strands.name as strand_name',
+                'strands.code as strand_code'
+            ])
+            ->orderBy('preference_order')
+            ->get();
+            
+        return response()->json([
+            'success' => true,
+            'message' => 'Strand preferences test completed',
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->firstname . ' ' . $user->lastname,
+                'email' => $user->email
+            ],
+            'student_personal_info_id' => $student->id,
+            'test_choices' => $testChoices,
+            'inserted_preferences' => $inserted,
+            'table_columns' => DB::getSchemaBuilder()->getColumnListing('student_strand_preferences')
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Strand preferences test failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.test.strand.preferences');
+
+// Debug route to check why enrollment doesn't appear in coordinator view
+Route::get('/debug/enrollment-visibility', function() {
+    try {
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return response()->json([
+                'error' => 'No active school year found',
+                'school_years' => \App\Models\SchoolYear::all()
+            ]);
+        }
+        
+        // Check all enrollments in the system
+        $allEnrollments = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->select([
+                'enrollments.*',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.role'
+            ])
+            ->get();
+            
+        // Check enrollments for active school year
+        $activeYearEnrollments = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->select([
+                'enrollments.*',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.role'
+            ])
+            ->get();
+            
+        // Check student users
+        $studentUsers = DB::table('users')->where('role', 'student')->get();
+        
+        // Check student personal info
+        $studentPersonalInfo = DB::table('student_personal_info')->get();
+        
+        // Run the exact coordinator query
+        $coordinatorQuery = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+            ->where('enrollments.school_year_id', $activeSchoolYear->id)
+            ->where('users.role', 'student')
+            ->whereIn('enrollments.status', ['pending', 'approved', 'rejected'])
+            ->select([
+                'users.id as user_id',
+                'users.firstname',
+                'users.lastname', 
+                'users.email',
+                'users.student_type',
+                'student_personal_info.grade_level',
+                'student_personal_info.student_status',
+                'student_personal_info.address',
+                'enrollments.status as enrollment_status',
+                'enrollments.id as enrollment_id',
+                'enrollments.created_at as enrollment_date'
+            ])
+            ->orderBy('enrollments.created_at', 'desc')
+            ->get();
+            
+        // Check strand preferences
+        $strandPreferences = DB::table('student_strand_preferences')
+            ->join('strands', 'student_strand_preferences.strand_id', '=', 'strands.id')
+            ->select([
+                'student_strand_preferences.*',
+                'strands.name as strand_name',
+                'strands.code as strand_code'
+            ])
+            ->get();
+        
+        return response()->json([
+            'active_school_year' => $activeSchoolYear,
+            'debug_summary' => [
+                'total_enrollments' => $allEnrollments->count(),
+                'active_year_enrollments' => $activeYearEnrollments->count(),
+                'student_users' => $studentUsers->count(),
+                'student_personal_info_records' => $studentPersonalInfo->count(),
+                'coordinator_query_results' => $coordinatorQuery->count(),
+                'strand_preferences' => $strandPreferences->count()
+            ],
+            'all_enrollments' => $allEnrollments,
+            'active_year_enrollments' => $activeYearEnrollments,
+            'student_users' => $studentUsers,
+            'student_personal_info' => $studentPersonalInfo,
+            'coordinator_query_results' => $coordinatorQuery,
+            'strand_preferences' => $strandPreferences,
+            'enrollment_table_columns' => DB::getSchemaBuilder()->getColumnListing('enrollments'),
+            'student_personal_info_columns' => DB::getSchemaBuilder()->getColumnListing('student_personal_info'),
+            'coordinator_query_filters' => [
+                'school_year_id' => $activeSchoolYear->id,
+                'user_role' => 'student',
+                'enrollment_status_in' => ['pending', 'approved', 'rejected']
+            ]
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Enrollment visibility debug failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.enrollment.visibility');
+
+// Simple route to check current enrollment status
+Route::get('/debug/simple-enrollment-check', function() {
+    try {
+        // Get the most recent enrollment
+        $latestEnrollment = DB::table('enrollments')
+            ->join('users', 'enrollments.student_id', '=', 'users.id')
+            ->orderBy('enrollments.created_at', 'desc')
+            ->select([
+                'enrollments.*',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.role'
+            ])
+            ->first();
+            
+        if (!$latestEnrollment) {
+            return response()->json(['error' => 'No enrollments found in database']);
+        }
+        
+        // Check if this enrollment should appear in coordinator view
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        
+        $shouldAppear = [
+            'has_active_school_year' => (bool)$activeSchoolYear,
+            'enrollment_school_year_matches' => $activeSchoolYear ? ($latestEnrollment->school_year_id == $activeSchoolYear->id) : false,
+            'user_role_is_student' => $latestEnrollment->role === 'student',
+            'status_is_valid' => in_array($latestEnrollment->status, ['pending', 'approved', 'rejected']),
+        ];
+        
+        // Check student personal info
+        $studentPersonalInfo = DB::table('student_personal_info')
+            ->where('user_id', $latestEnrollment->student_id)
+            ->first();
+            
+        // Check strand preferences
+        $strandPrefs = DB::table('student_strand_preferences')
+            ->join('strands', 'student_strand_preferences.strand_id', '=', 'strands.id')
+            ->where('student_personal_info_id', $studentPersonalInfo ? $studentPersonalInfo->id : 0)
+            ->select([
+                'student_strand_preferences.*',
+                'strands.name as strand_name'
+            ])
+            ->get();
+        
+        return response()->json([
+            'latest_enrollment' => $latestEnrollment,
+            'active_school_year' => $activeSchoolYear,
+            'should_appear_in_coordinator_view' => $shouldAppear,
+            'all_conditions_met' => array_reduce($shouldAppear, function($carry, $item) { return $carry && $item; }, true),
+            'student_personal_info' => $studentPersonalInfo,
+            'strand_preferences' => $strandPrefs,
+            'debug_info' => [
+                'enrollment_status' => $latestEnrollment->status,
+                'school_year_match' => $activeSchoolYear ? ($latestEnrollment->school_year_id . ' == ' . $activeSchoolYear->id) : 'No active school year',
+                'user_role' => $latestEnrollment->role
+            ]
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Simple enrollment check failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine()
+        ], 500);
+    }
+})->name('debug.simple.enrollment.check');
+
+// Route to get sections by strand for enrollment management
+Route::get('/coordinator/sections-by-strand/{strandId}', function($strandId) {
+    try {
+        $sections = \App\Models\Section::where('strand_id', $strandId)
+            ->select('id', 'section_name', 'year_level', 'strand_id')
+            ->get();
+            
+        return response()->json([
+            'success' => true,
+            'sections' => $sections
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to get sections: ' . $e->getMessage()
+        ], 500);
+    }
+})->name('coordinator.sections.by.strand');
+
+// Route to view student COR/schedule
+Route::get('/coordinator/student/{studentId}/schedule', function($studentId) {
+    try {
+        // Get student info
+        $student = \App\Models\User::where('id', $studentId)
+            ->where('role', 'student')
+            ->first();
+            
+        if (!$student) {
+            return response()->json(['error' => 'Student not found'], 404);
+        }
+        
+        // Get active school year
+        $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+        if (!$activeSchoolYear) {
+            return response()->json(['error' => 'No active school year'], 404);
+        }
+        
+        // Get enrollment info
+        $enrollment = DB::table('enrollments')
+            ->where('student_id', $studentId)
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->first();
+            
+        if (!$enrollment) {
+            return response()->json(['error' => 'No enrollment found for this student'], 404);
+        }
+        
+        // Get student's class schedule
+        $schedule = DB::table('class')
+            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+            ->join('users as faculty', 'class.faculty_id', '=', 'faculty.id')
+            ->leftJoin('sections', 'class.section_id', '=', 'sections.id')
+            ->leftJoin('strands', 'subjects.strand_id', '=', 'strands.id')
+            ->where('class.student_id', $studentId)
+            ->where('class.school_year_id', $activeSchoolYear->id)
+            ->select([
+                'class.*',
+                'subjects.name as subject_name',
+                'subjects.code as subject_code',
+                'subjects.units',
+                'faculty.firstname as faculty_firstname',
+                'faculty.lastname as faculty_lastname',
+                'sections.section_name',
+                'strands.name as strand_name',
+                'strands.code as strand_code'
+            ])
+            ->orderBy('class.semester')
+            ->orderBy('class.day_of_week')
+            ->orderBy('class.start_time')
+            ->get();
+            
+        // Get student personal info
+        $personalInfo = DB::table('student_personal_info')
+            ->where('user_id', $studentId)
+            ->first();
+            
+        return response()->json([
+            'success' => true,
+            'student' => [
+                'id' => $student->id,
+                'firstname' => $student->firstname,
+                'lastname' => $student->lastname,
+                'email' => $student->email,
+                'lrn' => $personalInfo->lrn ?? 'N/A',
+                'grade_level' => $personalInfo->grade_level ?? 'N/A'
+            ],
+            'enrollment' => $enrollment,
+            'schedule' => $schedule,
+            'school_year' => $activeSchoolYear
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Failed to get student schedule',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+})->name('coordinator.student.schedule');
+
+// Routes for transferee subject crediting
+Route::post('/coordinator/student/{studentId}/credit-subjects', [App\Http\Controllers\CoordinatorController::class, 'creditTransfereeSubjects'])
+    ->name('coordinator.student.credit.subjects');
+
+Route::get('/coordinator/student/{studentId}/credited-subjects', [App\Http\Controllers\CoordinatorController::class, 'getTransfereeCreditedSubjects'])
+    ->name('coordinator.student.credited.subjects');
+
+// Route for viewing student COR
+Route::get('/coordinator/student/{studentId}/cor', [App\Http\Controllers\CoordinatorController::class, 'viewStudentCOR'])
+    ->name('coordinator.student.cor');
+
+// Route for previewing COR before enrollment
+Route::post('/coordinator/student/{studentId}/preview-cor', [App\Http\Controllers\CoordinatorController::class, 'previewStudentCOR'])
+    ->name('coordinator.student.preview.cor');
+
+// Route to get all subjects for crediting (for transferees)
+Route::get('/coordinator/subjects-for-crediting', function() {
+    try {
+        $subjects = \App\Models\Subject::with('strand')
+            ->select('id', 'name', 'code', 'units', 'strand_id')
+            ->orderBy('strand_id')
+            ->orderBy('name')
+            ->get();
+            
+        $subjectsByStrand = $subjects->groupBy('strand_id');
+        
+        return response()->json([
+            'success' => true,
+            'subjects' => $subjects,
+            'subjectsByStrand' => $subjectsByStrand
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to get subjects: ' . $e->getMessage()
+        ], 500);
+    }
+})->name('coordinator.subjects.for.crediting');
+
+// Test route to verify transferee crediting system
+Route::get('/debug/test-transferee-system', function() {
+    try {
+        // Check if transferee credited subjects table exists
+        $tableExists = Schema::hasTable('transferee_credited_subjects');
+        
+        // Get sample data
+        $transfereeStudents = DB::table('users')
+            ->where('role', 'student')
+            ->where('student_type', 'transferee')
+            ->limit(5)
+            ->get();
+            
+        $subjects = \App\Models\Subject::with('strand')->limit(10)->get();
+        
+        $existingCredits = \App\Models\TransfereeCreditedSubject::with(['student', 'subject'])
+            ->limit(10)
+            ->get();
+        
+        return response()->json([
+            'success' => true,
+            'system_status' => [
+                'transferee_table_exists' => $tableExists,
+                'transferee_model_exists' => class_exists('\App\Models\TransfereeCreditedSubject'),
+                'subjects_available' => $subjects->count(),
+                'transferee_students_count' => $transfereeStudents->count(),
+                'existing_credits_count' => $existingCredits->count()
+            ],
+            'sample_data' => [
+                'transferee_students' => $transfereeStudents,
+                'subjects' => $subjects,
+                'existing_credits' => $existingCredits
+            ],
+            'routes_available' => [
+                'credit_subjects' => route('coordinator.student.credit.subjects', ['studentId' => 1]),
+                'get_credited_subjects' => route('coordinator.student.credited.subjects', ['studentId' => 1]),
+                'view_cor' => route('coordinator.student.cor', ['studentId' => 1]),
+                'subjects_for_crediting' => route('coordinator.subjects.for.crediting')
+            ]
+        ], 200, [], JSON_PRETTY_PRINT);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Test failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.test.transferee.system');
+
+// Test route to verify COR preview system
+Route::get('/debug/test-cor-preview/{studentId}/{strandId}/{sectionId}', function($studentId, $strandId, $sectionId) {
+    try {
+        // Simulate the preview request
+        $request = new \Illuminate\Http\Request();
+        $request->merge([
+            'strand_id' => $strandId,
+            'section_id' => $sectionId
+        ]);
+        
+        $controller = new \App\Http\Controllers\CoordinatorController();
+        $response = $controller->previewStudentCOR($request, $studentId);
+        
+        return $response;
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'COR Preview test failed',
+            'message' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile()
+        ], 500);
+    }
+})->name('debug.test.cor.preview');

@@ -17,7 +17,9 @@ class VerifyCsrfToken extends Middleware
         'public/*',
         'student/check-enrollment-day',
         'student/enrollment-day-status',
-        'student/test-day-check'
+        'student/test-day-check',
+        'student/check-enrollment-eligibility',
+        'student/enroll'
     ];
 
 

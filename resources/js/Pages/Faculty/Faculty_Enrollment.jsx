@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import FacultySidebar from "../layouts/Faculty_Sidebar";
+import TransfereeCreditModal from "./TransfereeCreditModal";
+import CORPreviewModal from "./CORPreviewModal";
 import { router } from "@inertiajs/react";
 import Swal from "sweetalert2";
 import { AuthManager } from '../../auth';
@@ -27,10 +29,27 @@ import {
   FaUserGraduate,
   FaUserPlus,
   FaExchangeAlt,
-  FaSchool
+  FaSchool,
+  FaAward,
+  FaCreditCard,
+  FaIdCard,
+  FaClipboardCheck,
+  FaPlus,
+  FaTrash
 } from "react-icons/fa";
 
-export default function Faculty_Enrollment({ newStudents: initialNewStudents = [], transfereeStudents: initialTransfereeStudents = [], rejectedStudents: initialRejectedStudents = [], activeSchoolYear = null, allowFacultyCorPrint = true, auth }) {
+export default function Faculty_Enrollment({ 
+  newStudents: initialNewStudents = [], 
+  transfereeStudents: initialTransfereeStudents = [], 
+  continuingStudents: initialContinuingStudents = [], 
+  rejectedStudents: initialRejectedStudents = [], 
+  activeSchoolYear = null, 
+  allowFacultyCorPrint = true, 
+  strands = [], 
+  sections = [], 
+  sectionsByStrand = {}, 
+  auth 
+}) {
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('faculty-sidebar-collapsed');
@@ -39,7 +58,17 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   
   const [newStudents, setNewStudents] = useState(initialNewStudents);
   const [transfereeStudents, setTransfereeStudents] = useState(initialTransfereeStudents);
+  const [continuingStudents, setContinuingStudents] = useState(initialContinuingStudents);
   const [rejectedStudents, setRejectedStudents] = useState(initialRejectedStudents);
+
+  // Debug logging to see what data we're receiving
+  console.log('Faculty_Enrollment: Student data received:', {
+    newStudents: initialNewStudents.length,
+    transfereeStudents: initialTransfereeStudents.length,
+    continuingStudents: initialContinuingStudents.length,
+    rejectedStudents: initialRejectedStudents.length,
+    activeSchoolYear: activeSchoolYear?.id
+  });
   const [selectedStudentForCOR, setSelectedStudentForCOR] = useState(null);
   const [showCORModal, setShowCORModal] = useState(false);
   
@@ -53,6 +82,14 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   const [filterStrand, setFilterStrand] = useState("all");
   const [activeTab, setActiveTab] = useState("new");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Transferee Credit Modal states
+  const [showCreditModal, setShowCreditModal] = useState(false);
+  const [selectedTransferee, setSelectedTransferee] = useState(null);
+  
+  // COR Preview Modal states
+  const [showCORPreviewModal, setShowCORPreviewModal] = useState(false);
+  const [selectedStudentForPreview, setSelectedStudentForPreview] = useState(null);
 
   // Authentication check on component mount
   useEffect(() => {
@@ -134,8 +171,6 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   }, [selectedStrand, selectedSection]);
   
   // Transferee credit management states
-  const [creditedSubjects, setCreditedSubjects] = useState([]);
-  const [subjectGrades, setSubjectGrades] = useState({});
   const [previousSchoolData, setPreviousSchoolData] = useState({
     last_school: ''
   });
@@ -143,6 +178,13 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
   // Image viewing state
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+
+  // COR Review and Subject Crediting states
+  const [corReviewedStudents, setCORReviewedStudents] = useState(new Set());
+  const [creditedSubjects, setCreditedSubjects] = useState({});
+  const [subjectGrades, setSubjectGrades] = useState({});
+  const [showCreditingModal, setShowCreditingModal] = useState(false);
+  const [selectedStudentForCrediting, setSelectedStudentForCrediting] = useState(null);
 
   // Handle image viewing
   const handleImageClick = (imageUrl, title) => {
@@ -155,13 +197,92 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     setSelectedImage(null);
   };
 
+  // COR Review Functions
+  const handleCORReview = (student) => {
+    setSelectedStudentForCOR(student);
+    setShowCORModal(true);
+  };
+
+  const markCORAsReviewed = (studentId) => {
+    setCORReviewedStudents(prev => new Set([...prev, studentId]));
+    Swal.fire({
+      icon: 'success',
+      title: 'COR Reviewed',
+      text: 'Certificate of Registration has been reviewed and approved.',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  };
+
+  const isCORReviewed = (studentId) => {
+    return corReviewedStudents.has(studentId);
+  };
+
+  // Subject Crediting Functions for Transferees
+  const handleSubjectCrediting = (student) => {
+    setSelectedStudentForCrediting(student);
+    setShowCreditingModal(true);
+    // Fetch available subjects for crediting
+    fetchSubjectsForCrediting(student);
+  };
+
+  const fetchSubjectsForCrediting = async (student) => {
+    try {
+      // Get subjects that can be credited based on student's intended strand
+      const strandCode = student.strand_preferences?.[0] || 'STEM';
+      const response = await fetch(`/coordinator/subjects-for-strand/${strandCode}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSubjects(data.subjects || []);
+      }
+    } catch (error) {
+      console.error('Error fetching subjects for crediting:', error);
+    }
+  };
+
+  const handleCreditSubject = (subjectId, grade, semester) => {
+    setCreditedSubjects(prev => ({
+      ...prev,
+      [selectedStudentForCrediting.id]: {
+        ...prev[selectedStudentForCrediting.id],
+        [subjectId]: {
+          grade: parseFloat(grade),
+          semester: semester,
+          is_credited: true
+        }
+      }
+    }));
+  };
+
+  const removeCreditedSubject = (subjectId) => {
+    setCreditedSubjects(prev => {
+      const studentCredits = { ...prev[selectedStudentForCrediting.id] };
+      delete studentCredits[subjectId];
+      return {
+        ...prev,
+        [selectedStudentForCrediting.id]: studentCredits
+      };
+    });
+  };
+
+  const getStudentCreditedSubjects = (studentId) => {
+    return creditedSubjects[studentId] || {};
+  };
+
   // Handle transferee subject credit toggle
   const handleSubjectCreditToggle = (subjectId, isChecked) => {
     if (isChecked) {
-      setCreditedSubjects(prev => [...prev, subjectId]);
+      setCreditedSubjects(prev => ({
+        ...prev,
+        [subjectId]: true
+      }));
       // Don't set automatic grade - let user input the actual grade
     } else {
-      setCreditedSubjects(prev => prev.filter(id => id !== subjectId));
+      setCreditedSubjects(prev => {
+        const newCredits = { ...prev };
+        delete newCredits[subjectId];
+        return newCredits;
+      });
       setSubjectGrades(prev => {
         const newGrades = { ...prev };
         delete newGrades[subjectId];
@@ -180,7 +301,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
 
   // Save credited subjects for transferee student
   const saveCreditedSubjects = async () => {
-    if (creditedSubjects.length === 0 && !previousSchoolData.last_school.trim()) {
+    if (Object.keys(creditedSubjects).length === 0 && !previousSchoolData.last_school.trim()) {
       return; // No credits or school info to save
     }
 
@@ -213,9 +334,10 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       }
 
       // Save credited subjects if any
-      if (creditedSubjects.length > 0) {
+      const creditedSubjectIds = Object.keys(creditedSubjects);
+      if (creditedSubjectIds.length > 0) {
         // Validate that all credited subjects have grades
-        const missingGrades = creditedSubjects.filter(subjectId => 
+        const missingGrades = creditedSubjectIds.filter(subjectId => 
           !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
         );
         
@@ -223,8 +345,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           throw new Error('Please enter valid grades (75-100) for all credited subjects');
         }
         
-        const creditData = creditedSubjects.map(subjectId => {
-          const subject = subjects.find(s => s.id === subjectId);
+        const creditData = creditedSubjectIds.map(subjectId => {
+          const subject = subjects.find(s => s.id == subjectId);
           return {
             subject_id: subjectId,
             grade: subjectGrades[subjectId],
@@ -301,7 +423,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
 
     // Check if credited subjects are selected
-    if (creditedSubjects.length === 0) {
+    const creditedSubjectIds = Object.keys(creditedSubjects);
+    if (creditedSubjectIds.length === 0) {
       Swal.fire({
         icon: 'error',
         title: 'No Credited Subjects',
@@ -312,7 +435,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
 
     // Validate that all credited subjects have valid grades
-    const missingGrades = creditedSubjects.filter(subjectId => 
+    const missingGrades = creditedSubjectIds.filter(subjectId => 
       !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
     );
     
@@ -330,8 +453,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       setIsSubmitting(true);
 
       // Prepare credited subjects data
-      const creditData = creditedSubjects.map(subjectId => {
-        const subject = subjects.find(s => s.id === subjectId);
+      const creditData = creditedSubjectIds.map(subjectId => {
+        const subject = subjects.find(s => s.id == subjectId);
         return {
           subject_id: subjectId,
           grade: subjectGrades[subjectId],
@@ -360,8 +483,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         strand_code: selectedStrand,
         credited_subjects: creditData,
         credited_subjects_count: creditData.length,
-        creditedSubjects_array: creditedSubjects,
-        creditedSubjects_length: creditedSubjects.length,
+        creditedSubjects_array: creditedSubjectIds,
+        creditedSubjects_length: creditedSubjectIds.length,
         subjectGrades: subjectGrades,
         school_year: '2023-2024'
       });
@@ -386,7 +509,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           setSelectedSection("");
           setSelectedSubjects([]);
           setClassSchedules([]);
-          setCreditedSubjects([]);
+          setCreditedSubjects({});
           setSubjectGrades({});
           setIsStudentEnrolled(false);
 
@@ -437,6 +560,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
       } else if (activeTab === 'transferee') {
         setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+      } else if (activeTab === 'continuing') {
+        setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
       }
       
       // Close modal and reset states
@@ -482,8 +607,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
     }
     
     // Clear credited subjects when strand changes (since available subjects change)
-    console.log('Clearing credited subjects due to strand change. Previous count:', creditedSubjects.length);
-    setCreditedSubjects([]);
+    console.log('Clearing credited subjects due to strand change. Previous count:', Object.keys(creditedSubjects).length);
+    setCreditedSubjects({});
     setSubjectGrades({});
   }, [selectedStrand]);
   // Fetch sections and strands from API
@@ -650,6 +775,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       student = newStudents.find(s => s.id === studentId);
     } else if (activeTab === 'transferee') {
       student = transfereeStudents.find(s => s.id === studentId);
+    } else if (activeTab === 'continuing') {
+      student = continuingStudents.find(s => s.id === studentId);
     }
     
     if (student) {
@@ -813,6 +940,9 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           } else if (activeTab === 'transferee') {
             student = transfereeStudents.find(s => s.id === studentId);
             setTransfereeStudents(prev => prev.filter(s => s.id !== studentId));
+          } else if (activeTab === 'continuing') {
+            student = continuingStudents.find(s => s.id === studentId);
+            setContinuingStudents(prev => prev.filter(s => s.id !== studentId));
           }
           if (student) {
             setRejectedStudents(prev => [...prev, student]);
@@ -956,6 +1086,8 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       student = newStudents.find(s => s.id === studentId);
     } else if (activeTab === 'transferee') {
       student = transfereeStudents.find(s => s.id === studentId);
+    } else if (activeTab === 'continuing') {
+      student = continuingStudents.find(s => s.id === studentId);
     }
 
     if (!student) {
@@ -963,6 +1095,34 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         icon: 'error',
         title: 'Student Not Found',
         text: 'Unable to find student information.'
+      });
+      return;
+    }
+
+    // Check if COR has been reviewed
+    if (!isCORReviewed(studentId)) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'COR Review Required',
+        html: `
+          <div class="text-left">
+            <p class="mb-3"><strong>⚠️ Certificate of Registration (COR) must be reviewed before enrollment.</strong></p>
+            <p class="text-sm text-gray-600">Please:</p>
+            <ul class="text-sm text-gray-600 list-disc list-inside mt-2">
+              <li>Click "Review COR" to examine the student's academic records</li>
+              <li>Verify the appropriate strand and section selection</li>
+              ${student.user?.student_type === 'transferee' ? '<li>Evaluate and credit applicable subjects from previous school</li>' : ''}
+              <li>Mark COR as reviewed before proceeding with enrollment</li>
+            </ul>
+          </div>
+        `,
+        confirmButtonText: 'Review COR Now',
+        showCancelButton: true,
+        cancelButtonText: 'Cancel'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          handleCORReview(student);
+        }
       });
       return;
     }
@@ -989,24 +1149,96 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
 
     if (!result.isConfirmed) return;
 
+    // Debug: Log available sections and strands
+    console.log('Available strands:', availableStrands);
+    console.log('Available sections:', availableSections);
+    
+    // Show strand and section selection dialog first
+    const { value: formValues } = await Swal.fire({
+      title: 'Select Section & Strand',
+      html: `
+        <div class="text-left space-y-4">
+          <div class="bg-blue-50 p-3 rounded">
+            <p><strong>Student:</strong> ${student.user?.firstname} ${student.user?.lastname}</p>
+            <p><strong>Email:</strong> ${student.user?.email}</p>
+            <p><strong>Type:</strong> ${student.user?.student_type || 'New'}</p>
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Select Strand:</label>
+            <select id="swal-strand" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+              <option value="">Choose Strand</option>
+              ${availableStrands.map(strand => 
+                `<option value="${strand.code}">${strand.name} (${strand.code})</option>`
+              ).join('')}
+            </select>
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Select Section:</label>
+            <select id="swal-section" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+              <option value="">Choose Section</option>
+              ${availableSections.map(section => 
+                `<option value="${section.id}">${section.section_name || section.name || 'Section ' + section.id}</option>`
+              ).join('')}
+            </select>
+            ${availableSections.length === 0 ? '<p class="text-sm text-red-600 mt-1">No sections available. Please create sections first.</p>' : ''}
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Enroll Student',
+      cancelButtonText: 'Cancel',
+      preConfirm: () => {
+        const strand = document.getElementById('swal-strand').value;
+        const section = document.getElementById('swal-section').value;
+        
+        if (!strand || !section) {
+          Swal.showValidationMessage('Please select both strand and section');
+          return false;
+        }
+        
+        return { strand, section };
+      }
+    });
+
+    if (!formValues) return;
+
     try {
-      // Get default section and strand for enrollment
-      const defaultStrand = student.strand_preferences?.[0] || 'STEM';
-      const defaultSection = 1; // You may want to make this configurable
+      // Get credited subjects for transferees
+      const studentCreditedSubjects = getStudentCreditedSubjects(student.id);
+      const creditedSubjectsArray = Object.entries(studentCreditedSubjects).map(([subjectId, creditData]) => ({
+        subject_id: parseInt(subjectId),
+        grade: creditData.grade,
+        semester_completed: creditData.semester,
+        is_credited: creditData.is_credited
+      }));
 
       router.post(`/coordinator/students/${student.id}/finalize`, {
-        strand: defaultStrand,
-        section_id: defaultSection,
-        subjects: [] // Backend will automatically assign all subjects
+        strand: formValues.strand,
+        section_id: parseInt(formValues.section),
+        subjects: [], // Backend will automatically assign all subjects
+        credited_subjects: creditedSubjectsArray // Include credited subjects for transferees
       }, {
-        onSuccess: () => {
+        onSuccess: (response) => {
+          console.log('Enrollment success response:', response);
+          
+          const selectedStrand = availableStrands.find(s => s.code === formValues.strand);
+          const selectedSection = availableSections.find(s => s.id == formValues.section);
+          
+          // Use response data if available, fallback to local data
+          const strandInfo = response?.props?.data?.strand || selectedStrand;
+          const sectionInfo = response?.props?.data?.section || selectedSection;
+          
           Swal.fire({
             icon: 'success',
             title: 'Student Enrolled Successfully!',
             html: `
               <div class="text-center">
                 <p class="mb-2">${student.user?.firstname} ${student.user?.lastname} has been enrolled!</p>
-                <p class="text-sm text-gray-600">Complete academic year schedule assigned (1st & 2nd semester)</p>
+                <p class="text-sm text-blue-600"><strong>Strand:</strong> ${strandInfo?.name || 'Unknown'} (${strandInfo?.code || 'N/A'})</p>
+                <p class="text-sm text-blue-600"><strong>Section:</strong> ${sectionInfo?.section_name || sectionInfo?.name || 'Unknown'}</p>
+                <p class="text-sm text-gray-600 mt-2">Complete academic year schedule assigned (1st & 2nd semester)</p>
               </div>
             `,
             showConfirmButton: true,
@@ -1019,14 +1251,17 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
             setNewStudents(prev => prev.filter(s => s.id !== student.id));
           } else if (activeTab === 'transferee') {
             setTransfereeStudents(prev => prev.filter(s => s.id !== student.id));
+          } else if (activeTab === 'continuing') {
+            setContinuingStudents(prev => prev.filter(s => s.id !== student.id));
           }
         },
         onError: (errors) => {
           console.error('Enrollment error:', errors);
+          const errorMessage = Object.values(errors).flat().join('. ') || 'Failed to enroll student. Please try again.';
           Swal.fire({
             icon: 'error',
             title: 'Enrollment Failed',
-            text: 'Failed to enroll student. Please try again or contact the registrar.',
+            text: errorMessage,
             confirmButtonColor: '#ef4444'
           });
         }
@@ -1056,9 +1291,10 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                         selectedStudentForCOR?.user?.student_type === 'transferee' || 
                         selectedStudentForCOR?.student_status === 'Transferee';
     
-    if (isTransferee && creditedSubjects.length > 0) {
+    const creditedSubjectIds = Object.keys(creditedSubjects);
+    if (isTransferee && creditedSubjectIds.length > 0) {
       // Check if all credited subjects have valid grades
-      const missingGrades = creditedSubjects.filter(subjectId => 
+      const missingGrades = creditedSubjectIds.filter(subjectId => 
         !subjectGrades[subjectId] || subjectGrades[subjectId] < 75 || subjectGrades[subjectId] > 100
       );
       
@@ -1083,10 +1319,10 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         subjects: selectedSubjects && selectedSubjects.length > 0 ? selectedSubjects : undefined,
         // Include transferee credit information
         student_type: selectedStudentForCOR.user?.student_type || selectedStudentForCOR.student_status,
-        credited_subjects: isTransferee ? creditedSubjects.map(subjectId => ({
+        credited_subjects: isTransferee ? Object.keys(creditedSubjects).map(subjectId => ({
           subject_id: subjectId,
           grade: subjectGrades[subjectId],
-          semester_completed: subjects.find(s => s.id === subjectId)?.semester || '1st Semester',
+          semester_completed: subjects.find(s => s.id == subjectId)?.semester || '1st Semester',
           is_credited: true
         })) : []
       }, {
@@ -1135,6 +1371,9 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
       case 'transferee':
         students = transfereeStudents;
         break;
+      case 'continuing':
+        students = continuingStudents;
+        break;
       case 'rejected':
         students = rejectedStudents;
         break;
@@ -1158,11 +1397,65 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         return newStudents.length;
       case 'transferee':
         return transfereeStudents.length;
+      case 'continuing':
+        return continuingStudents.length;
       case 'rejected':
         return rejectedStudents.length;
       default:
         return 0;
     }
+  };
+
+  const handleCreditTransferee = (student) => {
+    setSelectedTransferee(student);
+    setShowCreditModal(true);
+  };
+
+  const handleViewCOR = (student) => {
+    router.visit(`/coordinator/student/${student.id}/cor`);
+  };
+
+  const handleCreditSuccess = () => {
+    router.reload();
+  };
+
+  // Handle COR preview
+  const handlePreviewCOR = (student) => {
+    setSelectedStudentForPreview(student);
+    setShowCORPreviewModal(true);
+  };
+
+  // Handle enrollment confirmation from COR preview
+  const handleConfirmEnrollmentFromPreview = (student, strandId, sectionId) => {
+    // Close the preview modal first
+    setShowCORPreviewModal(false);
+    setSelectedStudentForPreview(null);
+
+    // Proceed with enrollment using the selected strand and section
+    router.post(`/coordinator/students/${student.id}/finalize`, {
+      strand: strandId,
+      section_id: sectionId
+    }, {
+      onSuccess: () => {
+        Swal.fire({
+          title: 'Student Enrolled!',
+          text: `${student.firstname} ${student.lastname} has been successfully enrolled.`,
+          icon: 'success',
+          confirmButtonColor: '#10B981'
+        });
+        // Refresh the page to show updated data
+        router.reload();
+      },
+      onError: (errors) => {
+        console.error('Enrollment errors:', errors);
+        Swal.fire({
+          title: 'Enrollment Failed',
+          text: 'Failed to enroll student. Please try again.',
+          icon: 'error',
+          confirmButtonColor: '#EF4444'
+        });
+      }
+    });
   };
 
   if (loading) {
@@ -1171,7 +1464,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         <FacultySidebar onToggle={setIsCollapsed} />
         <main className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-8 bg-gray-50 min-h-screen transition-all duration-300`}>
           <div className="flex items-center justify-center h-64">
-            <FaSpinner className="animate-spin text-4xl text-purple-600" />
+            <FaSpinner className="animate-spin text-4xl text-blue-500" />
             <span className="ml-3 text-lg text-gray-600">Loading enrollment data...</span>
           </div>
         </main>
@@ -1239,7 +1532,19 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Continuing Students</p>
+                <p className="text-2xl font-bold text-green-600">{continuingStudents.length}</p>
+              </div>
+              <div className="p-3 bg-green-100 rounded-full">
+                <FaSchool className="text-green-600 text-xl" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Rejected</p>
@@ -1289,6 +1594,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
               {[
                 { key: 'new', label: 'New Students', color: 'blue', icon: 'FaUserPlus' },
                 { key: 'transferee', label: 'Transferee Students', color: 'purple', icon: 'FaUserGraduate' },
+                { key: 'continuing', label: 'Continuing Students', color: 'green', icon: 'FaSchool' },
                 { key: 'rejected', label: 'Rejected', color: 'red', icon: 'FaTimes' }
               ].map(tab => (
                 <button
@@ -1345,12 +1651,80 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                           <FaEye className="text-sm" />
                           <span>View</span>
                         </button>
-                        {(activeTab === 'new' || activeTab === 'transferee') && (
+                        {/* Transferee-specific buttons */}
+                        {activeTab === 'transferee' && (
+                          <button
+                            onClick={() => handleCreditTransferee(student)}
+                            title="Credit subjects from previous school"
+                            className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors duration-200 flex items-center space-x-1"
+                          >
+                            <FaAward className="text-sm" />
+                            <span>Credit Subjects</span>
+                          </button>
+                        )}
+                        
+                        {/* COR viewing for enrolled students */}
+                        {student.enrollment_status === 'enrolled' && allowFacultyCorPrint && (
+                          <button
+                            onClick={() => handleViewCOR(student)}
+                            title="View Certificate of Registration"
+                            className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors duration-200 flex items-center space-x-1"
+                          >
+                            <FaIdCard className="text-sm" />
+                            <span>View COR</span>
+                          </button>
+                        )}
+
+                        {(activeTab === 'new' || activeTab === 'transferee' || activeTab === 'continuing') && (
                           <>
                             <button
+                              onClick={() => handlePreviewCOR(student)}
+                              title="Preview Certificate of Registration before enrollment"
+                              className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors duration-200 flex items-center space-x-1"
+                            >
+                              <FaEye className="text-sm" />
+                              <span>Preview COR</span>
+                            </button>
+                            
+                            {/* COR Review Button */}
+                            <button
+                              onClick={() => handleCORReview(student)}
+                              title="Review Certificate of Registration (Required before enrollment)"
+                              className={`px-3 py-1 rounded-lg transition-colors duration-200 flex items-center space-x-1 ${
+                                isCORReviewed(student.id) 
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                  : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                              }`}
+                            >
+                              <FaClipboardCheck className="text-sm" />
+                              <span>{isCORReviewed(student.id) ? 'COR Reviewed ✓' : 'Review COR'}</span>
+                            </button>
+
+                            {/* Subject Crediting Button for Transferees */}
+                            {student.user?.student_type === 'transferee' && (
+                              <button
+                                onClick={() => handleSubjectCrediting(student)}
+                                title="Evaluate and credit subjects from previous school"
+                                className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors duration-200 flex items-center space-x-1"
+                              >
+                                <FaGraduationCap className="text-sm" />
+                                <span>Credit Subjects</span>
+                              </button>
+                            )}
+                            
+                            {/* Enrollment Button - Only enabled after COR review */}
+                            <button
                               onClick={() => handleEnrollStudent(student.id)}
-                              title="Enroll student and assign complete academic year schedule (1st & 2nd semester)"
-                              className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors duration-200 flex items-center space-x-2 font-medium"
+                              title={isCORReviewed(student.id) 
+                                ? "Enroll student and assign complete academic year schedule (1st & 2nd semester)" 
+                                : "COR must be reviewed before enrollment"
+                              }
+                              disabled={!isCORReviewed(student.id)}
+                              className={`px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2 font-medium ${
+                                isCORReviewed(student.id)
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              }`}
                             >
                               <FaUserCheck className="text-sm" />
                               <span>Enroll Student</span>
@@ -2039,7 +2413,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       {subjects.filter(subject => 
                         !selectedStrand || subject.strand_code === selectedStrand || subject.strand_id === selectedStrand
                       ).map(subject => {
-                        const isAlreadyCredited = creditedSubjects.includes(subject.id);
+                        const isAlreadyCredited = creditedSubjects[subject.id] || false;
                         return (
                         <div key={subject.id} className={`flex items-center justify-between p-2 border rounded ${
                           isAlreadyCredited ? 'bg-green-50 border-green-200' : 'bg-white border-purple-200'
@@ -2052,31 +2426,32 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                               onChange={(e) => {
                                 if (e.target.checked) {
                                   console.log('Adding subject to credited subjects:', subject.id, subject.name);
-                                  setCreditedSubjects(prev => {
-                                    const newArray = [...prev, subject.id];
-                                    console.log('New credited subjects array:', newArray);
-                                    return newArray;
-                                  });
-                                  // Set default grade if not set
+                                  setCreditedSubjects(prev => ({
+                                    ...prev,
+                                    [subject.id]: true
+                                  }));
+                                  
+                                  // Set a default grade that the user can modify
                                   if (!subjectGrades[subject.id]) {
-                                    setSubjectGrades(prev => ({...prev, [subject.id]: 85}));
+                                    setSubjectGrades(prev => ({ ...prev, [subject.id]: 85 }));
                                   }
                                 } else {
                                   console.log('Removing subject from credited subjects:', subject.id, subject.name);
                                   setCreditedSubjects(prev => {
-                                    const newArray = prev.filter(id => id !== subject.id);
-                                    console.log('New credited subjects array after removal:', newArray);
-                                    return newArray;
+                                    const newCredits = { ...prev };
+                                    delete newCredits[subject.id];
+                                    return newCredits;
                                   });
-                                  // Remove grade when unchecked
+                                  
+                                  // Remove the grade as well
                                   setSubjectGrades(prev => {
-                                    const newGrades = {...prev};
+                                    const newGrades = { ...prev };
                                     delete newGrades[subject.id];
                                     return newGrades;
                                   });
                                 }
                               }}
-                              checked={creditedSubjects.includes(subject.id)}
+                              checked={creditedSubjects[subject.id] || false}
                             />
                             <label htmlFor={`credit-${subject.id}`} className={`text-sm font-medium ${
                               isAlreadyCredited ? 'text-green-700' : 'text-gray-700'
@@ -2103,13 +2478,13 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                                 }));
                               }}
                               className={`w-16 px-2 py-1 text-xs border rounded focus:ring-purple-500 focus:border-purple-500 ${
-                                creditedSubjects.includes(subject.id) && !subjectGrades[subject.id] 
+                                creditedSubjects[subject.id] && !subjectGrades[subject.id] 
                                   ? 'border-red-300 bg-red-50' 
                                   : 'border-gray-300'
                               }`}
                               id={`grade-${subject.id}`}
-                              disabled={!creditedSubjects.includes(subject.id)}
-                              required={creditedSubjects.includes(subject.id)}
+                              disabled={!creditedSubjects[subject.id]}
+                              required={creditedSubjects[subject.id] || false}
                             />
                           </div>
                         </div>
@@ -2131,14 +2506,14 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                     ) : null}
                     
                     {/* Credits Summary */}
-                    {creditedSubjects.length > 0 && (
+                    {Object.keys(creditedSubjects).length > 0 && (
                       <div className="mt-3 pt-3 border-t border-purple-200">
                         <div className="text-sm text-purple-700 mb-2">
-                          <strong>{creditedSubjects.length}</strong> subject(s) selected for credit:
+                          <strong>{Object.keys(creditedSubjects).length}</strong> subject(s) selected for credit:
                         </div>
                         <div className="space-y-1 text-xs">
-                          {creditedSubjects.map(subjectId => {
-                            const subject = subjects.find(s => s.id === subjectId);
+                          {Object.keys(creditedSubjects).map(subjectId => {
+                            const subject = subjects.find(s => s.id == subjectId);
                             const grade = subjectGrades[subjectId];
                             return (
                               <div key={subjectId} className="flex justify-between items-center bg-green-50 px-2 py-1 rounded">
@@ -2295,12 +2670,13 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                 <div className="p-2 bg-gray-50 rounded-b-lg flex justify-end space-x-2 print:hidden flex-shrink-0">
                   <button
                     onClick={() => {
+                      // Check if student is enrolled
                       if (isStudentEnrolled) {
-                        // If student is already enrolled, ask for confirmation
+                        // Show confirmation before closing
                         Swal.fire({
                           title: 'Student Already Enrolled',
-                          text: 'The student has been enrolled but COR has not been printed. What would you like to do?',
-                          icon: 'warning',
+                          text: 'This student is already enrolled. Do you want to close the COR view?',
+                          icon: 'info',
                           showCancelButton: true,
                           confirmButtonColor: '#3085d6',
                           cancelButtonColor: '#d33',
@@ -2308,14 +2684,14 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                           cancelButtonText: 'Stay Here'
                         }).then((result) => {
                           if (result.isConfirmed) {
-                            // Keep student enrolled and remove from current list
+                            // Remove student from appropriate list
                             if (activeTab === 'new') {
                               setNewStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
                             } else if (activeTab === 'transferee') {
                               setTransfereeStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
+                            } else if (activeTab === 'continuing') {
+                              setContinuingStudents(prev => prev.filter(s => s.id !== selectedStudentForCOR.id));
                             }
-                            
-                            // Close modal and reset states
                             setShowCORModal(false);
                             setSelectedStudentForCOR(null);
                             setSelectedStrand("");
@@ -2323,16 +2699,7 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                             setSelectedSubjects([]);
                             setClassSchedules([]); // Clear schedules
                             setIsStudentEnrolled(false);
-                            
-                            Swal.fire({
-                              icon: 'info',
-                              title: 'Student Kept Enrolled',
-                              text: 'Student has been moved to Enrolled Students without printing COR.',
-                              timer: 2000,
-                              showConfirmButton: false
-                            });
                           }
-                          // If cancelled, stay in modal
                         });
                       } else {
                         // If not enrolled yet, just close modal normally
@@ -2350,6 +2717,23 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                   >
                     Cancel
                   </button>
+                  
+                  {/* Mark as Reviewed Button */}
+                  <button
+                    onClick={() => {
+                      markCORAsReviewed(selectedStudentForCOR.id);
+                    }}
+                    className={`px-3 py-1 text-xs rounded transition-colors flex items-center space-x-1 ${
+                      isCORReviewed(selectedStudentForCOR.id)
+                        ? 'bg-green-100 text-green-700 cursor-default'
+                        : 'bg-yellow-500 text-white hover:bg-yellow-600'
+                    }`}
+                    disabled={isCORReviewed(selectedStudentForCOR.id)}
+                  >
+                    <FaClipboardCheck className="w-3 h-3" />
+                    <span>{isCORReviewed(selectedStudentForCOR.id) ? 'COR Reviewed ✓' : 'Mark as Reviewed'}</span>
+                  </button>
+                  
                   <button
                     onClick={() => {
                       // Check if this is a transferee student
@@ -2359,13 +2743,13 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
                       
                       console.log('Enrollment button clicked:', {
                         isTransferee,
-                        creditedSubjectsLength: creditedSubjects.length,
+                        creditedSubjectsLength: Object.keys(creditedSubjects).length,
                         creditedSubjects: creditedSubjects,
                         selectedStrand,
                         selectedSection
                       });
                       
-                      if (isTransferee && creditedSubjects.length > 0) {
+                      if (isTransferee && Object.keys(creditedSubjects).length > 0) {
                         console.log('Calling enrollTransfereeWithCredits for transferee with credits');
                         // Use new combined enrollment for transferees with credits
                         enrollTransfereeWithCredits();
@@ -2509,6 +2893,164 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
         }
       `}</style>
 
+      {/* Subject Crediting Modal for Transferees */}
+      {showCreditingModal && selectedStudentForCrediting && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-lg flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <FaGraduationCap className="text-xl" />
+                <div>
+                  <h2 className="text-lg font-semibold">Subject Crediting - Transferee Student</h2>
+                  <p className="text-sm opacity-90">
+                    {selectedStudentForCrediting?.user?.firstname} {selectedStudentForCrediting?.user?.lastname}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCreditingModal(false)}
+                className="text-white hover:bg-white/20 p-2 rounded-full transition-colors"
+              >
+                <FaTimes className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {/* Instructions */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <h3 className="font-semibold text-yellow-800 mb-2">📋 Subject Crediting Instructions</h3>
+                <ul className="text-sm text-yellow-700 space-y-1">
+                  <li>• Review the student's previous academic records</li>
+                  <li>• Select subjects that are equivalent to current curriculum</li>
+                  <li>• Enter the actual grade received (75-100)</li>
+                  <li>• Credited subjects will be excluded from enrollment</li>
+                  <li>• Double-check all entries before finalizing</li>
+                </ul>
+              </div>
+
+              {/* Credited Subjects List */}
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-800 mb-4">Credited Subjects</h3>
+                {Object.keys(getStudentCreditedSubjects(selectedStudentForCrediting.id)).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(getStudentCreditedSubjects(selectedStudentForCrediting.id)).map(([subjectId, creditData]) => {
+                      const subject = subjects.find(s => s.id == subjectId);
+                      return (
+                        <div key={subjectId} className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3">
+                          <div className="flex-1">
+                            <p className="font-medium text-green-800">
+                              {subject?.subject_code} - {subject?.subject_name}
+                            </p>
+                            <p className="text-sm text-green-600">
+                              Grade: {creditData.grade} | Semester: {creditData.semester}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => removeCreditedSubject(subjectId)}
+                            className="text-red-600 hover:text-red-800 p-2"
+                            title="Remove credited subject"
+                          >
+                            <FaTimes className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <FaGraduationCap className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p>No subjects credited yet</p>
+                    <p className="text-sm">Add subjects from the student's previous school</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Add Credit Form */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4">Add Subject Credit</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Subject
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select Subject</option>
+                      {subjects.filter(subject => 
+                        !getStudentCreditedSubjects(selectedStudentForCrediting.id)[subject.id]
+                      ).map(subject => (
+                        <option key={subject.id} value={subject.id}>
+                          {subject.subject_code} - {subject.subject_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Grade (75-100)
+                    </label>
+                    <input
+                      type="number"
+                      min="75"
+                      max="100"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="85"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Semester
+                    </label>
+                    <select className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="1st Semester">1st Semester</option>
+                      <option value="2nd Semester">2nd Semester</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <button
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <FaPlus className="w-4 h-4" />
+                  <span>Add Credit</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-gray-50 p-4 rounded-b-lg flex justify-end space-x-3">
+              <button
+                onClick={() => setShowCreditingModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreditingModal(false);
+                  Swal.fire({
+                    icon: 'success',
+                    title: 'Subject Credits Saved',
+                    text: 'Credited subjects have been saved for this transferee student.',
+                    timer: 2000,
+                    showConfirmButton: false
+                  });
+                }}
+                className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors flex items-center space-x-2"
+              >
+                <FaCheck className="w-4 h-4" />
+                <span>Save Credits</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Image Viewing Modal */}
       {showImageModal && selectedImage && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -2554,6 +3096,26 @@ export default function Faculty_Enrollment({ newStudents: initialNewStudents = [
           </div>
         </div>
       )}
+
+      {/* Transferee Credit Modal */}
+      <TransfereeCreditModal
+        isOpen={showCreditModal}
+        onClose={() => setShowCreditModal(false)}
+        student={selectedTransferee}
+        strands={strands}
+        onSuccess={handleCreditSuccess}
+      />
+
+      {/* COR Preview Modal */}
+      <CORPreviewModal
+        isOpen={showCORPreviewModal}
+        onClose={() => setShowCORPreviewModal(false)}
+        student={selectedStudentForPreview}
+        strands={strands}
+        sections={sections}
+        sectionsByStrand={sectionsByStrand}
+        onConfirmEnrollment={handleConfirmEnrollmentFromPreview}
+      />
 
     </div>
   );

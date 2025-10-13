@@ -26,13 +26,11 @@ class User extends Authenticatable
         'student_type',
         'status',
         'password',
-        'plain_password',
         'assigned_strand_id',
         'is_coordinator',
         'is_disabled',
-        'password_changed',
-        'password_change_required',
         'last_login_at',
+        'password_changed',
         // Manual enrollment fields (removed redundant columns - now in student_personal_info)
         'is_manual_enrollment',
         'enrolled_by_coordinator',
@@ -45,7 +43,6 @@ class User extends Authenticatable
      */
     protected $hidden = [
         'password',
-        'plain_password',
         'remember_token',
     ];
 
@@ -59,8 +56,8 @@ class User extends Authenticatable
         'password' => 'hashed',
         'is_coordinator' => 'boolean',
         'is_disabled' => 'boolean',
-        'password_change_required' => 'boolean',
         'last_login_at' => 'datetime',
+        'password_changed' => 'boolean',
     ];
 
     // Relationships for role-based authentication system

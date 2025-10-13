@@ -112,14 +112,25 @@ export default function StudentSidebar({ auth, onToggle }) {
   useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        // Get user data from AuthManager instead of making API call
-        const user = AuthManager.getUser();
+        // Get user data from AuthManager first
+        let user = AuthManager.getUser();
+        
+        // If no user data in AuthManager, try to refresh from server
+        if (!user) {
+          console.log('🔍 Student_Sidebar: No user in AuthManager, refreshing from server...');
+          const refreshSuccess = await refreshUserData();
+          if (refreshSuccess) {
+            user = AuthManager.getUser();
+          }
+        }
         
         if (user) {
           setUserInfo(user);
         } else if (auth?.user) {
           // Fallback to auth prop if available
           setUserInfo(auth.user);
+          // Also store in AuthManager for future use
+          AuthManager.setUser(auth.user);
         } else {
           console.warn('No user data found in AuthManager or auth prop');
         }
@@ -128,7 +139,38 @@ export default function StudentSidebar({ auth, onToggle }) {
         // Fallback to auth prop if available
         if (auth?.user) {
           setUserInfo(auth.user);
+          AuthManager.setUser(auth.user);
         }
+      }
+    };
+
+    // Define refreshUserData function
+    const refreshUserData = async () => {
+      try {
+        // Try the new auth/user endpoint with session-based auth
+        let response = await fetch('/auth/user', {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+          },
+          credentials: 'include' // Include session cookies
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const userData = data.success ? data.user : data;
+          if (userData && userData.id) {
+            console.log('🔄 Student_Sidebar: Refreshed user data:', userData);
+            AuthManager.setUser(userData);
+            return true;
+          }
+        }
+        return false;
+      } catch (error) {
+        console.error('Error refreshing user data:', error);
+        return false;
       }
     };
 
@@ -186,7 +228,6 @@ export default function StudentSidebar({ auth, onToggle }) {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
           },
           credentials: 'include',
@@ -194,6 +235,11 @@ export default function StudentSidebar({ auth, onToggle }) {
         });
 
         clearTimeout(timeoutId);
+
+        // Don't throw error on 401 - user might already be logged out
+        if (!response.ok && response.status !== 401) {
+          console.warn('Logout request failed, but continuing with local cleanup:', response.status);
+        }
 
         // Clear all authentication data
         const keysToRemove = [

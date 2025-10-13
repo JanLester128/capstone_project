@@ -5,6 +5,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\RegistrarController;
 use Inertia\Inertia;
@@ -40,12 +41,12 @@ Route::get('/auth/debug-faculty-password', function() {
             'id' => $user->id,
             'email' => $user->email,
             'role' => $user->role,
-            'password_change_required' => $user->password_change_required,
-            'password_changed' => $user->password_changed,
-            'has_plain_password' => !empty($user->plain_password),
-            'plain_password_value' => $user->plain_password ? substr($user->plain_password, 0, 3) . '...' : null,
+            'password_change_required' => $user->password_change_required ?? false,
+            'password_changed' => $user->password_changed ?? true, // Default to true if field doesn't exist
+            'has_plain_password' => !empty($user->plain_password ?? ''),
+            'plain_password_value' => ($user->plain_password ?? '') ? substr($user->plain_password, 0, 3) . '...' : null,
             'should_require_change' => in_array($user->role, ['faculty', 'coordinator']) && 
-                ($user->password_change_required || !$user->password_changed || $user->plain_password)
+                (($user->password_change_required ?? false) || !($user->password_changed ?? true) || ($user->plain_password ?? ''))
         ];
     }
     
@@ -69,16 +70,23 @@ Route::get('/auth/fix-faculty-user/{email}', function($email) {
     }
     
     $oldValues = [
-        'password_change_required' => $user->password_change_required,
-        'password_changed' => $user->password_changed,
-        'has_plain_password' => !empty($user->plain_password)
+        'password_change_required' => $user->password_change_required ?? false,
+        'password_changed' => $user->password_changed ?? true,
+        'has_plain_password' => !empty($user->plain_password ?? '')
     ];
     
-    // Force password change requirement
-    $user->update([
-        'password_change_required' => true,
-        'password_changed' => false
-    ]);
+    // Force password change requirement - only update fields that exist
+    $updateData = [];
+    if (Schema::hasColumn('users', 'password_change_required')) {
+        $updateData['password_change_required'] = true;
+    }
+    if (Schema::hasColumn('users', 'password_changed')) {
+        $updateData['password_changed'] = false;
+    }
+    
+    if (!empty($updateData)) {
+        $user->update($updateData);
+    }
     
     return response()->json([
         'success' => true,
@@ -316,16 +324,22 @@ Route::post('/auth/login-simple', function (Request $request) {
         
         // Check if password change is required (for faculty/coordinator users)
         $passwordChangeRequired = false;
-        if (in_array($user->role, ['faculty', 'coordinator']) && 
-            ($user->password_change_required || !$user->password_changed || $user->plain_password)) {
+        if (in_array($user->role, ['faculty', 'coordinator'])) {
+            // Use null coalescing to handle missing fields gracefully
+            $passwordChangeRequiredField = $user->password_change_required ?? false;
+            $passwordChangedField = $user->password_changed ?? true; // Default to true (already changed)
+            $plainPasswordField = $user->plain_password ?? '';
             
-            $passwordChangeRequired = true;
-            $debugInfo['password_change_required'] = true;
-            $debugInfo['password_change_reasons'] = [
-                'password_change_required' => $user->password_change_required,
-                'password_changed' => $user->password_changed,
-                'has_plain_password' => !empty($user->plain_password)
-            ];
+            // Only require password change if explicitly required or has plain password
+            if ($passwordChangeRequiredField || !empty($plainPasswordField)) {
+                $passwordChangeRequired = true;
+                $debugInfo['password_change_required'] = true;
+                $debugInfo['password_change_reasons'] = [
+                    'password_change_required' => $passwordChangeRequiredField,
+                    'password_changed' => $passwordChangedField,
+                    'has_plain_password' => !empty($plainPasswordField)
+                ];
+            }
         }
         
         $debugInfo['step'] = 'Preparing response';
@@ -357,8 +371,23 @@ Route::post('/auth/login-simple', function (Request $request) {
             };
         }
         
-        // Return success response
-        return response()->json($responseData);
+        // Check if this is an AJAX request or form submission
+        if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+            // Return JSON for AJAX requests
+            return response()->json($responseData);
+        } else {
+            // For form submissions, redirect directly (maintains session better)
+            $redirectUrl = $passwordChangeRequired ? 
+                '/auth/change-password?userType=' . $user->role :
+                match($user->role) {
+                    'student' => '/student/dashboard',
+                    'registrar' => '/registrar/dashboard', 
+                    'faculty', 'coordinator' => '/faculty/dashboard',
+                    default => '/login'
+                };
+            
+            return redirect($redirectUrl)->with('success', 'Login successful!');
+        }
         
     } catch (\Exception $e) {
         $debugInfo['final_error'] = $e->getMessage();
@@ -386,6 +415,7 @@ Route::post('/auth/login-simple', function (Request $request) {
     }
 });
 
+
 // Registrar/Faculty/Coordinator login (must be first to avoid conflict)
 Route::post('/auth/login', [AuthController::class, 'login']);
 
@@ -411,11 +441,6 @@ Route::post('/auth/validate-session', [AuthController::class, 'validateSession']
 Route::post('/auth/forgot-password', [App\Http\Controllers\PasswordResetController::class, 'sendOTP']);
 Route::post('/auth/verify-otp', [App\Http\Controllers\PasswordResetController::class, 'verifyOTP']);
 Route::post('/auth/reset-password', [App\Http\Controllers\PasswordResetController::class, 'resetPassword']);
-
-// Change Password routes (with authentication middleware)
-Route::get('/auth/change-password', function() {
-    return Inertia::render('Auth/Change_Password');
-});
 
 // Protected password change routes - require authentication
 Route::middleware(['auth:sanctum'])->group(function () {

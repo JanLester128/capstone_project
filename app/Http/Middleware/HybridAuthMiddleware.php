@@ -79,11 +79,13 @@ class HybridAuthMiddleware
         }
 
         // For dashboard routes, check if this is a browser request and allow through
-        if ($request->is('*/dashboard') || 
+        // BUT NOT for faculty/enrollment which needs proper authentication
+        if (($request->is('*/dashboard') || 
             $request->is('registrar/*') || 
             $request->is('faculty/*') || 
             $request->is('student/*') ||
-            $request->is('dashboard')) {
+            $request->is('dashboard')) &&
+            !$request->is('faculty/enrollment')) { // Exclude faculty/enrollment from bypass
             
             $userAgent = $request->header('User-Agent');
             $acceptHeader = $request->header('Accept');

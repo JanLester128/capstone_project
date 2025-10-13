@@ -21,7 +21,6 @@ class ClassSchedule extends Model
         'end_time',
         'duration',
         'semester',
-        'room',
         'is_active'
     ];
 

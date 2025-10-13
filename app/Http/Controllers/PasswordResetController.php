@@ -131,9 +131,7 @@ class PasswordResetController extends Controller
 
         // Update user password
         $user->update([
-            'password' => Hash::make($request->password),
-            'plain_password' => null, // Clear plain password if exists
-            'password_change_required' => false
+            'password' => Hash::make($request->password)
         ]);
 
         // Mark OTP as used

@@ -128,7 +128,6 @@ class ScheduleController extends Controller
             'duration' => 'required|integer|in:60,90,120',
             'semester' => 'required|in:1st Semester,2nd Semester',
             'school_year' => 'required|string',
-            'room' => 'nullable|string|max:255'
         ]);
 
         // Normalize time formats to handle both datetime and time-only strings
@@ -383,7 +382,6 @@ class ScheduleController extends Controller
             'duration' => 'required|integer|in:60,90,120',
             'semester' => 'required|in:1st Semester,2nd Semester',
             'school_year' => 'required|string',
-            'room' => 'nullable|string|max:255'
         ]);
 
         // Convert school_year string to school_year_id
@@ -998,7 +996,7 @@ class ScheduleController extends Controller
                     'day_of_week' => $schedule->day_of_week,
                     'start_time' => $schedule->start_time,
                     'end_time' => $schedule->end_time,
-                    'room' => $schedule->room ?? 'TBA',
+                    'room' => 'TBA',
                     'duration' => $schedule->duration,
                     'semester' => $schedule->semester,
                     'year_level' => $schedule->year_level,
@@ -1142,44 +1140,6 @@ class ScheduleController extends Controller
             }
         }
         
-        // Additional check: Room conflicts (same room, same time, same day)
-        if (!empty($data['room'])) {
-            $roomConflicts = ClassSchedule::where('room', $data['room'])
-                ->where('day_of_week', $data['day_of_week'])
-                ->where('school_year_id', $data['school_year_id'])
-                ->where('semester', $data['semester'])
-                ->when($excludeId, function ($query, $excludeId) {
-                    return $query->where('id', '!=', $excludeId);
-                })
-                ->with(['subject', 'section.strand', 'faculty'])
-                ->get()
-                ->filter(function ($schedule) use ($startTime, $endTime) {
-                    // Normalize schedule times for comparison
-                    $scheduleStart = $this->normalizeTimeForComparison($schedule->start_time);
-                    $scheduleEnd = $this->normalizeTimeForComparison($schedule->end_time);
-                    
-                    if (!$scheduleStart || !$scheduleEnd) {
-                        Log::warning('Invalid room schedule time format', [
-                            'schedule_id' => $schedule->id,
-                            'start_time' => $schedule->start_time,
-                            'end_time' => $schedule->end_time
-                        ]);
-                        return false;
-                    }
-                    
-                    return $startTime->lt($scheduleEnd) && $endTime->gt($scheduleStart);
-                });
-                
-            if ($roomConflicts->isNotEmpty()) {
-                foreach ($roomConflicts as $roomConflict) {
-                    $facultyName = $roomConflict->faculty ? $roomConflict->faculty->name : 'Unknown Faculty';
-                    $subjectName = $roomConflict->subject ? $roomConflict->subject->name : 'Unknown Subject';
-                    
-                    $conflicts[] = "ROOM CONFLICT: Room {$data['room']} is already occupied by {$facultyName} for {$subjectName} from {$roomConflict->start_time} to {$roomConflict->end_time} on {$data['day_of_week']}";
-                }
-            }
-        }
-        
         return $conflicts;
     }
 
@@ -1262,8 +1222,7 @@ class ScheduleController extends Controller
                         'start_time' => $startTime,
                         'end_time' => $endTime,
                         'school_year_id' => $currentAcademicYear->id,
-                        'semester' => $currentAcademicYear->current_semester ?? 1,
-                        'room' => $scheduleData['room'] ?? null
+                        'semester' => $currentAcademicYear->current_semester ?? 1
                     ];
 
                     // Check for conflicts before creating
@@ -1316,8 +1275,7 @@ class ScheduleController extends Controller
                         'end_time' => $endTime,
                         'duration' => $scheduleData['duration'],
                         'school_year_id' => $currentAcademicYear->id,
-                        'semester' => $semester,
-                        'room' => $scheduleData['room'] ?? null
+                        'semester' => $semester
                     ]);
 
                     $createdSchedules[] = $schedule;

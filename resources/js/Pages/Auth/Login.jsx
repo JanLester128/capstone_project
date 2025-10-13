@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, useForm, router } from '@inertiajs/react';
 import { AuthManager } from '../../auth';
 import { FaGraduationCap, FaShieldAlt, FaChartLine, FaCalendarAlt, FaUsers, FaEnvelope, FaLock, FaEye, FaEyeSlash, FaSignInAlt, FaSpinner } from 'react-icons/fa';
 
@@ -13,13 +13,12 @@ export default function Login() {
     return null; // Don't render anything
   }
   
-  const [formData, setFormData] = useState({
+  // Use Inertia form handling instead of manual state
+  const { data, setData, post, processing, errors, clearErrors } = useForm({
     email: '',
     password: '',
     remember: false
   });
-  const [errors, setErrors] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -56,215 +55,13 @@ export default function Login() {
     );
   }
 
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
-    
-    // Clear error for this field when user starts typing
-    if (errors[name]) {
-      setErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
-    }
-  };
 
-  const validateForm = () => {
-    const newErrors = {};
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
-    }
-    
-    if (!formData.password.trim()) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    console.log('🚀 Login form submitted!', formData);
-    
-    if (!validateForm()) {
-      console.log('❌ Form validation failed');
-      return;
-    }
-    
-    console.log('✅ Form validation passed, proceeding with login...');
-    
-    setIsLoading(true);
-    setErrors({});
-    
-    try {
-      // TEMPORARY: Use simple login with debugging to identify 500 error
-      const response = await fetch('/auth/login-simple', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: JSON.stringify(formData),
-        credentials: 'include'
-      });
-
-      const data = await response.json();
-      
-      console.log('Login response received:', {
-        status: response.status,
-        ok: response.ok,
-        data: data,
-        headers: Object.fromEntries(response.headers.entries()),
-        url: response.url
-      });
-      
-      // DETAILED DEBUGGING: Check every condition
-      console.log('🔍 Detailed response analysis:', {
-        hasSuccess: 'success' in data,
-        successValue: data.success,
-        hasUser: 'user' in data,
-        userValue: data.user,
-        hasToken: 'token' in data,
-        tokenValue: data.token ? data.token.substring(0, 10) + '...' : null,
-        responseOk: response.ok,
-        dataKeys: Object.keys(data)
-      });
-      
-      console.log('Response data details:', {
-        hasSuccess: 'success' in data,
-        successValue: data.success,
-        hasUser: 'user' in data,
-        hasToken: 'token' in data,
-        userRole: data.user?.role,
-        redirectUrl: data.redirect
-      });
-      
-      if (!response.ok) {
-        console.error('Login failed - response not ok:', data);
-        if (data.errors) {
-          setErrors(data.errors);
-        } else {
-          setErrors({ general: data.message || 'Login failed. Please try again.' });
-        }
-        return;
-      }
-
-      // Check for successful login - handle multiple response formats
-      console.log('🔍 Checking login success conditions:', {
-        hasSuccess: 'success' in data,
-        successValue: data.success,
-        hasUser: 'user' in data,
-        hasToken: 'token' in data,
-        responseOk: response.ok
-      });
-
-      // SIMPLIFIED: Just check if we have user and token (most reliable)
-      const hasUserAndToken = data.user && data.token;
-      const isResponseOk = response.ok;
-      
-      console.log('🔍 Simplified success check:', {
-        hasUserAndToken: hasUserAndToken,
-        isResponseOk: isResponseOk,
-        willProceed: hasUserAndToken && isResponseOk
-      });
-      
-      if (hasUserAndToken && isResponseOk) {
-        console.log('✅ Login successful - at least one condition met:', data);
-        
-        // Check if password change is required
-        if (data.password_change_required) {
-          console.log('🔐 Password change required, redirecting to change password page');
-          
-          // Store temporary auth data for password change
-          AuthManager.setUser(data.user);
-          AuthManager.setToken(data.token);
-          AuthManager.setSession(data.session_id || `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-          
-          // Redirect to password change page
-          window.location.replace(`http://127.0.0.1:8000${data.redirect}`);
-          return;
-        }
-        
-        // Store authentication data using AuthManager
-        if (data.user && data.token) {
-          console.log('💾 Storing auth data...');
-          AuthManager.setUser(data.user);
-          AuthManager.setToken(data.token);
-          AuthManager.setSession(data.session_id || `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-          
-          // Also set token in cookie for browser refresh scenarios
-          document.cookie = `auth_token=${data.token}; path=/; max-age=${24 * 60 * 60}; SameSite=Lax`;
-          
-          // Update last activity immediately
-          AuthManager.updateLastActivity();
-          
-          // FIXED: Use AuthManager.getRedirectUrl() to respect stored page preference
-          let redirectUrl = data.redirect;
-          if (!redirectUrl && data.user) {
-            // Use our enhanced redirect logic that checks for stored pages first
-            redirectUrl = AuthManager.getRedirectUrl();
-            console.log('🎯 Using AuthManager redirect URL:', redirectUrl, 'for user role:', data.user.role);
-          }
-          
-          console.log('🚀 Final redirect URL:', redirectUrl, 'for user role:', data.user.role);
-          
-          // Redirect to appropriate dashboard
-          if (redirectUrl && redirectUrl !== '/login') {
-            console.log('🔄 Performing redirect to:', redirectUrl);
-            
-            // Show success message first, then redirect
-            setErrors({});
-            
-            // Show visual success feedback
-            console.log('✅ Login successful! Redirecting to dashboard...');
-            
-            // SUCCESS! Store auth data and redirect
-            console.log('🎉 LOGIN SUCCESS! Storing auth data and redirecting...');
-            console.log('📊 Auth data to store:', { user: data.user, token: data.token?.substring(0, 10) + '...' });
-            console.log('🎯 Redirect URL:', redirectUrl);
-            
-            // Clear any existing errors
-            setErrors({});
-            
-            // Force redirect with full page reload to ensure clean state
-            console.log('🔄 Performing immediate redirect...');
-            
-            // FIXED: Immediate redirect without any delays or popups
-            window.location.replace(`http://127.0.0.1:8000${redirectUrl}`);
-          } else {
-            console.error('❌ No valid redirect URL found');
-            setErrors({ general: 'Login successful but redirect failed. Please try refreshing the page.' });
-          }
-        } else {
-          console.error('❌ Login response missing user or token data:', data);
-          setErrors({ general: 'Login response incomplete. Please try again.' });
-        }
-      } else {
-        console.error('❌ Login failed - conditions not met:', {
-          data,
-          success: data.success,
-          hasUser: !!data.user,
-          hasToken: !!data.token,
-          responseOk: response.ok
-        });
-        setErrors({ general: data.message || 'Login failed. Please check your credentials.' });
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      setErrors({ general: 'Network error. Please check your connection and try again.' });
-    } finally {
-      setIsLoading(false);
-    }
+    clearErrors();
+    console.log('🔄 Submitting login form via Inertia...');
+    post('/auth/login-inertia');
   };
 
   // Handle navigation with smooth transition
@@ -382,8 +179,8 @@ export default function Login() {
                     id="email"
                     type="email"
                     name="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
+                    value={data.email}
+                    onChange={(e) => setData('email', e.target.value)}
                     className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm ${
                       errors.email ? 'border-red-300 bg-red-50' : 'border-gray-300'
                     }`}
@@ -412,8 +209,8 @@ export default function Login() {
                     id="password"
                     type={showPassword ? "text" : "password"}
                     name="password"
-                    value={formData.password}
-                    onChange={handleInputChange}
+                    value={data.password}
+                    onChange={(e) => setData('password', e.target.value)}
                     className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm ${
                       errors.password ? 'border-red-300 bg-red-50' : 'border-gray-300'
                     }`}
@@ -445,8 +242,8 @@ export default function Login() {
                   <input
                     type="checkbox"
                     name="remember"
-                    checked={formData.remember}
-                    onChange={handleInputChange}
+                    checked={data.remember}
+                    onChange={(e) => setData('remember', e.target.checked)}
                     className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                   />
                   <span className="ml-2 text-gray-600">Remember me</span>
@@ -456,13 +253,13 @@ export default function Login() {
                   className="text-blue-600 hover:text-blue-800 font-medium focus:outline-none focus:underline transition-colors duration-200 flex items-center gap-1 disabled:opacity-50"
                   onClick={() => {
                     // Navigate to forgot password page with current email if provided
-                    const email = formData.email.trim();
+                    const email = data.email.trim();
                     const forgotPasswordUrl = email 
                       ? `/forgot-password?email=${encodeURIComponent(email)}`
                       : '/forgot-password';
                     handleNavigation(forgotPasswordUrl);
                   }}
-                  disabled={isNavigating || isLoading}
+                  disabled={isNavigating || processing}
                 >
                   <span>🔑</span>
                   Forgot Password?
@@ -482,10 +279,10 @@ export default function Login() {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={processing}
                 className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:scale-100 disabled:cursor-not-allowed shadow-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
-                {isLoading ? (
+                {processing ? (
                   <div className="flex items-center justify-center gap-2">
                     <FaSpinner className="w-4 h-4 animate-spin" />
                     Signing In...

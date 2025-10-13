@@ -95,7 +95,7 @@ class RegistrarReportsController extends Controller
 
             // Apply filters
             if ($validated['strand_id']) {
-                $query->where('assigned_strand_id', $validated['strand_id']);
+                $query->where('strand_id', $validated['strand_id']);
             }
 
             if ($validated['section_id']) {

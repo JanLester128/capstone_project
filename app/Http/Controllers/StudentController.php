@@ -545,8 +545,8 @@ class StudentController extends Controller
                     $activeSchoolYearId = isset($schoolYear) && $schoolYear ? (int)$schoolYear->id : null;
 
                     // Remove existing preferences for idempotency
-                    // FIXED: Use student_personal_info.id since student_strand_preferences.student_id references student_personal_info.id
-                    $deleted = DB::table('student_strand_preferences')->where('student_id', $student->id)->delete();
+                    // FIXED: Use student_personal_info.id since student_strand_preferences.student_personal_info_id references student_personal_info.id
+                    $deleted = DB::table('student_strand_preferences')->where('student_personal_info_id', $student->id)->delete();
                     Log::info('Deleted existing strand preferences', ['deleted' => $deleted, 'user_id' => $user->id]);
 
                     // Accept multiple key names and coerce to int
@@ -569,7 +569,7 @@ class StudentController extends Controller
                     foreach ($choices as $order => $strandId) {
                         if (!empty($strandId) && in_array($strandId, $existingIds, true)) {
                             $row = [
-                                'student_id' => $student->id, // Use student_personal_info.id, not user.id
+                                'student_personal_info_id' => $student->id, // Use student_personal_info.id, not user.id
                                 'strand_id' => $strandId,
                                 'preference_order' => $order,
                                 'created_at' => now(),
@@ -611,26 +611,13 @@ class StudentController extends Controller
             }
 
             // Philippine SHS System: Auto-enroll in full year subjects (both semesters)
+            // Note: Class details creation is handled during coordinator approval when section is assigned
             if ($enrollmentId && $strand) {
-                try {
-                    // Determine grade level (default to 11 for new SHS students)
-                    $gradeLevel = $validated['gradeLevel'] ?? 11;
-                    
-                    // Create class_details records for auto-enrolled students
-                    $this->createClassDetailsForEnrolledStudent($enrollmentId, $validated['section_id'], $strand->id, $activeSchoolYear->id);
-                    
-                    Log::info('Philippine SHS: Enrollment completed with class_details created', [
-                        'enrollment_id' => $enrollmentId,
-                        'strand_id' => $strand->id,
-                        'grade_level' => $gradeLevel
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('Failed to auto-enroll in subjects', [
-                        'error' => $e->getMessage(),
-                        'enrollment_id' => $enrollmentId
-                    ]);
-                    // Don't fail the enrollment, just log the error
-                }
+                Log::info('Philippine SHS: Enrollment completed, class details will be created upon coordinator approval', [
+                    'enrollment_id' => $enrollmentId,
+                    'strand_id' => $strand->id,
+                    'note' => 'Section assignment and class details creation happens during coordinator approval'
+                ]);
             }
 
             Log::info('Enrollment completed successfully', [
@@ -1087,7 +1074,6 @@ class StudentController extends Controller
                         'class.day_of_week',
                         'class.start_time',
                         'class.duration',
-                        'class.room',
                         'users.firstname as faculty_firstname',
                         'users.lastname as faculty_lastname'
                     ])
@@ -1131,7 +1117,7 @@ class StudentController extends Controller
                                 'day' => $schedule->day_of_week,
                                 'time_range' => $startTime->format('g:i A') . ' - ' . $endTime->format('g:i A'),
                                 'faculty_name' => $schedule->faculty_firstname . ' ' . $schedule->faculty_lastname,
-                                'room' => $schedule->room ?? 'TBA'
+                                'room' => 'TBA'
                             ];
                         });
                     }
@@ -1925,69 +1911,117 @@ class StudentController extends Controller
     private function getStudentGrades($userId)
     {
         try {
-            // Get grades from grades table or create sample data
+            // Get active school year
+            $activeSchoolYear = \App\Models\SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return $this->getSampleGrades();
+            }
+
+            // Get approved grades for both semesters
             $grades = DB::table('grades')
                 ->join('subjects', 'grades.subject_id', '=', 'subjects.id')
                 ->leftJoin('users as faculty', 'grades.faculty_id', '=', 'faculty.id')
                 ->where('grades.student_id', $userId)
+                ->where('grades.school_year_id', $activeSchoolYear->id)
                 ->where('grades.approval_status', 'approved')
                 ->select([
-                    'subjects.name as subject_name',
-                    'subjects.code as subject_code',
-                    DB::raw("CONCAT(faculty.firstname, ' ', faculty.lastname) as faculty_name"),
+                    'subjects.subject_name',
+                    'subjects.subject_code',
+                    DB::raw("CONCAT(COALESCE(faculty.firstname, 'No'), ' ', COALESCE(faculty.lastname, 'Faculty')) as faculty_name"),
                     'grades.first_quarter',
-                    'grades.second_quarter', 
-                    'grades.third_quarter',
-                    'grades.fourth_quarter',
+                    'grades.second_quarter',
                     'grades.semester_grade as final_grade',
-                    'grades.semester'
+                    'grades.semester',
+                    'grades.status',
+                    'grades.remarks',
+                    'grades.approved_at'
                 ])
+                ->orderBy('grades.semester')
+                ->orderBy('subjects.subject_code')
                 ->get();
 
             // If no grades found, return sample data for demonstration
             if ($grades->isEmpty()) {
-                return [
-                    [
-                        'subject_name' => 'General Mathematics',
-                        'subject_code' => 'MATH-11',
-                        'faculty_name' => 'Ms. Maria Santos',
-                        'first_quarter' => 88,
-                        'second_quarter' => 90,
-                        'third_quarter' => 87,
-                        'fourth_quarter' => 89,
-                        'final_grade' => 88.5,
-                        'semester' => '1st'
-                    ],
-                    [
-                        'subject_name' => 'Communication Arts',
-                        'subject_code' => 'ENG-11',
-                        'faculty_name' => 'Mr. Juan Dela Cruz',
-                        'first_quarter' => 92,
-                        'second_quarter' => 90,
-                        'third_quarter' => 91,
-                        'fourth_quarter' => 93,
-                        'final_grade' => 91.5,
-                        'semester' => '1st'
-                    ],
-                    [
-                        'subject_name' => 'Physical Science',
-                        'subject_code' => 'SCI-11',
-                        'faculty_name' => 'Dr. Ana Rodriguez',
-                        'first_quarter' => 85,
-                        'second_quarter' => 87,
-                        'third_quarter' => 86,
-                        'fourth_quarter' => 88,
-                        'final_grade' => 86.5,
-                        'semester' => '1st'
-                    ]
+                return $this->getSampleGrades();
+            }
+
+            // Group grades by semester for better organization
+            $groupedGrades = [
+                '1st_semester' => [],
+                '2nd_semester' => []
+            ];
+
+            foreach ($grades as $grade) {
+                $semesterKey = $grade->semester === '1st' ? '1st_semester' : '2nd_semester';
+                $groupedGrades[$semesterKey][] = [
+                    'subject_name' => $grade->subject_name,
+                    'subject_code' => $grade->subject_code,
+                    'faculty_name' => $grade->faculty_name,
+                    'first_quarter' => $grade->first_quarter,
+                    'second_quarter' => $grade->second_quarter,
+                    'final_grade' => $grade->final_grade,
+                    'semester' => $grade->semester,
+                    'status' => $grade->status,
+                    'remarks' => $grade->remarks,
+                    'approved_at' => $grade->approved_at
                 ];
             }
 
-            return $grades->toArray();
+            return $groupedGrades;
         } catch (\Exception $e) {
             Log::error('Error fetching student grades: ' . $e->getMessage());
-            return [];
+            return $this->getSampleGrades();
         }
+    }
+
+    /**
+     * Get sample grades for demonstration when no real grades exist
+     */
+    private function getSampleGrades()
+    {
+        return [
+            '1st_semester' => [
+                [
+                    'subject_name' => 'General Mathematics',
+                    'subject_code' => 'MATH-11',
+                    'faculty_name' => 'Ms. Maria Santos',
+                    'first_quarter' => 88,
+                    'second_quarter' => 90,
+                    'final_grade' => 89.0,
+                    'semester' => '1st',
+                    'status' => 'completed',
+                    'remarks' => 'Good performance',
+                    'approved_at' => now()->subDays(7)
+                ],
+                [
+                    'subject_name' => 'Communication Arts',
+                    'subject_code' => 'ENG-11',
+                    'faculty_name' => 'Mr. Juan Dela Cruz',
+                    'first_quarter' => 92,
+                    'second_quarter' => 90,
+                    'final_grade' => 91.0,
+                    'semester' => '1st',
+                    'status' => 'completed',
+                    'remarks' => 'Excellent work',
+                    'approved_at' => now()->subDays(7)
+                ]
+            ],
+            '2nd_semester' => [
+                [
+                    'subject_name' => 'Statistics and Probability',
+                    'subject_code' => 'MATH-12',
+                    'faculty_name' => 'Ms. Maria Santos',
+                    'first_quarter' => 85,
+                    'second_quarter' => 87,
+                    'final_grade' => 86.0,
+                    'semester' => '2nd',
+                    'status' => 'ongoing',
+                    'remarks' => 'Keep up the good work',
+                    'approved_at' => null
+                ]
+            ]
+        ];
     }
 
     /**
