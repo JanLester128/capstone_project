@@ -119,6 +119,18 @@ router.on('error', (errors) => {
   }
 });
 
+// Configure Inertia to include CSRF token
+// Set up CSRF token for Inertia requests
+router.on('before', (event) => {
+  const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+  if (token) {
+    event.detail.visit.headers = {
+      ...event.detail.visit.headers,
+      'X-CSRF-TOKEN': token
+    };
+  }
+});
+
 // Inertia app setup
 createInertiaApp({
   resolve: (name) => {

@@ -36,7 +36,7 @@ class Kernel extends HttpKernel
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
-            // \App\Http\Middleware\SingleSessionMiddleware::class, // TEMPORARILY DISABLED: Testing session issues
+            \App\Http\Middleware\SingleSessionMiddleware::class, // Re-enabled for proper session management
         ],
 
         'api' => [
@@ -68,6 +68,8 @@ class Kernel extends HttpKernel
         // ✅ Custom role-based middleware
         'role' => \App\Http\Middleware\RoleMiddleware::class,
         'single.session' => \App\Http\Middleware\SingleSessionMiddleware::class,
-        'hybrid.auth' => \App\Http\Middleware\HybridAuthMiddleware::class,
+        'role.redirect' => \App\Http\Middleware\RoleBasedRedirectMiddleware::class,
+        'require.school.year' => \App\Http\Middleware\RequireActiveSchoolYear::class,
+        'update.faculty.loads' => \App\Http\Middleware\UpdateFacultyLoads::class,
     ];
 }

@@ -447,6 +447,23 @@ export const AuthManager = {
     // }); // DISABLED
   },
 
+  // Get redirect URL based on user role
+  getRedirectUrl() {
+    const user = this.getUser();
+    if (!user || !user.role) {
+      return '/login';
+    }
+
+    const roleRedirects = {
+      'registrar': '/registrar/dashboard',
+      'faculty': '/faculty/dashboard',
+      'coordinator': '/faculty/dashboard',
+      'student': '/student/dashboard'
+    };
+
+    return roleRedirects[user.role.toLowerCase()] || '/dashboard';
+  },
+
   // Track page changes for better UX
   trackPageChange() {
     const currentPath = window.location.pathname;

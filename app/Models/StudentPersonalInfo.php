@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\TransfereePreviousSchool;
 
 class StudentPersonalInfo extends Model
 {
@@ -13,29 +14,31 @@ class StudentPersonalInfo extends Model
 
     protected $fillable = [
         'user_id',
-        // Personal information only (no academic/enrollment data)
+        'lrn',
+        'grade_level',
+        'student_status',
         'birthdate',
-        'age',
         'sex',
-        'birth_place',
         'address',
-        'religion',
-        'contact_number',
         'guardian_name',
         'guardian_contact',
         'guardian_relationship',
+        'psa_birth_certificate',
+        'report_card',
+        // Additional personal information fields
+        'previous_school',
+        'extension_name',
+        'birth_place',
+        'religion',
+        'ip_community',
+        'four_ps',
+        'pwd_id',
+        'last_grade',
+        'last_sy',
+        'last_school',
         'emergency_contact_name',
         'emergency_contact_number',
         'emergency_contact_relationship',
-        'ip_community',
-        'four_ps',
-        'special_needs',
-        'pwd_id',
-        'extension_name',
-        'last_grade',
-        'last_sy',
-        'psa_birth_certificate',
-        'image'
     ];
 
     protected $casts = [
@@ -43,7 +46,29 @@ class StudentPersonalInfo extends Model
     ];
 
     /**
-     * Get the user that owns the student personal info
+     * Boot the model and add event listeners
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        // When student personal info is updated, sync transferee previous school
+        static::updated(function ($studentInfo) {
+            if ($studentInfo->student_status === 'transferee' && !empty($studentInfo->last_school)) {
+                $studentInfo->syncTransfereePreviousSchool();
+            }
+        });
+
+        // When student personal info is created, create transferee previous school if needed
+        static::created(function ($studentInfo) {
+            if ($studentInfo->student_status === 'transferee' && !empty($studentInfo->last_school)) {
+                $studentInfo->syncTransfereePreviousSchool();
+            }
+        });
+    }
+
+    /**
+     * Get the user that owns the student personal info.
      */
     public function user()
     {
@@ -51,53 +76,81 @@ class StudentPersonalInfo extends Model
     }
 
     /**
-     * Get the strand preferences for this student
+     * Get the transferee previous schools for this student.
+     */
+    public function transfereePreviousSchools()
+    {
+        return $this->hasMany(TransfereePreviousSchool::class);
+    }
+
+    /**
+     * Get the student strand preferences for this student.
      */
     public function strandPreferences()
     {
-        return $this->hasMany(StudentStrandPreference::class, 'student_personal_info_id')
-                    ->orderBy('preference_order');
+        return $this->hasMany(StudentStrandPreference::class);
     }
 
     /**
-     * Get the enrollments for this student
+     * Get the enrollments for this student.
      */
     public function enrollments()
     {
-        return $this->hasMany(Enrollment::class, 'student_personal_info_id');
+        return $this->hasMany(Enrollment::class);
     }
 
     /**
-     * Get the current enrollment (most recent active enrollment)
+     * Get the full name of the student.
      */
-    public function currentEnrollment()
+    public function getFullNameAttribute()
     {
-        return $this->hasOne(Enrollment::class, 'student_personal_info_id')
-                    ->where('status', 'enrolled')
-                    ->latest();
+        return $this->user->username ?? 'Unknown Student';
     }
 
     /**
-     * Get section via current enrollment
+     * Check if student is a transferee.
      */
-    public function getSection()
+    public function isTransferee()
     {
-        return $this->currentEnrollment?->assignedSection;
+        return $this->student_status === 'transferee';
     }
 
     /**
-     * Get strand via current enrollment
+     * Get the age of the student.
      */
-    public function getStrand()
+    public function getAgeAttribute()
     {
-        return $this->currentEnrollment?->assignedStrand;
+        return $this->birthdate ? $this->birthdate->age : null;
     }
 
     /**
-     * Get school year via current enrollment
+     * Sync transferee previous school data
      */
-    public function getSchoolYear()
+    public function syncTransfereePreviousSchool()
     {
-        return $this->currentEnrollment?->schoolYear;
+        if ($this->student_status !== 'transferee' || empty($this->last_school)) {
+            return;
+        }
+
+        try {
+            // Find or create transferee previous school record
+            $previousSchool = TransfereePreviousSchool::firstOrNew([
+                'student_personal_info_id' => $this->id
+            ]);
+
+            $previousSchool->last_school = $this->last_school;
+            $previousSchool->save();
+
+            \Log::info('Synced transferee previous school', [
+                'student_personal_info_id' => $this->id,
+                'student_name' => $this->full_name,
+                'last_school' => $this->last_school
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Failed to sync transferee previous school', [
+                'student_personal_info_id' => $this->id,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }

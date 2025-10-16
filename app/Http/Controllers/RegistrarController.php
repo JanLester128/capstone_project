@@ -3,2889 +3,597 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Str;
+use App\Http\Controllers\Controller;
 use Inertia\Inertia;
 use App\Models\User;
-use App\Models\Subject;
 use App\Models\Strand;
+use App\Models\Subject;
 use App\Models\Section;
-use App\Models\Student;
 use App\Models\SchoolYear;
-use App\Models\StudentPersonalInfo;
 use App\Models\Enrollment;
-use App\Models\ClassSchedule;
-use App\Models\ClassDetail;
-use App\Models\Notification;
-use App\Models\Registrar;
-use App\Models\Coordinator;
-use App\Models\Semester;
-use App\Services\SchoolYearService;
+use App\Models\Grade;
+use App\Models\GradeInputRequest;
+use App\Models\TransfereeSubjectCredit;
+use App\Models\TransfereeCreditedSubject;
+use App\Models\TransfereePreviousSchool;
+use App\Models\CertificateOfRegistration;
+use App\Models\SummerClassSchedule;
+use App\Models\SummerClass;
 
 class RegistrarController extends Controller
 {
     /**
-     * Toggle whether faculty can print COR for the active school year
+     * Display registrar dashboard
      */
-    public function toggleFacultyCorPrint(Request $request)
+    public function dashboard()
     {
-        try {
-            $active = SchoolYear::where('is_active', true)->first();
-            if (!$active) {
-                return redirect()->back()->withErrors(['general' => 'No active school year found.']);
-            }
-
-            $new = !((bool)$active->allow_faculty_cor_print);
-            $active->update(['allow_faculty_cor_print' => $new]);
-
-            $msg = $new ? 'Faculty COR printing has been enabled.' : 'Faculty COR printing has been disabled.';
-            return redirect()->back()->with('success', $msg);
-        } catch (\Exception $e) {
-            Log::error('toggleFacultyCorPrint error: '.$e->getMessage());
-            return redirect()->back()->withErrors(['general' => 'Failed to update setting.']);
-        }
-    }
-    public function sectionCOR($sectionId, $studentId = null)
-    {
-        $section = Section::with(['strand'])->findOrFail($sectionId);
-        $activeSchoolYear = SchoolYear::getActive();
-
-        if (!$activeSchoolYear) {
-            return redirect()->back()->with('error', 'No active school year found. Please set an active school year first.');
-        }
-
-        // Get actual scheduled subjects for this section from class table
-        // Filter by active school year and current semester
-        $scheduledSubjects = DB::table('class')
-            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
-            ->join('users', 'class.faculty_id', '=', 'users.id')
-            ->where('class.school_year_id', $activeSchoolYear->id)
-            ->where('subjects.school_year_id', $activeSchoolYear->id)
-            ->where('subjects.semester', $activeSchoolYear->current_semester ?? 1)
-            ->where('class.is_active', true)
-            ->select(
-                'subjects.*',
-                'class.day_of_week',
-                'class.start_time',
-                'class.end_time',
-                'class.semester',
-                'users.name as faculty_name'
-            )
-            ->orderBy('subjects.year_level')
-            ->orderBy('subjects.semester')
-            ->orderBy('subjects.name')
-            ->get();
-
-        // Group subjects by year level and semester
-        $subjectsByYear = $scheduledSubjects->groupBy('year_level');
-
-        // Get all sections for dropdown
-        $sections = Section::with('strand')->orderBy('section_name')->get();
-
-        return Inertia::render('Registrar/SectionCOR', [
-            'section' => $section,
-            'subjectsByYear' => $subjectsByYear,
-            'activeSchoolYear' => $activeSchoolYear,
-            'sections' => $sections,
-            'scheduledSubjects' => $scheduledSubjects
-        ]);
-    }
-
-    // Classes Management Method
-    public function classesPage()
-    {
-        // Get active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        if (!$activeSchoolYear) {
-            return Inertia::render('Registrar/RegistrarClass', [
-                'strands' => Strand::orderBy('name')->get(),
-                'faculties' => User::whereIn('role', ['faculty', 'coordinator'])->get(),
-                'sections' => Section::with(['strand', 'adviser'])->orderBy('section_name')->get(),
-                'classSchedules' => [],
-                'activeSchoolYear' => null,
-                'message' => 'No active school year found. Please create and activate a school year first.'
-            ]);
-        }
-
-        // Get all strands for class assignment
-        $strands = Strand::with(['subjects' => function ($query) use ($activeSchoolYear) {
-            $query->where('school_year_id', $activeSchoolYear->id);
-        }])->orderBy('name')->get();
-
-        // Get all faculties for teacher assignment
-        $faculties = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'assigned_strand_id')
-            ->get();
-
-        // Get faculties grouped by strand for filtering
-        $facultiesByStrand = User::whereIn('role', ['faculty', 'coordinator'])
-            ->whereNotNull('assigned_strand_id')
-            ->with('assignedStrand')
-            ->get()
-            ->groupBy('assigned_strand_id')
-            ->map(function ($strandFaculties) {
-                return $strandFaculties->map(function ($faculty) {
-                    return [
-                        'id' => $faculty->id,
-                        'name' => $faculty->firstname . ' ' . $faculty->lastname,
-                        'firstname' => $faculty->firstname,
-                        'lastname' => $faculty->lastname,
-                        'email' => $faculty->email,
-                        'role' => $faculty->role,
-                        'assigned_strand_id' => $faculty->assigned_strand_id
-                    ];
-                });
-            });
-
-        // Debug: Log the faculty data to see what's happening
-        Log::info('Faculties data:', [
-            'total_faculties' => $faculties->count(),
-            'faculties_with_strand' => $faculties->whereNotNull('assigned_strand_id')->count(),
-            'facultiesByStrand_keys' => array_keys($facultiesByStrand->toArray()),
-            'sample_faculty' => $faculties->first() ? $faculties->first()->toArray() : null
-        ]);
-
-        // Get all sections for class assignment
-        $sections = Section::with(['strand', 'adviser'])->orderBy('section_name')->get();
-
-        // Debug: Check all schedules in database
-        $allSchedules = ClassSchedule::all();
-        $schedulesWithoutYear = $allSchedules->whereNull('school_year_id');
+        $user = Auth::user();
         
-        Log::info('All schedules in database', [
-            'total_count' => $allSchedules->count(),
-            'schedules_with_school_year' => $allSchedules->whereNotNull('school_year_id')->count(),
-            'schedules_without_school_year' => $schedulesWithoutYear->count(),
-            'active_school_year_id' => $activeSchoolYear->id,
-            'schedules_by_year' => $allSchedules->groupBy('school_year_id')->map->count()->toArray()
-        ]);
-
-        // Fix orphaned schedules (schedules without school_year_id)
-        if ($schedulesWithoutYear->count() > 0) {
-            Log::info('Found orphaned schedules, these need manual assignment', [
-                'orphaned_count' => $schedulesWithoutYear->count(),
-                'active_year_id' => $activeSchoolYear->id,
-                'orphaned_schedule_ids' => $schedulesWithoutYear->pluck('id')->toArray()
-            ]);
-            
-            // Don't auto-assign orphaned schedules to avoid data confusion
-            // Instead, log them for manual review
+        if (!$user || $user->role !== 'registrar') {
+            return redirect()->route('login');
         }
 
-        // Get class schedules with relationships - only for active school year
-        $classSchedules = ClassSchedule::with(['subject.strand', 'faculty', 'section'])
-            ->where('school_year_id', $activeSchoolYear->id)
-            ->orderBy('day_of_week')
-            ->orderBy('start_time')
-            ->get();
+        // Get dashboard statistics
+        $stats = $this->getDashboardStats();
 
-        Log::info('Filtered schedules for active year', [
-            'active_year_schedules' => $classSchedules->count(),
-            'active_school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end
-        ]);
-
-        $classSchedules = $classSchedules->map(function ($schedule) {
-                return [
-                    'id' => $schedule->id,
-                    'subject_name' => $schedule->subject ? $schedule->subject->name : 'No Subject',
-                    'subject_code' => $schedule->subject ? $schedule->subject->code : 'N/A',
-                    'strand_name' => $schedule->subject && $schedule->subject->strand ? $schedule->subject->strand->name : 'No Strand',
-                    'faculty_name' => $schedule->faculty ? $schedule->faculty->firstname . ' ' . $schedule->faculty->lastname : 'No Faculty',
-                    'section_name' => $schedule->section ? $schedule->section->section_name : 'No Section',
-                    'day_of_week' => $schedule->day_of_week,
-                    'start_time' => $schedule->start_time,
-                    'end_time' => $schedule->end_time,
-                    'semester' => $schedule->semester,
-                    'is_active' => $schedule->is_active
-                ];
-            });
-
-        return Inertia::render('Registrar/RegistrarClass', [
-            'strands' => $strands,
-            'faculties' => $faculties,
-            'sections' => $sections,
-            'classSchedules' => $classSchedules,
-            'activeSchoolYear' => $activeSchoolYear,
-            'facultiesByStrand' => $facultiesByStrand
+        return Inertia::render('Registrar/Dashboard', [
+            'user' => $user,
+            'stats' => $stats
         ]);
     }
 
-    public function createSchoolYear(Request $request)
+    /**
+     * Get dashboard statistics
+     */
+    private function getDashboardStats()
     {
-        $validated = $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050',
-            'semester' => 'required|in:Full Academic Year,Summer',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after:start_date',
-            'enrollment_start' => 'nullable|date',
-            'enrollment_end' => 'nullable|date|after:enrollment_start',
-        ]);
-
-        // Validate 10-month duration for Full Academic Year
-        if ($validated['semester'] === 'Full Academic Year') {
-            $startDate = \Carbon\Carbon::parse($validated['start_date']);
-            $endDate = \Carbon\Carbon::parse($validated['end_date']);
-            
-            // Calculate duration in months
-            $durationInMonths = $startDate->diffInMonths($endDate);
-            
-            if ($durationInMonths < 10) {
-                return redirect()->back()->withErrors([
-                    'end_date' => 'Full Academic Year must be at least 10 months duration. Current duration: ' . $durationInMonths . ' months.'
-                ]);
-            }
-            
-            if ($durationInMonths > 11) {
-                return redirect()->back()->withErrors([
-                    'end_date' => 'Full Academic Year cannot exceed 11 months duration. Current duration: ' . $durationInMonths . ' months.'
-                ]);
-            }
-        }
-
-        // Weekend Validation temporarily removed for testing
-        $startDate = \Carbon\Carbon::parse($validated['start_date']);
-        $endDate = \Carbon\Carbon::parse($validated['end_date']);
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
         
-        // Weekend validation commented out for testing purposes
-        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'start_date' => 'Start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-        // 
-        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'end_date' => 'End date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-
-        // Validate enrollment window (1 week minimum, 2 weeks maximum)
-        $diffDays = $startDate->diffInDays($endDate);
-
-        if ($diffDays < 7) {
-            return redirect()->back()->withErrors([
-                'end_date' => "Enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
-            ]);
-        }
-
-        if ($diffDays > 14) {
-            return redirect()->back()->withErrors([
-                'end_date' => "Enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
-            ]);
-        }
-
-        // Handle Full Academic Year creation
-        if ($validated['semester'] === 'Full Academic Year') {
-            return $this->createFullAcademicYear($request);
-        }
-
-        // Handle Summer semester creation
-        if ($validated['semester'] === 'Summer') {
-            return $this->createSummerSemester($request);
-        }
-
-        return redirect()->back()->withErrors(['semester' => 'Invalid semester type selected.']);
+        return [
+            'total_faculty' => User::where('role', 'faculty')->count(),
+            'total_students' => User::where('role', 'student')->count(),
+            'pending_enrollments' => $activeSchoolYear ? 
+                Enrollment::where('school_year_id', $activeSchoolYear->id)
+                    ->where('status', 'pending')->count() : 0,
+            'pending_grades' => Grade::where('status', 'pending_registrar_approval')->count(),
+            'pending_grade_requests' => $activeSchoolYear ? 
+                GradeInputRequest::where('school_year_id', $activeSchoolYear->id)
+                    ->where('status', 'pending')->count() : 0,
+            'total_strands' => Strand::count(),
+            'total_subjects' => Subject::count(),
+            'total_sections' => Section::count()
+        ];
     }
 
     /**
-     * Create Summer semester for students with failed subjects
+     * Faculty Management Page
      */
-    public function createSummerSemester(Request $request)
-    {
-        $validated = $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after:start_date',
-            'enrollment_start' => 'nullable|date',
-            'enrollment_end' => 'nullable|date|after:enrollment_start',
-        ]);
-
-        // Weekend Validation temporarily removed for testing
-        $startDate = \Carbon\Carbon::parse($validated['start_date']);
-        $endDate = \Carbon\Carbon::parse($validated['end_date']);
-        
-        // Weekend validation commented out for testing purposes
-        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'start_date' => 'Summer start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-        // 
-        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'end_date' => 'Summer end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-
-        // Validate enrollment window (1 week minimum, 2 weeks maximum)
-        $diffDays = $startDate->diffInDays($endDate);
-
-        if ($diffDays < 7) {
-            return redirect()->back()->withErrors([
-                'end_date' => "Summer enrollment period must be at least 1 week (7 days). Current period: {$diffDays} days."
-            ]);
-        }
-
-        if ($diffDays > 14) {
-            return redirect()->back()->withErrors([
-                'end_date' => "Summer enrollment period cannot exceed 2 weeks (14 days). Current period: {$diffDays} days."
-            ]);
-        }
-
-        try {
-            // Check if summer semester already exists for this year
-            $existingSummer = SchoolYear::where('year_start', $validated['year_start'])
-                ->where('year_end', $validated['year_end'])
-                ->where('semester', 'Summer')
-                ->first();
-
-            if ($existingSummer) {
-                return redirect()->back()->withErrors(['general' => 'Summer semester already exists for this academic year.']);
-            }
-
-            // Prepare data for summer semester creation
-            $schoolYearData = [
-                'year_start' => $validated['year_start'],
-                'year_end' => $validated['year_end'],
-                'semester' => 'Summer',
-                'start_date' => $validated['start_date'],
-                'end_date' => $validated['end_date'],
-                'is_active' => false,
-                'enrollment_open' => false, // Summer enrollment is managed separately
-                'enrollment_start' => $validated['enrollment_start'] ?? $validated['start_date'],
-                'enrollment_end' => $validated['enrollment_end'] ?? $validated['end_date'],
-                'is_current_academic_year' => false, // Summer is not part of regular academic year
-                'allow_grade_progression' => false, // No grade progression in summer
-            ];
-
-            // Only include 'year' column if it exists in the database schema
-            if (Schema::hasColumn('school_years', 'year')) {
-                $schoolYearData['year'] = $validated['year_start'] . '-' . $validated['year_end'] . ' Summer';
-            }
-
-            $schoolYear = SchoolYear::create($schoolYearData);
-
-            Log::info('Summer semester created successfully', [
-                'school_year_id' => $schoolYear->id,
-                'semester' => $schoolYear->semester,
-                'year_range' => $schoolYear->year_start . '-' . $schoolYear->year_end,
-                'purpose' => 'Failed subjects remedial'
-            ]);
-
-            return redirect()->back()->with('success', 
-                "Summer semester {$validated['year_start']}-{$validated['year_end']} created successfully! " .
-                "This semester is specifically designed for students who need to retake failed subjects."
-            );
-
-        } catch (\Exception $e) {
-            Log::error('Failed to create summer semester', [
-                'error' => $e->getMessage(),
-                'year_start' => $validated['year_start'],
-                'year_end' => $validated['year_end'],
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return redirect()->back()->withErrors([
-                'error' => 'Failed to create summer semester: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    public function activateSchoolYear($id)
-    {
-        try {
-            DB::beginTransaction();
-            
-            $schoolYear = SchoolYear::findOrFail($id);
-            $previousActiveYear = SchoolYear::where('is_active', true)->first();
-
-            Log::info('Activating school year', [
-                'school_year_id' => $id,
-                'previous_active' => $previousActiveYear ? $previousActiveYear->id : 'none',
-                'new_year' => $schoolYear->year_start . '-' . $schoolYear->year_end
-            ]);
-
-            // Deactivate all other school years
-            SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
-
-            // Activate the selected school year
-            $schoolYear->update(['is_active' => true]);
-
-            // If this is a new school year activation, handle data reset and progression
-            if ($previousActiveYear && $previousActiveYear->id !== $id) {
-                try {
-                    $this->handleSchoolYearTransition($previousActiveYear, $schoolYear);
-                } catch (\Exception $transitionError) {
-                    Log::error('Error in school year transition: ' . $transitionError->getMessage(), [
-                        'trace' => $transitionError->getTraceAsString()
-                    ]);
-                    // Continue without transition - just activate the year
-                }
-            }
-
-            DB::commit();
-            
-            Log::info('School year activated successfully', ['school_year_id' => $id]);
-            
-            return redirect()->back()->with('success', 'School year activated successfully. Data has been prepared for the new academic year.');
-            
-        } catch (\Exception $e) {
-            DB::rollback();
-            Log::error('Error activating school year: ' . $e->getMessage(), [
-                'school_year_id' => $id,
-                'trace' => $e->getTraceAsString()
-            ]);
-            return redirect()->back()->withErrors(['general' => 'Failed to activate school year: ' . $e->getMessage()]);
-        }
-    }
-
-    /**
-     * Handle the transition between school years
-     */
-    private function handleSchoolYearTransition($previousYear, $newYear)
-    {
-        Log::info('Handling school year transition', [
-            'previous_year' => $previousYear->year_start . '-' . $previousYear->year_end,
-            'new_year' => $newYear->year_start . '-' . $newYear->year_end
-        ]);
-
-        // 1. Auto-create Grade 12 pending enrollments for current Grade 11 students
-        $this->createGrade12PendingEnrollments($previousYear, $newYear);
-
-        // 2. Reset class schedules (but preserve faculty accounts)
-        $this->resetClassSchedules($newYear);
-
-        // 3. Create default sections for new school year if they don't exist
-        $this->createDefaultSections($newYear);
-    }
-
-    /**
-     * Create Grade 12 pending enrollments for Grade 11 students
-     */
-    private function createGrade12PendingEnrollments($previousYear, $newYear)
-    {
-        try {
-            // Get all Grade 11 students who were enrolled in the previous year
-            $grade11Students = DB::table('enrollments')
-                ->join('student_personal_info', 'enrollments.student_id', '=', 'student_personal_info.id')
-                ->where('enrollments.school_year_id', $previousYear->id)
-                ->where('student_personal_info.grade_level', '11')
-                ->where('enrollments.status', 'enrolled')
-                ->select('student_personal_info.*', 'enrollments.assigned_section_id', 'enrollments.strand_id')
-                ->get();
-
-            Log::info('Found Grade 11 students for progression', [
-                'count' => $grade11Students->count(),
-                'previous_year_id' => $previousYear->id,
-                'new_year_id' => $newYear->id,
-                'students' => $grade11Students->pluck('id')->toArray()
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error fetching Grade 11 students: ' . $e->getMessage());
-            return; // Skip this step if it fails
-        }
-
-        $createdCount = 0;
-        $skippedCount = 0;
-        
-        foreach ($grade11Students as $student) {
-            // Check if student already has enrollment for new year
-            $existingEnrollment = DB::table('enrollments')
-                ->where('student_id', $student->id)
-                ->where('school_year_id', $newYear->id)
-                ->first();
-
-            if (!$existingEnrollment) {
-                // Create pending Grade 12 enrollment
-                DB::table('enrollments')->insert([
-                    'student_id' => $student->id,
-                    'school_year_id' => $newYear->id,
-                    'assigned_section_id' => null, // Will be assigned later
-                    'strand_id' => $student->strand_id,
-                    'status' => 'pending',
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-
-                // Update student to Grade 12
-                DB::table('student_personal_info')
-                    ->where('id', $student->id)
-                    ->update([
-                        'grade_level' => '12',
-                        'updated_at' => now()
-                    ]);
-                
-                $createdCount++;
-                
-                Log::info('Created Grade 12 pending enrollment', [
-                    'student_id' => $student->id,
-                    'user_id' => $student->user_id,
-                    'new_school_year_id' => $newYear->id,
-                    'strand_id' => $student->strand_id
-                ]);
-            } else {
-                $skippedCount++;
-                Log::info('Skipped student - already has enrollment', [
-                    'student_id' => $student->id,
-                    'existing_status' => $existingEnrollment->status
-                ]);
-            }
-        }
-
-        Log::info('Grade 12 pending enrollments summary', [
-            'total_grade11_students' => $grade11Students->count(),
-            'created_enrollments' => $createdCount,
-            'skipped_existing' => $skippedCount
-        ]);
-    }
-
-    /**
-     * Reset class schedules for new school year
-     */
-    private function resetClassSchedules($newYear)
-    {
-        try {
-            // Note: We don't delete faculty accounts, just reset their class assignments
-            // Faculty accounts (users table) remain intact
-            
-            // Clear schedules for the NEW year to ensure clean slate
-            $deletedSchedules = DB::table('class_schedules')->where('school_year_id', $newYear->id)->delete();
-            $deletedClasses = DB::table('class')->where('school_year_id', $newYear->id)->delete();
-            
-            // Also clear any orphaned schedules (without school_year_id) to prevent confusion
-            $deletedOrphans = DB::table('class_schedules')->whereNull('school_year_id')->delete();
-            $deletedOrphanClasses = DB::table('class')->whereNull('school_year_id')->delete();
-            
-            Log::info('Reset class schedules for new school year', [
-                'school_year_id' => $newYear->id,
-                'year' => $newYear->year_start . '-' . $newYear->year_end,
-                'deleted_schedules' => $deletedSchedules,
-                'deleted_classes' => $deletedClasses,
-                'deleted_orphan_schedules' => $deletedOrphans,
-                'deleted_orphan_classes' => $deletedOrphanClasses
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error resetting class schedules: ' . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    /**
-     * Create default sections for new school year
-     */
-    private function createDefaultSections($newYear)
-    {
-        $strands = Strand::all();
-        
-        foreach ($strands as $strand) {
-            // Create Grade 11 and Grade 12 sections for each strand
-            foreach ([11, 12] as $gradeLevel) {
-                $sectionName = $strand->code . '-A-G' . $gradeLevel;
-                
-                // Check if section already exists
-                $existingSection = Section::where('section_name', $sectionName)
-                    ->where('strand_id', $strand->id)
-                    ->where('grade_level', $gradeLevel)
-                    ->first();
-                
-                if (!$existingSection) {
-                    Section::create([
-                        'section_name' => $sectionName,
-                        'strand_id' => $strand->id,
-                        'grade_level' => $gradeLevel,
-                        'max_students' => 40,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]);
-                }
-            }
-        }
-        
-        Log::info('Created default sections for new school year');
-    }
-
-    /**
-     * Check and fix data integrity for school year schedules
-     */
-    public function checkScheduleIntegrity()
-    {
-        try {
-            $allSchedules = ClassSchedule::all();
-            $allSchoolYears = SchoolYear::all();
-            
-            $report = [
-                'total_schedules' => $allSchedules->count(),
-                'total_school_years' => $allSchoolYears->count(),
-                'schedules_without_year' => $allSchedules->whereNull('school_year_id')->count(),
-                'schedules_by_year' => $allSchedules->groupBy('school_year_id')->map->count()->toArray(),
-                'school_years' => $allSchoolYears->map(function($year) {
-                    return [
-                        'id' => $year->id,
-                        'year' => $year->year_start . '-' . $year->year_end,
-                        'is_active' => $year->is_active,
-                        'schedule_count' => ClassSchedule::where('school_year_id', $year->id)->count()
-                    ];
-                })->toArray()
-            ];
-            
-            Log::info('Schedule integrity report', $report);
-            
-            return response()->json([
-                'success' => true,
-                'report' => $report
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Error checking schedule integrity: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Manually clear schedules for active school year
-     */
-    public function clearActiveYearSchedules()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            if (!$activeSchoolYear) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No active school year found'
-                ], 404);
-            }
-
-            // Clear schedules for active year
-            $deletedSchedules = DB::table('class_schedules')->where('school_year_id', $activeSchoolYear->id)->delete();
-            $deletedClasses = DB::table('class')->where('school_year_id', $activeSchoolYear->id)->delete();
-            
-            // Also clear orphaned schedules
-            $deletedOrphans = DB::table('class_schedules')->whereNull('school_year_id')->delete();
-            $deletedOrphanClasses = DB::table('class')->whereNull('school_year_id')->delete();
-            
-            Log::info('Manually cleared schedules for active school year', [
-                'school_year_id' => $activeSchoolYear->id,
-                'year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
-                'deleted_schedules' => $deletedSchedules,
-                'deleted_classes' => $deletedClasses,
-                'deleted_orphan_schedules' => $deletedOrphans,
-                'deleted_orphan_classes' => $deletedOrphanClasses
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Successfully cleared schedules for active school year',
-                'deleted' => [
-                    'schedules' => $deletedSchedules,
-                    'classes' => $deletedClasses,
-                    'orphan_schedules' => $deletedOrphans,
-                    'orphan_classes' => $deletedOrphanClasses
-                ]
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Error clearing active year schedules: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to clear schedules: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Manually trigger Grade 12 progression for all eligible Grade 11 students
-     */
-    public function triggerGrade12Progression()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            $previousSchoolYear = SchoolYear::where('is_active', false)
-                ->orderBy('year_start', 'desc')
-                ->first();
-            
-            if (!$activeSchoolYear || !$previousSchoolYear) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Could not find active and previous school years'
-                ], 404);
-            }
-
-            // Trigger the Grade 12 progression
-            $this->createGrade12PendingEnrollments($previousSchoolYear, $activeSchoolYear);
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Grade 12 progression triggered successfully',
-                'active_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
-                'previous_year' => $previousSchoolYear->year_start . '-' . $previousSchoolYear->year_end
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Error triggering Grade 12 progression: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to trigger Grade 12 progression: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    public function switchSemester(Request $request)
-    {
-        $validated = $request->validate([
-            'semester' => 'required|integer|in:1,2'
-        ]);
-
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        if (!$activeSchoolYear) {
-            return redirect()->back()->withErrors(['general' => 'No active school year found']);
-        }
-
-        $activeSchoolYear->update([
-            'current_semester' => $validated['semester'],
-            'semester' => $validated['semester'] === 1 ? '1st Semester' : '2nd Semester'
-        ]);
-
-        return redirect()->back()->with('success', 'Semester switched successfully');
-    }
-
-    public function getSections()
-    {
-        $sections = Section::with(['strand', 'adviser'])
-            ->orderBy('section_name')
-            ->get()
-            ->map(function ($section) {
-                return [
-                    'id' => $section->id,
-                    'section_name' => $section->section_name,
-                    'year_level' => $section->year_level,
-                    'strand_id' => $section->strand_id,
-                    'strand_name' => $section->strand ? $section->strand->name : 'No Strand',
-                    'strand_code' => $section->strand ? $section->strand->code : 'N/A',
-                    'adviser_id' => $section->adviser_id,
-                    'adviser_name' => $section->adviser ? $section->adviser->firstname . ' ' . $section->adviser->lastname : 'No Adviser Assigned',
-                ];
-            });
-
-        return response()->json($sections);
-    }
-
-    // Class Management Method
-    public function classPage()
-    {
-        // Get active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        // Get all strands for class assignment
-        $strands = Strand::with(['subjects' => function ($query) use ($activeSchoolYear) {
-            if ($activeSchoolYear) {
-                $query->where('school_year_id', $activeSchoolYear->id);
-            }
-        }])->orderBy('name')->get();
-
-        // Get all sections for class assignment
-        $sections = Section::with(['strand', 'adviser'])->orderBy('section_name')->get();
-
-        // Get all faculties for teacher assignment
-        $faculties = User::whereIn('role', ['faculty', 'coordinator'])->get();
-
-        // Get class schedules with relationships
-        $classSchedules = ClassSchedule::with(['subject.strand', 'faculty', 'section'])
-            ->when($activeSchoolYear, function ($query) use ($activeSchoolYear) {
-                $query->where('school_year_id', $activeSchoolYear->id);
-            })
-            ->orderBy('day_of_week')
-            ->orderBy('start_time')
-            ->get()
-            ->map(function ($schedule) {
-                return [
-                    'id' => $schedule->id,
-                    'subject_id' => $schedule->subject_id,
-                    'subject_name' => $schedule->subject ? $schedule->subject->name : 'No Subject',
-                    'subject_code' => $schedule->subject ? $schedule->subject->code : 'N/A',
-                    'strand_name' => $schedule->subject && $schedule->subject->strand ? $schedule->subject->strand->name : 'No Strand',
-                    'faculty_id' => $schedule->faculty_id,
-                    'faculty_name' => $schedule->faculty ? $schedule->faculty->firstname . ' ' . $schedule->faculty->lastname : 'No Teacher',
-                    'section_id' => $schedule->section_id,
-                    'section_name' => $schedule->section ? $schedule->section->name : 'No Section',
-                    'day_of_week' => $schedule->day_of_week,
-                    'start_time' => $schedule->start_time,
-                    'end_time' => $schedule->end_time,
-                    'room' => 'TBA',
-                    'semester' => $schedule->semester,
-                    'is_active' => $schedule->is_active ?? true,
-                ];
-            });
-
-        return Inertia::render('Registrar/RegistrarClass', [
-            'strands' => $strands,
-            'sections' => $sections,
-            'faculties' => $faculties,
-            'classSchedules' => $classSchedules,
-            'activeSchoolYear' => $activeSchoolYear
-        ]);
-    }
-
-
-    // Sections Management Method
-    public function sectionsPage()
-    {
-        // Get active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        // Get all strands for section assignment
-        $strands = Strand::orderBy('name')->get();
-
-        // Get all faculties for teacher assignment
-        $faculties = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'assigned_strand_id')
-            ->get();
-
-        // Get faculties grouped by strand for filtering
-        $facultiesByStrand = User::whereIn('role', ['faculty', 'coordinator'])
-            ->whereNotNull('assigned_strand_id')
-            ->with('assignedStrand')
-            ->get()
-            ->groupBy('assigned_strand_id')
-            ->map(function ($strandFaculties) {
-                return $strandFaculties->map(function ($faculty) {
-                    return [
-                        'id' => $faculty->id,
-                        'name' => $faculty->firstname . ' ' . $faculty->lastname,
-                        'firstname' => $faculty->firstname,
-                        'lastname' => $faculty->lastname,
-                        'email' => $faculty->email,
-                        'role' => $faculty->role,
-                        'assigned_strand_id' => $faculty->assigned_strand_id
-                    ];
-                });
-            });
-
-        // Debug: Log the faculty data to see what's happening
-        Log::info('Faculties data:', [
-            'total_faculties' => $faculties->count(),
-            'faculties_with_strand' => $faculties->whereNotNull('assigned_strand_id')->count(),
-            'facultiesByStrand_keys' => array_keys($facultiesByStrand->toArray()),
-            'sample_faculty' => $faculties->first() ? $faculties->first()->toArray() : null
-        ]);
-
-        // Get sections filtered by active school year (with historical support)
-        $sectionsQuery = Section::with(['strand', 'adviser', 'schoolYear']);
-
-        if ($activeSchoolYear) {
-            // Show sections for active school year AND legacy sections (NULL school_year_id)
-            $sectionsQuery->where(function ($query) use ($activeSchoolYear) {
-                $query->where('school_year_id', $activeSchoolYear->id)
-                    ->orWhereNull('school_year_id');
-            });
-        } else {
-            // If no active school year, show sections without school year assignment (legacy data)
-            $sectionsQuery->whereNull('school_year_id');
-        }
-
-        $sections = $sectionsQuery->orderBy('section_name')
-            ->get()
-            ->map(function ($section) {
-                return [
-                    'id' => $section->id,
-                    'section_name' => $section->section_name,
-                    'year_level' => $section->year_level,
-                    'strand' => $section->strand ? $section->strand->name : 'No Strand',
-                    'strand_id' => $section->strand_id,
-                    'adviser_name' => $section->adviser ? $section->adviser->firstname . ' ' . $section->adviser->lastname : 'No Adviser',
-                    'adviser_id' => $section->adviser_id,
-                    'school_year_id' => $section->school_year_id,
-                    'school_year' => $section->schoolYear ? $section->schoolYear->year_start . '-' . $section->schoolYear->year_end : 'Legacy',
-                ];
-            });
-
-        return Inertia::render('Registrar/RegistrarSections', [
-            'sections' => $sections,
-            'strands' => $strands,
-            'faculties' => $faculties,
-            'facultiesByStrand' => $facultiesByStrand,
-            'activeSchoolYear' => $activeSchoolYear,
-            'hasActiveSchoolYear' => $activeSchoolYear !== null
-        ]);
-    }
-
-    // Subjects Management Method
-    public function subjectsPage()
-    {
-        // Get active school year
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        // Get all strands with their subjects (don't filter by school year for now since subjects are seeded without school_year_id)
-        $strands = Strand::with(['subjects'])->get();
-
-        // Get all faculties for teacher assignment
-        $faculties = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'assigned_strand_id')
-            ->get();
-
-        // Get faculties grouped by strand for filtering
-        $facultiesByStrand = User::whereIn('role', ['faculty', 'coordinator'])
-            ->whereNotNull('assigned_strand_id')
-            ->with('assignedStrand')
-            ->get()
-            ->groupBy('assigned_strand_id')
-            ->map(function ($strandFaculties) {
-                return $strandFaculties->map(function ($faculty) {
-                    return [
-                        'id' => $faculty->id,
-                        'name' => $faculty->firstname . ' ' . $faculty->lastname,
-                        'firstname' => $faculty->firstname,
-                        'lastname' => $faculty->lastname,
-                        'email' => $faculty->email,
-                        'role' => $faculty->role,
-                        'assigned_strand_id' => $faculty->assigned_strand_id
-                    ];
-                });
-            });
-
-        // Debug: Log the faculty data to see what's happening
-        Log::info('Faculties data:', [
-            'total_faculties' => $faculties->count(),
-            'faculties_with_strand' => $faculties->whereNotNull('assigned_strand_id')->count(),
-            'facultiesByStrand_keys' => array_keys($facultiesByStrand->toArray()),
-            'sample_faculty' => $faculties->first() ? $faculties->first()->toArray() : null
-        ]);
-
-        // Get all subjects with their strand and faculty information, grouped by semester
-        $subjects = Subject::with(['strand', 'faculty'])
-            ->orderBy('semester')
-            ->orderBy('year_level')
-            ->orderBy('name')
-            ->get()
-            ->map(function ($subject) use ($activeSchoolYear) {
-                return [
-                    'id' => $subject->id,
-                    'name' => $subject->name,
-                    'code' => $subject->code,
-                    'semester' => $subject->semester,
-                    'semester_display' => $subject->semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)',
-                    'year_level' => $subject->year_level,
-                    'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
-                    'strand_id' => $subject->strand_id,
-                    'faculty_name' => $subject->faculty ? $subject->faculty->firstname . ' ' . $subject->faculty->lastname : 'No Faculty',
-                    'faculty_id' => $subject->faculty_id,
-                    'school_year_id' => $subject->school_year_id,
-                    'school_year' => $activeSchoolYear ? $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end : 'Not Assigned',
-                    'current_semester' => $activeSchoolYear ? $activeSchoolYear->current_semester ?? 1 : 1,
-                    'full_display' => "[" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . "] " . $subject->code . " - " . $subject->name
-                ];
-            });
-
-        return Inertia::render('Registrar/RegistrarSubjects', [
-            'subjects' => $subjects,
-            'strands' => $strands,
-            'faculties' => $faculties,
-            'facultiesByStrand' => $facultiesByStrand,
-            'activeSchoolYear' => $activeSchoolYear,
-            'hasActiveSchoolYear' => $activeSchoolYear !== null,
-            'firstSemesterSubjects' => $subjects->where('semester', 1)->values(),
-            'secondSemesterSubjects' => $subjects->where('semester', 2)->values()
-        ]);
-    }
-
-    // Strands Management Page
-    public function strandsPage()
-    {
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-        $strands = Strand::orderBy('code')->get();
-
-        return Inertia::render('Registrar/RegistrarClass', [
-            'strands' => $strands,
-            'activeSchoolYear' => $activeSchoolYear
-        ]);
-    }
-
-    // School Years Management Page
-    public function schoolYearsPage()
-    {
-        $schoolYears = SchoolYear::orderBy('year_start', 'desc')->get();
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        return Inertia::render('Registrar/RegistrarSemester', [
-            'schoolYears' => $schoolYears,
-            'activeSchoolYear' => $activeSchoolYear
-        ]);
-    }
-
-    // Semester Management Page
-    public function semestersPage()
-    {
-        try {
-            // Get all school years/semesters ordered by year and semester
-            $schoolYears = SchoolYear::orderBy('year_start', 'desc')
-                ->orderBy('year_end', 'desc')
-                ->orderBy('semester')
-                ->get();
-
-            // Get active school year
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-            // Prepare semester data for display
-            $semesters = $schoolYears->map(function ($schoolYear) {
-                return [
-                    'id' => $schoolYear->id,
-                    'year_start' => $schoolYear->year_start,
-                    'year_end' => $schoolYear->year_end,
-                    'semester' => $schoolYear->semester,
-                    'start_date' => $schoolYear->start_date,
-                    'end_date' => $schoolYear->end_date,
-                    'is_active' => $schoolYear->is_active,
-                    'display_name' => $schoolYear->year_start . '-' . $schoolYear->year_end . ' ' . $schoolYear->semester
-                ];
-            });
-
-            $activeSemester = $semesters->where('is_active', true)->first();
-            $inactiveSemesters = $semesters->where('is_active', false);
-            $totalSemesters = $semesters->count();
-
-            return Inertia::render('Registrar/RegistrarSemester', [
-                'schoolYears' => $schoolYears,
-                'semesters' => $semesters,
-                'activeSemester' => $activeSemester,
-                'inactiveSemesters' => $inactiveSemesters,
-                'totalSemesters' => $totalSemesters,
-                'activeSchoolYear' => $activeSchoolYear,
-                'allSchoolYears' => $schoolYears // For dropdown
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Error loading semesters page: ' . $e->getMessage());
-            
-            return Inertia::render('Registrar/RegistrarSemester', [
-                'schoolYears' => [],
-                'semesters' => [],
-                'activeSemester' => null,
-                'inactiveSemesters' => collect([]),
-                'totalSemesters' => 0,
-                'activeSchoolYear' => null,
-                'allSchoolYears' => [],
-                'error' => 'Failed to load semesters. Please try again.'
-            ]);
-        }
-    }
-
-    public function toggleSchoolYear($id)
-    {
-        try {
-            $schoolYear = SchoolYear::findOrFail($id);
-
-            if ($schoolYear->is_active) {
-                // Deactivate the school year
-                $schoolYear->update(['is_active' => false]);
-                $message = 'School year deactivated successfully';
-            } else {
-                // Deactivate all other school years first
-                SchoolYear::where('id', '!=', $id)->update(['is_active' => false]);
-
-                // Activate this school year
-                $schoolYear->update(['is_active' => true]);
-                $message = 'School year activated successfully';
-            }
-
-            return redirect()->back()->with('success', $message);
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to toggle school year status']);
-        }
-    }
-
-    // School Year Creation Method
-    public function storeSchoolYear(Request $request)
-    {
-        try {
-            // Log the incoming request data for debugging
-            Log::info('School year creation attempt', [
-                'request_data' => $request->all()
-            ]);
-
-            $validatedData = $request->validate([
-                'year_start' => 'required|integer|min:2020|max:2050',
-                'year_end' => 'required|integer|min:2020|max:2050',
-                'semester' => 'required|string|in:1st Semester,2nd Semester,Summer',
-                'start_date' => 'required|date',
-                'end_date' => 'required|date|after:start_date',
-            ]);
-
-            Log::info('Validation passed', [
-                'validated_data' => $validatedData
-            ]);
-
-            // Check for duplicate semester
-            $existingSemester = SchoolYear::where('year_start', $validatedData['year_start'])
-                ->where('year_end', $validatedData['year_end'])
-                ->where('semester', $validatedData['semester'])
-                ->first();
-
-            if ($existingSemester) {
-                Log::warning('Duplicate semester attempt', [
-                    'existing_semester_id' => $existingSemester->id,
-                    'attempted_data' => $validatedData
-                ]);
-                return redirect()->back()->with('error', 'A semester with this name and year already exists.');
-            }
-
-            // Prepare data for school year creation
-            $schoolYearData = [
-                'year_start' => $validatedData['year_start'],
-                'year_end' => $validatedData['year_end'],
-                'semester' => $validatedData['semester'],
-                'start_date' => $validatedData['start_date'],
-                'end_date' => $validatedData['end_date'],
-                'is_active' => false,
-            ];
-
-            // Only include 'year' column if it exists in the database schema
-            if (Schema::hasColumn('school_years', 'year')) {
-                $schoolYearData['year'] = $validatedData['year_start'] . '-' . $validatedData['year_end'];
-            }
-
-            $schoolYear = SchoolYear::create($schoolYearData);
-
-            Log::info('School year created successfully', [
-                'school_year_id' => $schoolYear->id,
-                'semester' => $schoolYear->semester,
-                'year_range' => $schoolYear->year_start . '-' . $schoolYear->year_end
-            ]);
-
-            return redirect()->back()->with('success', 'Semester created successfully!');
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            Log::error('Validation failed for school year creation', [
-                'errors' => $e->errors(),
-                'request_data' => $request->all()
-            ]);
-            return redirect()->back()->withErrors($e->errors())->withInput();
-
-        } catch (\Exception $e) {
-            Log::error('Error creating school year', [
-                'error_message' => $e->getMessage(),
-                'error_line' => $e->getLine(),
-                'error_file' => $e->getFile(),
-                'request_data' => $request->all(),
-                'stack_trace' => $e->getTraceAsString()
-            ]);
-            return redirect()->back()->with('error', 'Failed to create semester: ' . $e->getMessage());
-        }
-    }
-
-    public function updateSchoolYear(Request $request, $id)
-    {
-        try {
-            $validated = $request->validate([
-                'year_start' => 'required|integer|min:2020|max:2050',
-                'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
-                'semester' => 'required|string|max:255',
-                'start_date' => 'nullable|date',
-                'end_date' => 'nullable|date|after:start_date',
-            ]);
-
-            $schoolYear = SchoolYear::findOrFail($id);
-
-            // Update the school year with validated data
-            $schoolYear->update([
-                'year_start' => $validated['year_start'],
-                'year_end' => $validated['year_end'],
-                'semester' => $validated['semester'],
-                'start_date' => $validated['start_date'],
-                'end_date' => $validated['end_date'],
-            ]);
-
-            return redirect()->back()->with('success', 'School year updated successfully');
-        } catch (\Exception $e) {
-            Log::error('Error updating school year: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to update school year: ' . $e->getMessage());
-        }
-    }
-
-    public function deleteSchoolYear($id)
-    {
-        try {
-            $schoolYear = SchoolYear::findOrFail($id);
-
-            // Check if this school year has any associated data that would prevent deletion
-            $hasEnrollments = $schoolYear->enrollments()->count() > 0;
-            $hasSubjects = $schoolYear->subjects()->count() > 0;
-
-            if ($hasEnrollments || $hasSubjects) {
-                return redirect()->back()->with('error', 
-                    'Cannot delete this semester. It has associated enrollments or subjects. Please remove them first.');
-            }
-
-            // Prevent deletion of active school year
-            if ($schoolYear->is_active) {
-                return redirect()->back()->with('error', 
-                    'Cannot delete an active semester. Please deactivate it first.');
-            }
-
-            $semesterName = $schoolYear->semester;
-            $yearRange = $schoolYear->year_start . '-' . $schoolYear->year_end;
-            
-            $schoolYear->delete();
-
-            Log::info('School year deleted successfully', [
-                'school_year_id' => $id,
-                'semester' => $semesterName,
-                'year_range' => $yearRange
-            ]);
-
-            return redirect()->back()->with('success', 
-                "Semester '{$semesterName} ({$yearRange})' deleted successfully!");
-
-        } catch (\Exception $e) {
-            Log::error('Error deleting school year: ' . $e->getMessage(), [
-                'school_year_id' => $id,
-                'error' => $e->getMessage()
-            ]);
-
-            return redirect()->back()->with('error', 'Failed to delete semester. Please try again.');
-        }
-    }
-
-    // Strand Management Methods
-    public function createStrand(Request $request)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:10',
-        ]);
-
-        // Check if strand with this code already exists
-        $existingStrand = Strand::where('code', strtoupper($request->code))->first();
-        if ($existingStrand) {
-            return redirect()->back()->withErrors(['general' => 'A strand with this code already exists. Please choose a different code.']);
-        }
-
-        // Check if strand with this name already exists
-        $existingName = Strand::where('name', $request->name)->first();
-        if ($existingName) {
-            return redirect()->back()->withErrors(['general' => 'A strand with this name already exists. Please choose a different name.']);
-        }
-
-        try {
-            $strand = Strand::create([
-                'name' => $request->name,
-                'code' => strtoupper($request->code),
-                'description' => $request->description ?? null,
-            ]);
-
-            return redirect()->back()->with('success', 'Strand created successfully!');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create strand: ' . $e->getMessage()]);
-        }
-    }
-
-    public function updateStrand(Request $request, $id)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:10|unique:strands,code,' . $id,
-        ]);
-
-        try {
-            $strand = Strand::findOrFail($id);
-            $strand->update([
-                'name' => $request->name,
-                'code' => strtoupper($request->code),
-                'description' => $request->description ?? null,
-            ]);
-
-            return redirect()->back()->with('success', 'Strand updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update strand: ' . $e->getMessage()]);
-        }
-    }
-
-    public function deleteStrand($id)
-    {
-        try {
-            $strand = Strand::findOrFail($id);
-
-            // Check if strand has associated sections or subjects
-            if ($strand->sections()->count() > 0 || $strand->subjects()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete strand. It has associated sections or subjects.']);
-            }
-
-            $strand->delete();
-
-            return redirect()->back()->with('success', 'Strand deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete strand: ' . $e->getMessage()]);
-        }
-    }
-
-    // Section Management Methods
-    public function createSection(Request $request)
-    {
-        $request->validate([
-            'section_name' => [
-                'required',
-                'string',
-                'max:20',
-                Rule::unique('sections')->where(function ($query) use ($request) {
-                    return $query->where('strand_id', $request->strand_id)
-                        ->where('year_level', $request->year_level);
-                })
-            ],
-            'year_level' => 'required|integer|in:11,12',
-            'strand_id' => 'required|exists:strands,id',
-            'adviser_id' => [
-                'nullable',
-                'exists:users,id',
-                Rule::unique('sections')->where(function ($query) use ($request) {
-                    return $query->whereNotNull('adviser_id');
-                })->ignore($request->id ?? null)
-            ],
-        ], [
-            'section_name.unique' => 'A section with this name already exists for the selected strand and year level.',
-            'adviser_id.unique' => 'This teacher is already assigned to another section.',
-        ]);
-
-        try {
-            // Get active school year
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-            // Check if teacher is already assigned within the same school year
-            if ($request->adviser_id) {
-                $existingAssignment = Section::where('adviser_id', $request->adviser_id)
-                    ->when($activeSchoolYear, function ($query) use ($activeSchoolYear) {
-                        $query->where(function ($subQuery) use ($activeSchoolYear) {
-                            $subQuery->where('school_year_id', $activeSchoolYear->id)
-                                ->orWhereNull('school_year_id');
-                        });
-                    })
-                    ->first();
-
-                if ($existingAssignment) {
-                    $teacher = User::find($request->adviser_id);
-                    return redirect()->back()->withErrors([
-                        'adviser_id' => "Teacher {$teacher->firstname} {$teacher->lastname} is already assigned to section {$existingAssignment->section_name}"
-                    ]);
-                }
-            }
-
-            $section = Section::create([
-                'section_name' => $request->section_name,
-                'year_level' => $request->year_level,
-                'strand_id' => $request->strand_id,
-                'adviser_id' => $request->adviser_id,
-                'school_year_id' => $activeSchoolYear ? $activeSchoolYear->id : null,
-            ]);
-
-            return redirect()->back()->with('success', 'Section created successfully!');
-        } catch (\Exception $e) {
-            Log::error('Section creation failed: ' . $e->getMessage());
-
-            return redirect()->back()->withErrors([
-                'general' => 'Failed to create section: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    public function updateSection(Request $request, $id)
-    {
-        $request->validate([
-            'section_name' => 'required|string|max:20|unique:sections,section_name,' . $id,
-            'year_level' => 'required|integer|in:11,12',
-            'strand_id' => 'required|exists:strands,id',
-            'adviser_id' => 'nullable|exists:users,id',
-        ]);
-
-        try {
-            $section = Section::findOrFail($id);
-            $section->update([
-                'section_name' => $request->section_name,
-                'year_level' => $request->year_level,
-                'strand_id' => $request->strand_id,
-                'adviser_id' => $request->adviser_id,
-            ]);
-
-            return redirect()->back()->with('success', 'Section updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update section: ' . $e->getMessage()]);
-        }
-    }
-
-    public function deleteSection($id)
-    {
-        try {
-            $section = Section::findOrFail($id);
-
-            // Check if section has enrolled students
-            if ($section->enrollments()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete section. It has enrolled students.']);
-            }
-
-            $section->delete();
-
-            return redirect()->back()->with('success', 'Section deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete section: ' . $e->getMessage()]);
-        }
-    }
-
-    /**
-     * Philippine SHS System: Get progression status
-     */
-    public function getProgressionStatus()
-    {
-        try {
-            $progressionSchoolYear = SchoolYear::getProgressionAllowed();
-            
-            return response()->json([
-                'progression_enabled' => $progressionSchoolYear ? true : false,
-                'school_year' => $progressionSchoolYear ? [
-                    'id' => $progressionSchoolYear->id,
-                    'year' => $progressionSchoolYear->year,
-                    'semester' => $progressionSchoolYear->semester
-                ] : null,
-                'success' => true
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'progression_enabled' => false,
-                'error' => $e->getMessage(),
-                'success' => false
-            ], 500);
-        }
-    }
-
-
-    // Semester Management Methods
-    public function createSemester(Request $request)
-    {
-        $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
-            'semester' => 'required|integer|in:1,2',
-        ]);
-
-        try {
-            // Check if semester already exists for this year
-            $existingSemester = SchoolYear::where('year_start', $request->year_start)
-                ->where('year_end', $request->year_end)
-                ->where('semester', $request->semester)
-                ->first();
-
-            if ($existingSemester) {
-                return redirect()->back()->withErrors(['general' => 'This semester already exists for the specified academic year.']);
-            }
-
-            $semester = SchoolYear::create([
-                'year_start' => $request->year_start,
-                'year_end' => $request->year_end,
-                'semester' => $request->semester,
-                'is_active' => false, // New semesters are inactive by default
-            ]);
-
-            return redirect()->back()->with('success', 'Semester created successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create semester: ' . $e->getMessage()]);
-        }
-    }
-
-    public function updateSemester(Request $request, $id)
-    {
-        $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
-            'semester' => 'required|integer|in:1,2',
-        ]);
-
-        try {
-            $semester = SchoolYear::findOrFail($id);
-
-            // Check if updated semester already exists (excluding current record)
-            $existingSemester = SchoolYear::where('year_start', $request->year_start)
-                ->where('year_end', $request->year_end)
-                ->where('semester', $request->semester)
-                ->where('id', '!=', $id)
-                ->first();
-
-            if ($existingSemester) {
-                return redirect()->back()->withErrors(['general' => 'This semester already exists for the specified academic year.']);
-            }
-
-            $semester->update([
-                'year_start' => $request->year_start,
-                'year_end' => $request->year_end,
-                'semester' => $request->semester,
-            ]);
-
-            return redirect()->back()->with('success', 'Semester updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update semester: ' . $e->getMessage()]);
-        }
-    }
-
-    public function deleteSemester($id)
-    {
-        try {
-            $semester = SchoolYear::findOrFail($id);
-
-            // Check if semester is active
-            if ($semester->is_active) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete active semester. Please activate another semester first.']);
-            }
-
-            // Check if semester has subjects or enrollments
-            if ($semester->subjects()->count() > 0 || $semester->enrollments()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete semester. It has associated subjects or enrollments.']);
-            }
-
-            $semester->delete();
-
-            return redirect()->back()->with('success', 'Semester deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete semester: ' . $e->getMessage()]);
-        }
-    }
-
-    // Dashboard Statistics Methods
-    public function getDashboardStats()
-    {
-        try {
-            $stats = [
-                'students_count' => User::where('role', 'student')->count(),
-                'faculty_count' => User::whereIn('role', ['faculty', 'coordinator'])->count(),
-                'sections_count' => Section::count(),
-                'classes_count' => ClassSchedule::count(),
-                'coordinators_count' => User::where('role', 'coordinator')->count(),
-                'strands_count' => Strand::count(),
-                'subjects_count' => Subject::count(),
-                'active_school_year' => SchoolYear::where('is_active', true)->first()
-            ];
-
-            return redirect()->back()->with('dashboard_stats', $stats);
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to get dashboard stats: ' . $e->getMessage()]);
-        }
-    }
-
-    /**
-     * API endpoint for dashboard statistics
-     */
-    public function getDashboardStatsApi()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            // Get enrolled students count (those with approved enrollment status)
-            $enrolledStudentsCount = Enrollment::where('status', 'approved')
-                ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
-                    return $query->where('school_year_id', $activeSchoolYear->id);
-                })
-                ->count();
-
-            // Get pending enrollments count
-            $pendingEnrollmentsCount = Enrollment::where('status', 'pending')
-                ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
-                    return $query->where('school_year_id', $activeSchoolYear->id);
-                })
-                ->count();
-
-            $stats = [
-                'totalStudents' => $enrolledStudentsCount,
-                'pendingEnrollments' => $pendingEnrollmentsCount,
-                'activeClasses' => ClassSchedule::where('is_active', true)
-                    ->when($activeSchoolYear, function($query) use ($activeSchoolYear) {
-                        return $query->where('school_year_id', $activeSchoolYear->id);
-                    })
-                    ->count(),
-                'facultyMembers' => User::whereIn('role', ['faculty', 'coordinator'])
-                    ->where('is_disabled', false)
-                    ->count(),
-                'activeSections' => Section::count(),
-                'totalStrands' => Strand::count(),
-                'activeSchoolYear' => $activeSchoolYear
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $stats
-            ]);
-        } catch (\Exception $e) {
-            Log::error('getDashboardStatsApi error: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to get dashboard stats'
-            ], 500);
-        }
-    }
-
-    /**
-     * API endpoint for enrolled students per strand data for charts
-     */
-    public function getEnrolledStudentsPerStrand()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            if (!$activeSchoolYear) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No active school year found'
-                ], 404);
-            }
-
-            // Get enrolled students grouped by strand
-            $strandData = DB::table('enrollments')
-                ->join('strands', 'enrollments.strand_id', '=', 'strands.id')
-                ->where('enrollments.status', 'approved')
-                ->where('enrollments.school_year_id', $activeSchoolYear->id)
-                ->select(
-                    'strands.code',
-                    'strands.name',
-                    DB::raw('COUNT(enrollments.id) as student_count')
-                )
-                ->groupBy('strands.id', 'strands.code', 'strands.name')
-                ->orderBy('strands.code')
-                ->get();
-
-            // Also get all strands to show 0 counts for strands with no enrollments
-            $allStrands = Strand::orderBy('code')->get();
-            
-            $chartData = [];
-            foreach ($allStrands as $strand) {
-                $enrollmentData = $strandData->firstWhere('code', $strand->code);
-                $chartData[] = [
-                    'strand' => $strand->code,
-                    'name' => $strand->name,
-                    'students' => $enrollmentData ? (int)$enrollmentData->student_count : 0
-                ];
-            }
-
-            return response()->json([
-                'success' => true,
-                'data' => $chartData,
-                'total_enrolled' => $strandData->sum('student_count')
-            ]);
-        } catch (\Exception $e) {
-            Log::error('getEnrolledStudentsPerStrand error: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to get strand enrollment data'
-            ], 500);
-        }
-    }
-
-    // Faculty Management Method
     public function facultyPage()
     {
-        // Get all faculty and coordinators with session information
-        $teachers = User::whereIn('role', ['faculty', 'coordinator'])
-            ->select('id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id', 'is_disabled', 'updated_at', 'last_login_at')
-            ->with('assignedStrand:id,name,code')
-            ->orderBy('lastname')
-            ->get()
-            ->map(function ($user) {
-                // Check if user has active session by looking at sessions table
-                $isOnline = false;
-                $lastLoginAt = null;
-                
-                // Use last_login_at as primary source for last activity
-                $lastLoginAt = $user->last_login_at;
-                
-                try {
-                    // Check for active sessions in the last 15 minutes
-                    $activeSessionsCount = DB::table('sessions')
-                        ->where('user_id', $user->id)
-                        ->where('last_activity', '>', now()->subMinutes(15)->timestamp)
-                        ->count();
-                    
-                    // Get the most recent session activity
-                    $lastSession = DB::table('sessions')
-                        ->where('user_id', $user->id)
-                        ->orderBy('last_activity', 'desc')
-                        ->first();
-                    
-                    // Determine online status based on active sessions OR recent login
-                    $sessionBasedOnline = $activeSessionsCount > 0;
-                    $recentLogin = false;
-                    
-                    if ($user->last_login_at) {
-                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
-                        $recentLogin = $loginTime->diffInMinutes(now()) <= 15;
-                    }
-                    
-                    $isOnline = $sessionBasedOnline || $recentLogin;
-                    
-                    // Use session activity if more recent than last_login_at
-                    if ($lastSession && $user->last_login_at) {
-                        $sessionTime = \Carbon\Carbon::createFromTimestamp($lastSession->last_activity);
-                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
-                        
-                        if ($sessionTime->gt($loginTime)) {
-                            $lastLoginAt = $sessionTime;
-                        }
-                    } elseif ($lastSession && !$user->last_login_at) {
-                        $lastLoginAt = \Carbon\Carbon::createFromTimestamp($lastSession->last_activity);
-                    }
-                    
-                } catch (\Exception $e) {
-                    // Fallback to last_login_at only
-                    Log::warning('Sessions table not accessible, using last_login_at for user ' . $user->id . ': ' . $e->getMessage());
-                    
-                    if ($user->last_login_at) {
-                        $loginTime = \Carbon\Carbon::parse($user->last_login_at);
-                        $isOnline = $loginTime->diffInMinutes(now()) <= 15;
-                        $lastLoginAt = $user->last_login_at;
-                    } else {
-                        // Final fallback to updated_at
-                        $lastLoginAt = $user->updated_at;
-                        if ($user->updated_at) {
-                            $lastActivity = \Carbon\Carbon::parse($user->updated_at);
-                            $isOnline = $lastActivity->diffInMinutes(now()) <= 15;
-                        }
-                    }
-                }
-                
-                return [
-                    'id' => $user->id,
-                    'name' => trim($user->firstname . ' ' . $user->lastname),
-                    'firstname' => $user->firstname,
-                    'lastname' => $user->lastname,
-                    'email' => $user->email,
-                    'role' => $user->role,
-                    'status' => $user->is_coordinator ? 'coordinator' : 'faculty',
-                    'is_coordinator' => $user->is_coordinator,
-                    'is_disabled' => $user->is_disabled,
-                    'assigned_strand_id' => $user->assigned_strand_id,
-                    'assigned_strand' => $user->assignedStrand ? [
-                        'id' => $user->assignedStrand->id,
-                        'name' => $user->assignedStrand->name,
-                        'code' => $user->assignedStrand->code
-                    ] : null,
-                    'last_login_at' => $lastLoginAt,
-                    'is_online' => $isOnline && !$user->is_disabled
-                ];
-            });
+        $faculty = User::where('role', 'faculty')
+            ->orWhere('role', 'coordinator')
+            ->with('assignedStrand')
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-        // Get all strands for assignment
-        $strands = Strand::select('id', 'name', 'code')->orderBy('name')->get();
+        $strands = Strand::orderBy('name')->get();
 
-        // Get active school year status
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-        return Inertia::render('Registrar/RegistrarFaculty', [
-            'initialTeachers' => $teachers,
-            'strands' => $strands,
-            'hasActiveSchoolYear' => $activeSchoolYear !== null
+        return Inertia::render('Registrar/Faculty', [
+            'faculty' => $faculty,
+            'strands' => $strands
         ]);
     }
 
-    // Faculty Creation Method
+    /**
+     * Create new faculty account
+     */
     public function createFaculty(Request $request)
     {
         $request->validate([
             'firstname' => 'required|string|max:255',
             'lastname' => 'required|string|max:255',
-            'middlename' => 'nullable|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'assigned_strand_id' => 'nullable|exists:strands,id',
-            'send_email' => 'boolean'
+            'assigned_strand_id' => 'nullable|exists:strands,id'
         ]);
 
         try {
-            // Generate a random password
-            $password = Str::random(12);
-
-            // Create the faculty user
+            // Generate secure password
+            $password = $this->generateSecurePassword();
+            
+            // Create faculty user (always create as faculty, can be promoted to coordinator later)
             $faculty = User::create([
                 'firstname' => $request->firstname,
                 'lastname' => $request->lastname,
-                'middlename' => $request->middlename,
                 'email' => $request->email,
                 'password' => Hash::make($password),
                 'role' => 'faculty',
                 'is_coordinator' => false,
-                'assigned_strand_id' => $request->assigned_strand_id,
-                'email_verified_at' => now(),
+                'assigned_strand_id' => $request->assigned_strand_id ?: null,
+                'password_change_required' => true,
+                'generated_password' => $password,
+                'password_changed' => false
             ]);
 
-            $emailSent = false;
+            // Send email notification
+            $this->sendFacultyCredentials($faculty, $password);
 
-            // Send email if requested
-            if ($request->send_email) {
-                try {
-                    Mail::send('emails.faculty_credentials', [
-                        'name' => trim($faculty->firstname . ' ' . $faculty->lastname),
-                        'email' => $faculty->email,
-                        'password' => $password,
-                        'login_url' => url('/login')
-                    ], function ($message) use ($faculty) {
-                        $message->to($faculty->email)
-                            ->subject('ONSTS - Faculty Account Created')
-                            ->from('onsts.registrar@gmail.com', 'ONSTS Registrar');
-                    });
-                    $emailSent = true;
-                } catch (\Exception $e) {
-                    Log::error('Failed to send faculty credentials email: ' . $e->getMessage());
-                }
-            }
-
-            $message = 'Faculty account created successfully!';
-            if ($request->send_email) {
-                $message .= $emailSent ? ' Login credentials have been sent to their email.' : ' However, the email could not be sent.';
-            }
-
-            return redirect()->back()->with('success', $message);
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create faculty account: ' . $e->getMessage()]);
-        }
-    }
-
-    // Faculty Status Toggle Method
-    public function toggleFacultyStatus($id)
-    {
-        try {
-            $faculty = User::findOrFail($id);
-
-            // Debug: Log current state
-            Log::info('Toggle Faculty Status - Before:', [
-                'id' => $faculty->id,
-                'name' => $faculty->firstname . ' ' . $faculty->lastname,
-                'current_is_coordinator' => $faculty->is_coordinator,
-                'role' => $faculty->role
+            Log::info('Faculty account created', [
+                'faculty_id' => $faculty->id,
+                'email' => $faculty->email,
+                'created_by' => Auth::id()
             ]);
-
-            // Ensure the user is faculty or coordinator
-            if (!in_array($faculty->role, ['faculty', 'coordinator'])) {
-                return redirect()->back()->withErrors(['general' => 'User is not a faculty member or coordinator.']);
-            }
-
-            // Toggle the coordinator status
-            $newIsCoordinator = !$faculty->is_coordinator;
-
-            // Debug: Log what we're trying to update
-            Log::info('Toggle Faculty Status - Attempting Update:', [
-                'new_is_coordinator' => $newIsCoordinator
-            ]);
-
-            $updateResult = $faculty->update([
-                'is_coordinator' => $newIsCoordinator
-            ]);
-
-            // Debug: Log update result and verify change
-            $faculty->refresh();
-            Log::info('Toggle Faculty Status - After Update:', [
-                'update_result' => $updateResult,
-                'new_is_coordinator_value' => $faculty->is_coordinator,
-                'update_successful' => $faculty->is_coordinator === $newIsCoordinator
-            ]);
-
-            $newStatus = $newIsCoordinator ? 'coordinator' : 'faculty';
-            $statusText = $newIsCoordinator ? 'promoted to coordinator' : 'changed back to faculty';
-            $message = "Faculty member {$faculty->firstname} {$faculty->lastname} has been {$statusText} successfully.";
-
-            // If the user being updated is currently logged in, we need to update their session
-            $currentUser = Auth::user();
-            if ($currentUser && $currentUser->id === $faculty->id) {
-                // Update the current user's session data
-                Auth::login($faculty);
-            }
-
-            return redirect()->back()->with([
-                'success' => $message,
-                'new_status' => $newStatus,
-                'updated_user' => [
-                    'id' => $faculty->id,
-                    'is_coordinator' => $faculty->is_coordinator,
-                    'role' => $faculty->role
-                ]
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Faculty status toggle failed: ' . $e->getMessage());
-            return redirect()->back()->withErrors(['general' => 'Failed to update faculty status: ' . $e->getMessage()]);
-        }
-    }
-
-    // Faculty Update Method
-    public function updateFaculty(Request $request, $id)
-    {
-        $request->validate([
-            'firstname' => 'required|string|max:255',
-            'lastname' => 'required|string|max:255',
-            'middlename' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $id,
-            'assigned_strand_id' => 'nullable|exists:strands,id',
-        ]);
-
-        try {
-            $faculty = User::findOrFail($id);
-            $faculty->update([
-                'firstname' => $request->firstname,
-                'lastname' => $request->lastname,
-                'middlename' => $request->middlename,
-                'email' => $request->email,
-                'assigned_strand_id' => $request->assigned_strand_id,
-            ]);
-
-            return redirect()->back()->with('success', 'Faculty updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update faculty: ' . $e->getMessage()]);
-        }
-    }
-
-    // Faculty Delete Method
-    public function deleteFaculty($id)
-    {
-        try {
-            $faculty = User::findOrFail($id);
-
-            // Check if faculty has assigned sections or classes
-            if ($faculty->sections()->count() > 0 || $faculty->classSchedules()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete faculty. They have assigned sections or classes.']);
-            }
-
-            $faculty->delete();
-
-            return redirect()->back()->with('success', 'Faculty deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete faculty: ' . $e->getMessage()]);
-        }
-    }
-
-    /**
-     * Get subjects filtered by semester for schedule creation
-     */
-    public function getSubjectsBySemester($semester)
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            $subjects = Subject::with(['strand', 'faculty'])
-                ->where('semester', $semester)
-                ->orderBy('year_level')
-                ->orderBy('name')
-                ->get()
-                ->map(function ($subject) use ($activeSchoolYear) {
-                    return [
-                        'id' => $subject->id,
-                        'name' => $subject->name,
-                        'code' => $subject->code,
-                        'semester' => $subject->semester,
-                        'semester_display' => $subject->semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)',
-                        'year_level' => $subject->year_level,
-                        'strand_name' => $subject->strand ? $subject->strand->name : 'No Strand',
-                        'strand_id' => $subject->strand_id,
-                        'faculty_name' => $subject->faculty ? $subject->faculty->firstname . ' ' . $subject->faculty->lastname : 'Unassigned',
-                        'faculty_id' => $subject->faculty_id,
-                        'full_display' => "[" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . "] " . $subject->code . " - " . $subject->name,
-                        'schedule_display' => $subject->code . " - " . $subject->name . " (" . ($subject->semester == 1 ? '1st Sem' : '2nd Sem') . ")"
-                    ];
-                });
 
             return response()->json([
                 'success' => true,
-                'subjects' => $subjects,
-                'semester' => $semester,
-                'semester_display' => $semester == 1 ? '1st Semester (Aug-Dec)' : '2nd Semester (Jan-May)'
+                'message' => 'Faculty account created successfully. Login credentials sent to email.',
+                'faculty' => $faculty
             ]);
+
         } catch (\Exception $e) {
+            Log::error('Faculty creation failed', [
+                'error' => $e->getMessage(),
+                'email' => $request->email
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error fetching subjects: ' . $e->getMessage()
+                'message' => 'Failed to create faculty account: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    // Subject Management Methods
-    public function createSubject(Request $request)
+    /**
+     * Generate secure password
+     */
+    private function generateSecurePassword()
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:20',
-            'semester' => 'required|integer|in:1,2',
-            'year_level' => 'required|integer|in:11,12',
-            'strand_id' => 'required|exists:strands,id',
-        ]);
+        return Str::random(2) . rand(10, 99) . Str::random(2) . rand(10, 99);
+    }
 
+    /**
+     * Send faculty credentials via email
+     */
+    private function sendFacultyCredentials($faculty, $password)
+    {
         try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-
-            if (!$activeSchoolYear) {
-                return redirect()->back()->withErrors(['general' => 'No active school year found. Please create and activate a school year first.']);
-            }
-
-            // Check if subject code already exists for this strand and school year
-            $existingSubject = Subject::where('code', $request->code)
-                ->where('strand_id', $request->strand_id)
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->first();
-
-            if ($existingSubject) {
-                return redirect()->back()->withErrors(['general' => 'A subject with this code already exists for the selected strand.']);
-            }
-
-            $subject = Subject::create([
-                'name' => $request->name,
-                'code' => $request->code,
-                'semester' => $request->semester,
-                'year_level' => $request->year_level,
-                'strand_id' => $request->strand_id,
-                'school_year_id' => $activeSchoolYear->id,
+            Mail::send('emails.faculty-credentials', [
+                'faculty' => $faculty,
+                'password' => $password,
+                'login_url' => url('/login')
+            ], function ($message) use ($faculty) {
+                $message->to($faculty->email)
+                    ->subject('ONSTS - Faculty Account Created');
+            });
+        } catch (\Exception $e) {
+            Log::error('Failed to send faculty credentials email', [
+                'faculty_id' => $faculty->id,
+                'error' => $e->getMessage()
             ]);
-
-            return redirect()->back()->with('success', 'Subject created successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to create subject: ' . $e->getMessage()]);
-        }
-    }
-
-    public function updateSubject(Request $request, $id)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:20',
-            'semester' => 'required|integer|in:1,2',
-            'year_level' => 'required|integer|in:11,12',
-            'strand_id' => 'required|exists:strands,id',
-        ]);
-
-        try {
-            $subject = Subject::findOrFail($id);
-            $subject->update([
-                'name' => $request->name,
-                'code' => $request->code,
-                'semester' => $request->semester,
-                'year_level' => $request->year_level,
-                'strand_id' => $request->strand_id,
-            ]);
-
-            return redirect()->back()->with('success', 'Subject updated successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to update subject: ' . $e->getMessage()]);
-        }
-    }
-
-    public function deleteSubject($id)
-    {
-        try {
-            $subject = Subject::findOrFail($id);
-
-            // Check if subject has class schedules
-            if ($subject->classSchedules()->count() > 0) {
-                return redirect()->back()->withErrors(['general' => 'Cannot delete subject. It has associated class schedules.']);
-            }
-
-            $subject->delete();
-
-            return redirect()->back()->with('success', 'Subject deleted successfully');
-        } catch (\Exception $e) {
-            return redirect()->back()->withErrors(['general' => 'Failed to delete subject: ' . $e->getMessage()]);
-        }
-    }
-
-    // Deactivate Expired Semesters Method
-    public function deactivateExpired()
-    {
-        try {
-            // Get all active but expired school years
-            $expiredSchoolYears = SchoolYear::getActiveExpired();
-
-            if ($expiredSchoolYears->count() === 0) {
-                return redirect()->back()->with('message', 'No expired active semesters found.');
-            }
-
-            // Deactivate all expired school years
-            $count = $expiredSchoolYears->count();
-            SchoolYear::whereIn('id', $expiredSchoolYears->pluck('id'))
-                ->update(['is_active' => false]);
-
-            Log::info("Deactivated {$count} expired school years", [
-                'expired_school_years' => $expiredSchoolYears->pluck('id')->toArray()
-            ]);
-
-            return redirect()->back()->with('message', "Successfully deactivated {$count} expired semester(s).");
-        } catch (\Exception $e) {
-            Log::error('Error deactivating expired school years: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to deactivate expired semesters. Please try again.');
-        }
-    }
-
-    // Get Semester Status with Timer Information
-    public function getSemesterStatus($id = null)
-    {
-        try {
-            $schoolYear = $id ? SchoolYear::findOrFail($id) : SchoolYear::getActive();
-
-            if (!$schoolYear) {
-                return response()->json(['error' => 'No school year found'], 404);
-            }
-
-            $now = now();
-            $endDate = $schoolYear->end_date ? \Carbon\Carbon::parse($schoolYear->end_date) : null;
-
-            $status = [
-                'id' => $schoolYear->id,
-                'is_active' => $schoolYear->is_active,
-                'is_expired' => $schoolYear->isExpired(),
-                'end_date' => $endDate ? $endDate->toDateString() : null,
-                'end_datetime' => $endDate ? $endDate->toISOString() : null,
-                'days_remaining' => $endDate ? $now->diffInDays($endDate, false) : null,
-                'hours_remaining' => $endDate ? $now->diffInHours($endDate, false) : null,
-                'minutes_remaining' => $endDate ? $now->diffInMinutes($endDate, false) : null,
-                'seconds_remaining' => $endDate ? $now->diffInSeconds($endDate, false) : null,
-                'time_remaining' => $endDate ? [
-                    'days' => max(0, $now->diffInDays($endDate, false)),
-                    'hours' => max(0, $now->diff($endDate)->format('%H')),
-                    'minutes' => max(0, $now->diff($endDate)->format('%I')),
-                    'seconds' => max(0, $now->diff($endDate)->format('%S'))
-                ] : null
-            ];
-
-            return response()->json($status);
-        } catch (\Exception $e) {
-            Log::error('Error getting semester status: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to get semester status'], 500);
-        }
-    }
-
-    // Auto-deactivate expired semesters (can be called via cron job)
-    public function autoDeactivateExpired()
-    {
-        try {
-            // Get all active but expired school years
-            $expiredSchoolYears = SchoolYear::getActiveExpired();
-
-            if ($expiredSchoolYears->count() > 0) {
-                $count = $expiredSchoolYears->count();
-                SchoolYear::whereIn('id', $expiredSchoolYears->pluck('id'))
-                    ->update(['is_active' => false]);
-
-                Log::info("Auto-deactivated {$count} expired school years", [
-                    'expired_school_years' => $expiredSchoolYears->pluck('id')->toArray()
-                ]);
-
-                return redirect()->back()->with([
-                    'success' => true,
-                    'message' => "Auto-deactivated {$count} expired semester(s)",
-                    'count' => $count
-                ]);
-            }
-
-            return redirect()->back()->with([
-                'success' => true,
-                'message' => 'No expired active semesters found',
-                'count' => 0
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error auto-deactivating expired school years: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to auto-deactivate expired semesters');
-        }
-    }
-
-    // Fix subjects without school year assignment
-    public function fixSubjectsSchoolYear()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            if (!$activeSchoolYear) {
-                return redirect()->back()->with('error', 'No active school year found');
-            }
-
-            $updated = Subject::whereNull('school_year_id')
-                ->update(['school_year_id' => $activeSchoolYear->id]);
-
-            return redirect()->back()->with('success', "Fixed {$updated} subjects - assigned to {$activeSchoolYear->semester}");
-        } catch (\Exception $e) {
-            Log::error('Error fixing subjects school year: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to fix subjects: ' . $e->getMessage());
         }
     }
 
     /**
-     * Philippine SHS System: Create full academic year (both semesters)
+     * Strand Management Page
      */
-    public function createFullAcademicYear(Request $request)
+    public function strandsPage()
     {
-        
-        $request->validate([
-            'year_start' => 'required|integer|min:2020|max:2050',
-            'year_end' => 'required|integer|min:2020|max:2050',
-            'start_date' => 'required|date',
-            'end_date' => 'required|date|after:start_date',
-            'enrollment_start' => 'required|date',
-            'enrollment_end' => 'required|date|after:enrollment_start'
+        $strands = Strand::orderBy('name')->get();
+
+        return Inertia::render('Registrar/Strands', [
+            'strands' => $strands
         ]);
-
-        // Parse dates
-        $startDate = \Carbon\Carbon::parse($request->start_date);
-        $endDate = \Carbon\Carbon::parse($request->end_date);
-        $enrollmentStart = \Carbon\Carbon::parse($request->enrollment_start);
-        $enrollmentEnd = \Carbon\Carbon::parse($request->enrollment_end);
-        
-        // Validate 10-month duration for Full Academic Year
-        $durationInMonths = $startDate->diffInMonths($endDate);
-        
-        if ($durationInMonths < 10) {
-            return redirect()->back()->withErrors([
-                'end_date' => 'Full Academic Year must be at least 10 months duration. Current duration: ' . $durationInMonths . ' months.'
-            ]);
-        }
-        
-        if ($durationInMonths > 11) {
-            return redirect()->back()->withErrors([
-                'end_date' => 'Full Academic Year cannot exceed 11 months duration. Current duration: ' . $durationInMonths . ' months.'
-            ]);
-        }
-
-        // Validate enrollment period (1-2 weeks)
-        $enrollmentDays = $enrollmentStart->diffInDays($enrollmentEnd);
-        
-        if ($enrollmentDays < 7) {
-            return redirect()->back()->withErrors([
-                'enrollment_end' => 'Enrollment period must be at least 1 week (7 days). Current period: ' . $enrollmentDays . ' days.'
-            ]);
-        }
-        
-        if ($enrollmentDays > 14) {
-            return redirect()->back()->withErrors([
-                'enrollment_end' => 'Enrollment period cannot exceed 2 weeks (14 days). Current period: ' . $enrollmentDays . ' days.'
-            ]);
-        }
-        
-        // Weekend validation temporarily removed for testing
-        // if ($startDate->dayOfWeek === 0 || $startDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'start_date' => 'Full Academic Year start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-        // 
-        // if ($endDate->dayOfWeek === 0 || $endDate->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'end_date' => 'Full Academic Year end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-
-        // Weekend restrictions for enrollment dates temporarily removed for testing
-        // if ($enrollmentStart->dayOfWeek === 0 || $enrollmentStart->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'enrollment_start' => 'Enrollment start date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-        // 
-        // if ($enrollmentEnd->dayOfWeek === 0 || $enrollmentEnd->dayOfWeek === 6) {
-        //     return redirect()->back()->withErrors([
-        //         'enrollment_end' => 'Enrollment end date cannot be on a weekend. Please select a weekday (Monday - Friday).'
-        //     ]);
-        // }
-
-        try {
-            DB::beginTransaction();
-
-            // Check if school year already exists
-            $existingSchoolYear = SchoolYear::where('year_start', $request->year_start)
-                ->where('year_end', $request->year_end)
-                ->where('semester', 'Full Academic Year')
-                ->first();
-
-            if ($existingSchoolYear) {
-                DB::rollBack();
-                return redirect()->back()->withErrors([
-                    'error' => "Full Academic Year {$request->year_start}-{$request->year_end} already exists. Please use a different year range or update the existing school year."
-                ]);
-            }
-
-            // Deactivate all other school years first
-            SchoolYear::where('is_active', true)->update([
-                'is_active' => false,
-                'is_current_academic_year' => false
-            ]);
-
-            // Create single Full Academic Year entry
-            $academicYear = SchoolYear::create([
-                'year_start' => $request->year_start,
-                'year_end' => $request->year_end,
-                'semester' => 'Full Academic Year',
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'is_active' => true,
-                'enrollment_open' => true,
-                'enrollment_start' => $request->enrollment_start,
-                'enrollment_end' => $request->enrollment_end,
-                'is_current_academic_year' => true,
-                'allow_grade_progression' => true
-            ]);
-
-            DB::commit();
-
-            return redirect()->back()->with('success', 
-                "Full Academic Year {$request->year_start}-{$request->year_end} created successfully!"
-            );
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return redirect()->back()->withErrors([
-                'error' => 'Failed to create full academic year: ' . $e->getMessage()
-            ]);
-        }
     }
 
-    // Grade Approval System Methods
+    /**
+     * Create new strand
+     */
+    public function createStrand(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'code' => 'required|string|max:10|unique:strands,code',
+            'description' => 'nullable|string'
+        ]);
+
+        $strand = Strand::create($request->all());
+
+        Log::info('Strand created', [
+            'strand_id' => $strand->id,
+            'created_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Strand created successfully',
+            'strand' => $strand
+        ]);
+    }
+
+    /**
+     * Update strand
+     */
+    public function updateStrand(Request $request, $id)
+    {
+        $strand = Strand::findOrFail($id);
+
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'code' => 'required|string|max:10|unique:strands,code,' . $id,
+            'description' => 'nullable|string'
+        ]);
+
+        $strand->update($request->all());
+
+        Log::info('Strand updated', [
+            'strand_id' => $strand->id,
+            'updated_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Strand updated successfully',
+            'strand' => $strand
+        ]);
+    }
+
+    /**
+     * Subject Management Page
+     */
+    public function subjectsPage()
+    {
+        $subjects = Subject::with('strand')->orderBy('name')->get();
+        $strands = Strand::all();
+
+        return Inertia::render('Registrar/Subjects', [
+            'subjects' => $subjects,
+            'strands' => $strands
+        ]);
+    }
+
+    /**
+     * Create new subject
+     */
+    public function createSubject(Request $request)
+    {
+        $request->validate([
+            'subject_name' => 'required|string|max:255',
+            'subject_code' => 'required|string|max:20|unique:subjects,code',
+            'strand_id' => 'nullable|exists:strands,id',
+            'semester' => 'required|in:1,2',
+            'grade_level' => 'required|in:11,12'
+        ]);
+
+        $subject = Subject::create([
+            'name' => $request->subject_name,
+            'code' => $request->subject_code,
+            'strand_id' => $request->strand_id,
+            'semester' => $request->semester,
+            'year_level' => $request->grade_level,
+            'is_active' => true
+        ]);
+
+        Log::info('Subject created', [
+            'subject_id' => $subject->id,
+            'created_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Subject created successfully',
+            'subject' => $subject->load('strand')
+        ]);
+    }
+
+    /**
+     * Enrollment Management Page
+     */
+    public function enrollmentPage()
+    {
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return Inertia::render('Registrar/Enrollment', [
+                'enrollments' => [],
+                'strands' => [],
+                'sections' => [],
+                'message' => 'No active school year found'
+            ]);
+        }
+
+        $enrollments = Enrollment::with(['student', 'strand', 'section'])
+            ->where('school_year_id', $activeSchoolYear->id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $strands = Strand::all();
+        $sections = Section::where('school_year_id', $activeSchoolYear->id)->get();
+
+        return Inertia::render('Registrar/Enrollment', [
+            'enrollments' => $enrollments,
+            'strands' => $strands,
+            'sections' => $sections,
+            'activeSchoolYear' => $activeSchoolYear
+        ]);
+    }
+
+    /**
+     * Approve enrollment
+     */
+    public function approveEnrollment(Request $request, $id)
+    {
+        $enrollment = Enrollment::findOrFail($id);
+
+        $request->validate([
+            'strand_id' => 'required|exists:strands,id',
+            'assigned_section_id' => 'required|exists:sections,id'
+        ]);
+
+        // Check section capacity before approval
+        $section = Section::findOrFail($request->assigned_section_id);
+        if (!$section->hasAvailableSlots()) {
+            return response()->json([
+                'success' => false,
+                'message' => "Cannot approve enrollment. Section '{$section->section_name}' is at full capacity ({$section->max_capacity} students).",
+            ], 400);
+        }
+
+        $enrollment->update([
+            'status' => 'approved',
+            'strand_id' => $request->strand_id,
+            'assigned_section_id' => $request->assigned_section_id,
+            'approved_at' => now(),
+            'approved_by' => Auth::id()
+        ]);
+
+        // Update section capacity status after enrollment
+        $section->updateCapacityStatus();
+
+        Log::info('Enrollment approved', [
+            'enrollment_id' => $enrollment->id,
+            'student_id' => $enrollment->student_id,
+            'approved_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Enrollment approved successfully'
+        ]);
+    }
+
+    /**
+     * Grade Approval Management Page
+     */
+    public function gradeApprovalPage()
+    {
+        $pendingGrades = Grade::with(['student', 'subject', 'faculty'])
+            ->where('status', 'pending_registrar_approval')
+            ->get()
+            ->map(function ($grade) {
+                return [
+                    'id' => $grade->id,
+                    'student' => [
+                        'id' => $grade->student->id ?? null,
+                        'firstname' => $grade->student->firstname ?? 'Unknown',
+                        'lastname' => $grade->student->lastname ?? 'Student',
+                        'email' => $grade->student->email ?? 'N/A',
+                    ],
+                    'subject' => [
+                        'id' => $grade->subject->id ?? null,
+                        'subject_name' => $grade->subject->name ?? 'Unknown Subject',
+                        'subject_code' => $grade->subject->code ?? 'N/A',
+                    ],
+                    'faculty' => [
+                        'id' => $grade->faculty->id ?? null,
+                        'firstname' => $grade->faculty->firstname ?? 'Unknown',
+                        'lastname' => $grade->faculty->lastname ?? 'Faculty',
+                    ],
+                    // Map database fields to frontend expected fields
+                    'prelim' => $grade->first_quarter,
+                    'midterm' => $grade->second_quarter,
+                    'finals' => $grade->semester_grade,
+                    'created_at' => $grade->created_at,
+                    'updated_at' => $grade->updated_at,
+                    'status' => $grade->status,
+                ];
+            });
+
+        return Inertia::render('Registrar/GradeApproval', [
+            'pendingGrades' => $pendingGrades
+        ]);
+    }
 
     /**
      * Display pending grades for approval
      */
     public function pendingGrades()
     {
-        $user = Auth::user();
-        
-        // ✅ FIXED: Get grades that are actually pending approval
-        $pendingGrades = \App\Models\Grade::with([
-            'student', 
-            'faculty', 
-            'subject', 
-            'class.section'
-        ])
-        ->where('approval_status', 'pending_approval')  // ✅ FIXED: Proper approval status
-        ->whereNotNull('submitted_for_approval_at')     // ✅ FIXED: Must be submitted
-        ->orderBy('submitted_for_approval_at', 'desc')  // ✅ FIXED: Order by submission date
-        ->paginate(20);
-
-        return Inertia::render('Registrar/PendingGrades', [
-            'pendingGrades' => $pendingGrades,
-            'auth' => ['user' => $user]
-        ]);
-    }
-
-    /**
-     * Approve a grade
-     */
-    public function approveGrade(Request $request, $gradeId)
-    {
-        $request->validate([
-            'approval_notes' => 'nullable|string|max:500'
-        ]);
-
         try {
-            $grade = \App\Models\Grade::findOrFail($gradeId);
-            $user = Auth::user();
-
-            // Ensure only registrar can approve
-            if ($user->role !== 'registrar') {
-                return back()->withErrors(['error' => 'Unauthorized to approve grades.']);
-            }
-
-            $grade->approve($user->id, $request->approval_notes);
-
-            Log::info('Grade approved', [
-                'grade_id' => $gradeId,
-                'approved_by' => $user->id,
-                'student_id' => $grade->student_id,
-                'subject_id' => $grade->subject_id
-            ]);
-
-            return back()->with('success', 'Grade approved successfully.');
-
-        } catch (\Exception $e) {
-            Log::error('Failed to approve grade: ' . $e->getMessage());
-            return back()->withErrors(['error' => 'Failed to approve grade.']);
-        }
-    }
-
-    /**
-     * Reject a grade
-     */
-    public function rejectGrade(Request $request, $gradeId)
-    {
-        $request->validate([
-            'approval_notes' => 'required|string|max:500'
-        ]);
-
-        try {
-            $grade = \App\Models\Grade::findOrFail($gradeId);
-            $user = Auth::user();
-
-            // Ensure only registrar can reject
-            if ($user->role !== 'registrar') {
-                return back()->withErrors(['error' => 'Unauthorized to reject grades.']);
-            }
-
-            $grade->reject($user->id, $request->approval_notes);
-
-            Log::info('Grade rejected', [
-                'grade_id' => $gradeId,
-                'rejected_by' => $user->id,
-                'student_id' => $grade->student_id,
-                'subject_id' => $grade->subject_id,
-                'reason' => $request->approval_notes
-            ]);
-
-            return back()->with('success', 'Grade rejected successfully.');
-
-        } catch (\Exception $e) {
-            Log::error('Failed to reject grade: ' . $e->getMessage());
-            return back()->withErrors(['error' => 'Failed to reject grade.']);
-        }
-    }
-
-    /**
-     * Bulk approve grades
-     */
-    public function bulkApproveGrades(Request $request)
-    {
-        $request->validate([
-            'grade_ids' => 'required|array',
-            'grade_ids.*' => 'exists:grades,id',
-            'approval_notes' => 'nullable|string|max:500'
-        ]);
-
-        try {
-            $user = Auth::user();
+            // Log the query for debugging
+            Log::info('Fetching pending grades for registrar approval');
             
-            if ($user->role !== 'registrar') {
-                return back()->withErrors(['error' => 'Unauthorized to approve grades.']);
+            $pendingGrades = Grade::with(['student.studentPersonalInfo', 'subject', 'faculty', 'schoolYear'])
+                ->where('status', 'pending_registrar_approval')
+                ->orderBy('created_at', 'desc')
+                ->get();
+                
+            Log::info('Pending grades query result', [
+                'total_found' => $pendingGrades->count(),
+                'status_filter' => 'pending_registrar_approval'
+            ]);
+            
+            $pendingGrades = $pendingGrades->map(function ($grade) {
+                    // Log individual grade data for debugging
+                    Log::info('Processing grade for approval', [
+                        'grade_id' => $grade->id,
+                        'student_id' => $grade->student_id,
+                        'first_quarter' => $grade->first_quarter,
+                        'second_quarter' => $grade->second_quarter,
+                        'semester_grade' => $grade->semester_grade,
+                        'status' => $grade->status,
+                        'created_at' => $grade->created_at,
+                        'updated_at' => $grade->updated_at
+                    ]);
+
+                    return [
+                        'id' => $grade->id,
+                        // Nested objects for detailed access
+                        'student' => [
+                            'id' => $grade->student->id ?? null,
+                            'firstname' => $grade->student->firstname ?? 'Unknown',
+                            'lastname' => $grade->student->lastname ?? 'Student',
+                            'email' => $grade->student->email ?? 'N/A',
+                            'lrn' => $grade->student->studentPersonalInfo->lrn ?? 'N/A',
+                        ],
+                        'subject' => [
+                            'id' => $grade->subject->id ?? null,
+                            'subject_name' => $grade->subject->name ?? 'Unknown Subject',
+                            'subject_code' => $grade->subject->code ?? 'N/A',
+                        ],
+                        'faculty' => [
+                            'id' => $grade->faculty->id ?? null,
+                            'firstname' => $grade->faculty->firstname ?? 'Unknown',
+                            'lastname' => $grade->faculty->lastname ?? 'Faculty',
+                        ],
+                        // Flat properties for frontend compatibility
+                        'student_name' => ($grade->student->firstname ?? 'Unknown') . ' ' . ($grade->student->lastname ?? 'Student'),
+                        'subject_name' => $grade->subject->name ?? 'Unknown Subject',
+                        'faculty_name' => ($grade->faculty->firstname ?? 'Unknown') . ' ' . ($grade->faculty->lastname ?? 'Faculty'),
+                        'semester' => $grade->semester ?? '1st',
+                        // Map Philippine SHS quarters to expected format
+                        'prelim' => $grade->first_quarter ?? null,  // Q1 or Q3 depending on semester
+                        'midterm' => $grade->second_quarter ?? null, // Q2 or Q4 depending on semester
+                        'finals' => $grade->areBothQuartersComplete() ? $grade->semester_grade : null,  // Only show final if both quarters complete
+                        // Also keep original fields for compatibility
+                        'first_quarter' => $grade->first_quarter ?? null,
+                        'second_quarter' => $grade->second_quarter ?? null,
+                        'semester_grade' => $grade->semester_grade ?? null,
+                        'remarks' => $grade->remarks ?? '',
+                        'status' => $grade->status ?? 'pending_approval',
+                        'school_year' => ($grade->schoolYear->year_start ?? '2024') . '-' . ($grade->schoolYear->year_end ?? '2025'),
+                        'created_at' => $grade->created_at ? $grade->created_at->toISOString() : null,
+                        'updated_at' => $grade->updated_at ? $grade->updated_at->toISOString() : null,
+                        'submitted_at' => $grade->updated_at ? $grade->updated_at->toISOString() : null,
+                    ];
+                });
+
+            return Inertia::render('Registrar/GradeApproval', [
+                'pendingGrades' => $pendingGrades,
+                'totalPending' => $pendingGrades->count(),
+                'summary' => [
+                    'total_pending' => $pendingGrades->count(),
+                    'first_semester' => $pendingGrades->where('semester', '1st')->count(),
+                    'second_semester' => $pendingGrades->where('semester', '2nd')->count(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching pending grades', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return Inertia::render('Registrar/GradeApproval', [
+                'pendingGrades' => [],
+                'totalPending' => 0,
+                'error' => 'Failed to load pending grades. Please try again.',
+                'summary' => [
+                    'total_pending' => 0,
+                    'first_semester' => 0,
+                    'second_semester' => 0,
+                ]
+            ]);
+        }
+    }
+
+    /**
+     * Approve grades
+     */
+    public function approveGrades(Request $request)
+    {
+        try {
+            $request->validate([
+                'grade_ids' => 'required|array',
+                'grade_ids.*' => 'exists:grades,id',
+                'action' => 'required|in:approve,reject',
+                'remarks' => 'nullable|string'
+            ]);
+
+            $grades = Grade::whereIn('id', $request->grade_ids)->get();
+
+            if ($grades->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No grades found with the provided IDs'
+                ], 404);
             }
 
-            $approvedCount = 0;
-            foreach ($request->grade_ids as $gradeId) {
-                $grade = \App\Models\Grade::find($gradeId);
-                if ($grade && $grade->isPendingApproval()) {
-                    $grade->approve($user->id, $request->approval_notes);
-                    $approvedCount++;
+            foreach ($grades as $grade) {
+                $grade->update([
+                    'status' => $request->action === 'approve' ? 'approved' : 'rejected',
+                    'approved_by' => Auth::id(),
+                    'approved_at' => now()
+                ]);
+                
+                // Log the approval action for audit trail
+                Log::info('Grade approval action', [
+                    'grade_id' => $grade->id,
+                    'student_id' => $grade->student_id,
+                    'action' => $request->action,
+                    'approved_by' => Auth::id(),
+                    'grade_visible_to_student' => $request->action === 'approve'
+                ]);
+                
+                // Log remarks separately since approval_remarks field doesn't exist
+                if ($request->remarks) {
+                    Log::info('Grade approval with remarks', [
+                        'grade_id' => $grade->id,
+                        'action' => $request->action,
+                        'remarks' => $request->remarks,
+                        'approved_by' => Auth::id()
+                    ]);
                 }
             }
 
-            Log::info('Bulk grade approval', [
-                'approved_count' => $approvedCount,
-                'approved_by' => $user->id
-            ]);
-
-            return back()->with('success', "Successfully approved {$approvedCount} grades.");
-
-        } catch (\Exception $e) {
-            Log::error('Failed to bulk approve grades: ' . $e->getMessage());
-            return back()->withErrors(['error' => 'Failed to approve grades.']);
-        }
-    }
-
-    /**
-     * Bulk reject grades
-     */
-    public function bulkRejectGrades(Request $request)
-    {
-        $request->validate([
-            'grade_ids' => 'required|array',
-            'grade_ids.*' => 'exists:grades,id',
-            'approval_notes' => 'required|string|max:500'
-        ]);
-
-        try {
-            $user = Auth::user();
-            
-            if ($user->role !== 'registrar') {
-                return back()->withErrors(['error' => 'Unauthorized to reject grades.']);
-            }
-
-            $rejectedCount = 0;
-            foreach ($request->grade_ids as $gradeId) {
-                $grade = \App\Models\Grade::find($gradeId);
-                if ($grade && $grade->isPendingApproval()) {
-                    $grade->reject($user->id, $request->approval_notes);
-                    $rejectedCount++;
-                }
-            }
-
-            Log::info('Bulk grade rejection', [
-                'rejected_count' => $rejectedCount,
-                'rejected_by' => $user->id
-            ]);
-
-            return back()->with('success', "Successfully rejected {$rejectedCount} grades.");
-
-        } catch (\Exception $e) {
-            Log::error('Failed to bulk reject grades: ' . $e->getMessage());
-            return back()->withErrors(['error' => 'Failed to reject grades.']);
-        }
-    }
-
-    /**
-     * Approve all grades for a specific student
-     */
-    public function approveStudentGrades(Request $request, $studentId)
-    {
-        $request->validate([
-            'approval_notes' => 'nullable|string|max:500'
-        ]);
-
-        try {
-            $user = Auth::user();
-            
-            if ($user->role !== 'registrar') {
-                return response()->json(['error' => 'Unauthorized to approve grades.'], 403);
-            }
-
-            // Get all pending grades for this student
-            $pendingGrades = \App\Models\Grade::where('student_id', $studentId)
-                ->where('status', 'pending_approval')
-                ->get();
-
-            if ($pendingGrades->isEmpty()) {
-                return response()->json(['error' => 'No pending grades found for this student.'], 404);
-            }
-
-            $approvedCount = 0;
-            foreach ($pendingGrades as $grade) {
-                $grade->approve($user->id, $request->approval_notes);
-                $approvedCount++;
-            }
-
-            Log::info('Student grades bulk approval', [
-                'student_id' => $studentId,
-                'approved_count' => $approvedCount,
-                'approved_by' => $user->id
+            Log::info('Grades ' . $request->action . 'd', [
+                'grade_ids' => $request->grade_ids,
+                'action' => $request->action,
+                'approved_by' => Auth::id()
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => "Successfully approved {$approvedCount} grades for student.",
-                'approved_count' => $approvedCount
+                'message' => 'Grades ' . $request->action . 'd successfully'
             ]);
 
-        } catch (\Exception $e) {
-            Log::error('Failed to approve student grades: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to approve student grades.'], 500);
-        }
-    }
-
-    /**
-     * Reject all grades for a specific student
-     */
-    public function rejectStudentGrades(Request $request, $studentId)
-    {
-        $request->validate([
-            'approval_notes' => 'required|string|max:500'
-        ]);
-
-        try {
-            $user = Auth::user();
-            
-            if ($user->role !== 'registrar') {
-                return response()->json(['error' => 'Unauthorized to reject grades.'], 403);
-            }
-
-            // Get all pending grades for this student
-            $pendingGrades = \App\Models\Grade::where('student_id', $studentId)
-                ->where('status', 'pending_approval')
-                ->get();
-
-            if ($pendingGrades->isEmpty()) {
-                return response()->json(['error' => 'No pending grades found for this student.'], 404);
-            }
-
-            $rejectedCount = 0;
-            foreach ($pendingGrades as $grade) {
-                $grade->reject($user->id, $request->approval_notes);
-                $rejectedCount++;
-            }
-
-            Log::info('Student grades bulk rejection', [
-                'student_id' => $studentId,
-                'rejected_count' => $rejectedCount,
-                'rejected_by' => $user->id,
-                'reason' => $request->approval_notes
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Grade approval validation failed', [
+                'errors' => $e->errors(),
+                'request_data' => $request->all()
             ]);
 
             return response()->json([
-                'success' => true,
-                'message' => "Successfully rejected {$rejectedCount} grades for student.",
-                'rejected_count' => $rejectedCount
-            ]);
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
 
         } catch (\Exception $e) {
-            Log::error('Failed to reject student grades: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to reject student grades.'], 500);
-        }
-    }
-
-    /**
-     * Get students with pending grades grouped by student
-     */
-    public function getStudentsWithPendingGrades()
-    {
-        try {
-            $studentsWithGrades = DB::table('grades')
-                ->join('users', 'grades.student_id', '=', 'users.id')
-                ->join('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
-                ->leftJoin('sections', 'student_personal_info.section_id', '=', 'sections.id')
-                ->leftJoin('strands', 'sections.strand_id', '=', 'strands.id')
-                ->where('grades.status', 'pending_approval')
-                ->select([
-                    'users.id as student_id',
-                    'users.firstname',
-                    'users.lastname',
-                    'users.email',
-                    'student_personal_info.lrn',
-                    'student_personal_info.grade_level',
-                    'sections.section_name',
-                    'strands.name as strand_name',
-                    DB::raw('COUNT(grades.id) as pending_grades_count'),
-                    DB::raw('MIN(grades.created_at) as earliest_submission'),
-                    DB::raw('MAX(grades.updated_at) as latest_submission')
-                ])
-                ->groupBy([
-                    'users.id', 'users.firstname', 'users.lastname', 'users.email',
-                    'student_personal_info.lrn', 'student_personal_info.grade_level',
-                    'sections.section_name', 'strands.name'
-                ])
-                ->orderBy('latest_submission', 'desc')
-                ->get();
-
-            return response()->json([
-                'success' => true,
-                'students' => $studentsWithGrades
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Failed to get students with pending grades: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to fetch student data.'], 500);
-        }
-    }
-
-    /**
-     * ✅ NEW: Registrar-only grade editing method
-     */
-    public function editGrade(Request $request, $gradeId)
-    {
-        $request->validate([
-            'first_quarter' => 'nullable|numeric|min:0|max:100',
-            'second_quarter' => 'nullable|numeric|min:0|max:100',
-            'third_quarter' => 'nullable|numeric|min:0|max:100',
-            'fourth_quarter' => 'nullable|numeric|min:0|max:100',
-            'remarks' => 'nullable|string|max:1000',
-            'registrar_notes' => 'required|string|max:500' // Required for audit trail
-        ]);
-
-        try {
-            $user = Auth::user();
-            
-            if ($user->role !== 'registrar') {
-                return response()->json(['error' => 'Unauthorized. Only registrar can edit grades.'], 403);
-            }
-
-            $grade = \App\Models\Grade::findOrFail($gradeId);
-
-            // Calculate new semester grade
-            $quarters = array_filter([
-                $request->first_quarter,
-                $request->second_quarter,
-                $request->third_quarter,
-                $request->fourth_quarter
-            ], function($grade) {
-                return $grade !== null && $grade > 0;
-            });
-            
-            $semesterGrade = count($quarters) > 0 ? round(array_sum($quarters) / count($quarters), 2) : null;
-
-            // Update grade with registrar notes
-            $grade->update([
-                'first_quarter' => $request->first_quarter,
-                'second_quarter' => $request->second_quarter,
-                'third_quarter' => $request->third_quarter,
-                'fourth_quarter' => $request->fourth_quarter,
-                'semester_grade' => $semesterGrade,
-                'remarks' => $request->remarks,
-                'approval_notes' => $request->registrar_notes,
-                'approved_by' => $user->id,
-                'approved_at' => now(),
-                'approval_status' => 'approved',
-                'status' => 'approved'
-            ]);
-
-            Log::info('Grade edited by registrar', [
-                'grade_id' => $gradeId,
-                'registrar_id' => $user->id,
-                'student_id' => $grade->student_id,
-                'subject_id' => $grade->subject_id,
-                'old_semester_grade' => $grade->getOriginal('semester_grade'),
-                'new_semester_grade' => $semesterGrade,
-                'registrar_notes' => $request->registrar_notes
+            Log::error('Grade approval failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
             ]);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Grade updated successfully by registrar.',
-                'grade' => $grade->fresh()
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Failed to edit grade: ' . $e->getMessage(), [
-                'grade_id' => $gradeId,
-                'registrar_id' => $user->id ?? null
-            ]);
-            
-            return response()->json(['error' => 'Failed to update grade.'], 500);
-        }
-    }
-
-    /**
-     * Display settings page
-     */
-    public function settingsPage()
-    {
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-        
-        // Auto-set enrollment dates if they don't exist
-        if ($activeSchoolYear && (!$activeSchoolYear->enrollment_start || !$activeSchoolYear->enrollment_end)) {
-            $startDate = now();
-            $endDate = now()->addDays(30);
-            
-            $activeSchoolYear->update([
-                'enrollment_start' => $startDate,
-                'enrollment_end' => $endDate,
-                'enrollment_open' => true
-            ]);
-            
-            Log::info('Auto-set enrollment dates for active school year', [
-                'school_year_id' => $activeSchoolYear->id,
-                'enrollment_start' => $startDate,
-                'enrollment_end' => $endDate
-            ]);
-            
-            // Refresh the model
-            $activeSchoolYear = $activeSchoolYear->fresh();
-        }
-        
-        // Get enrollment settings from active school year
-        $enrollmentSettings = [
-            'enrollment_open' => $activeSchoolYear ? $activeSchoolYear->enrollment_open : false,
-            'enrollment_start' => $activeSchoolYear ? $activeSchoolYear->enrollment_start : null,
-            'enrollment_end' => $activeSchoolYear ? $activeSchoolYear->enrollment_end : null,
-        ];
-
-        return Inertia::render('Registrar/RegistrarSettings', [
-            'activeSchoolYear' => $activeSchoolYear,
-            'enrollmentSettings' => $enrollmentSettings
-        ]);
-    }
-
-    /**
-     * Toggle enrollment open/close status
-     */
-    public function toggleEnrollment()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            if (!$activeSchoolYear) {
-                return redirect()->back()->withErrors([
-                    'general' => 'No active school year found. Please activate a school year first.'
-                ]);
-            }
-
-            // Auto-set enrollment dates if they don't exist
-            if (!$activeSchoolYear->enrollment_start || !$activeSchoolYear->enrollment_end) {
-                $startDate = now();
-                $endDate = now()->addDays(30);
-                
-                $activeSchoolYear->update([
-                    'enrollment_start' => $startDate,
-                    'enrollment_end' => $endDate
-                ]);
-                
-                Log::info('Auto-set enrollment dates during toggle', [
-                    'school_year_id' => $activeSchoolYear->id,
-                    'enrollment_start' => $startDate,
-                    'enrollment_end' => $endDate
-                ]);
-            }
-
-            // Toggle the enrollment_open status
-            $newStatus = !$activeSchoolYear->enrollment_open;
-            $activeSchoolYear->update(['enrollment_open' => $newStatus]);
-
-            Log::info('Enrollment status toggled', [
-                'school_year_id' => $activeSchoolYear->id,
-                'year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
-                'old_status' => !$newStatus,
-                'new_status' => $newStatus,
-                'toggled_by' => Auth::id()
-            ]);
-
-            $message = $newStatus 
-                ? 'Enrollment has been opened for new Grade 11 students.' 
-                : 'Enrollment has been closed for new Grade 11 students.';
-
-            return redirect()->back()->with('success', $message);
-
-        } catch (\Exception $e) {
-            Log::error('Error toggling enrollment status: ' . $e->getMessage());
-            return redirect()->back()->withErrors([
-                'general' => 'Failed to update enrollment status: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Toggle coordinator COR printing permission
-     */
-    public function toggleCoordinatorCorPrint()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            if (!$activeSchoolYear) {
-                return redirect()->back()->withErrors([
-                    'general' => 'No active school year found. Please activate a school year first.'
-                ]);
-            }
-
-            // Get current status before toggle
-            $oldStatus = $activeSchoolYear->allow_coordinator_cor_print;
-            
-            // Toggle the allow_coordinator_cor_print status
-            $newStatus = !$oldStatus;
-            
-            Log::info('BEFORE Toggle - Coordinator COR printing status', [
-                'school_year_id' => $activeSchoolYear->id,
-                'current_status' => $oldStatus,
-                'will_change_to' => $newStatus
-            ]);
-            
-            $activeSchoolYear->update(['allow_coordinator_cor_print' => $newStatus]);
-            
-            // Refresh the model to get the updated value
-            $activeSchoolYear->refresh();
-            
-            Log::info('AFTER Toggle - Coordinator COR printing status', [
-                'school_year_id' => $activeSchoolYear->id,
-                'database_status' => $activeSchoolYear->allow_coordinator_cor_print,
-                'expected_status' => $newStatus,
-                'toggle_successful' => $activeSchoolYear->allow_coordinator_cor_print === $newStatus,
-                'toggled_by' => Auth::id()
-            ]);
-
-            $message = $newStatus 
-                ? 'Coordinator COR printing has been enabled.' 
-                : 'Coordinator COR printing has been disabled.';
-
-            return redirect()->back()->with('success', $message);
-
-        } catch (\Exception $e) {
-            Log::error('Error toggling coordinator COR printing permission: ' . $e->getMessage());
-            return redirect()->back()->withErrors([
-                'general' => 'Failed to update coordinator COR printing permission: ' . $e->getMessage()
-            ]);
+                'success' => false,
+                'message' => 'Failed to process grade approval. Please try again.'
+            ], 500);
         }
     }
 
@@ -2894,978 +602,3909 @@ class RegistrarController extends Controller
      */
     public function reportsPage()
     {
-        return Inertia::render('Registrar/RegistrarReports');
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        $reports = [
+            'enrollment_by_strand' => $this->getEnrollmentByStrand($activeSchoolYear),
+            'grade_approval_summary' => $this->getGradeApprovalSummary(),
+            'faculty_summary' => $this->getFacultySummary()
+        ];
+
+        // Get filter options
+        $filterOptions = [
+            'schoolYears' => SchoolYear::orderBy('year_start', 'desc')->get(['id', 'year', 'year_start', 'year_end']),
+            'strands' => DB::table('strands')->select('id', 'name', 'code')->orderBy('name')->get(),
+            'sections' => DB::table('sections')->select('id', 'section_name', 'strand_id')->orderBy('section_name')->get(),
+            'subjects' => DB::table('subjects')->select('id', 'name', 'code')->orderBy('name')->get(),
+            'semesters' => ['1st', '2nd']
+        ];
+
+        return Inertia::render('Registrar/Reports', [
+            'reports' => $reports,
+            'activeSchoolYear' => $activeSchoolYear,
+            'filterOptions' => $filterOptions
+        ]);
     }
 
     /**
-     * Get filter options for reports
+     * Get enrollment statistics by strand
      */
-    public function getReportFilterOptions()
+    private function getEnrollmentByStrand($schoolYear)
     {
+        if (!$schoolYear) return [];
+
         try {
-            $schoolYears = SchoolYear::select('id', 'year_start', 'year_end', 'semester')
-                ->orderBy('year_start', 'desc')
-                ->get();
+            // Check which strand column exists in enrollments table
+            $strandColumn = 'strand_id'; // Default to strand_id
+            
+            if (Schema::hasColumn('enrollments', 'strand_id')) {
+                $strandColumn = 'strand_id';
+            } elseif (Schema::hasColumn('enrollments', 'assigned_strand_id')) {
+                $strandColumn = 'assigned_strand_id';
+            } else {
+                // If neither column exists, return empty array
+                Log::warning('Neither strand_id nor assigned_strand_id column found in enrollments table');
+                return [];
+            }
 
-            $sections = Section::select('id', 'section_name')
-                ->orderBy('section_name')
+            return DB::table('enrollments')
+                ->join('strands', "enrollments.{$strandColumn}", '=', 'strands.id')
+                ->where('enrollments.school_year_id', $schoolYear->id)
+                ->select('strands.name', 'strands.code', 
+                    DB::raw('COUNT(*) as total'),
+                    DB::raw('SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as approved'),
+                    DB::raw('SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending'))
+                ->groupBy('strands.id', 'strands.name', 'strands.code')
                 ->get();
+        } catch (\Exception $e) {
+            Log::error('Error in getEnrollmentByStrand: ' . $e->getMessage());
+            return [];
+        }
+    }
 
-            $strands = Strand::select('id', 'code', 'name')
-                ->orderBy('code')
-                ->get();
+    /**
+     * Get grade approval summary
+     */
+    private function getGradeApprovalSummary()
+    {
+        return DB::table('grades')
+            ->select('status',
+                DB::raw('COUNT(*) as count'))
+            ->groupBy('status')
+            ->get();
+    }
 
-            $faculty = User::select('id', 'firstname', 'lastname')
-                ->whereIn('role', ['faculty', 'coordinator'])
-                ->orderBy('firstname')
-                ->get();
+    /**
+     * Get faculty summary
+     */
+    private function getFacultySummary()
+    {
+        return [
+            'total_faculty' => User::where('role', 'faculty')->count(),
+            'coordinators' => User::where('is_coordinator', true)->count(),
+            'password_change_required' => User::where('password_change_required', true)->count()
+        ];
+    }
+
+    /**
+     * Update faculty member
+     */
+    public function updateFaculty(Request $request, $id)
+    {
+        $faculty = User::findOrFail($id);
+
+        $request->validate([
+            'firstname' => 'required|string|max:255',
+            'lastname' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email,' . $id,
+            'assigned_strand_id' => 'nullable|exists:strands,id'
+        ]);
+
+        $faculty->update([
+            'firstname' => $request->firstname,
+            'lastname' => $request->lastname,
+            'email' => $request->email,
+            'assigned_strand_id' => $request->assigned_strand_id
+        ]);
+
+        Log::info('Faculty updated', [
+            'faculty_id' => $faculty->id,
+            'updated_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Faculty updated successfully',
+            'faculty' => $faculty
+        ]);
+    }
+
+    /**
+     * Delete faculty member
+     */
+    public function deleteFaculty($id)
+    {
+        $faculty = User::findOrFail($id);
+
+        // Soft delete by disabling the account
+        $faculty->update(['is_disabled' => true]);
+
+        Log::info('Faculty disabled', [
+            'faculty_id' => $faculty->id,
+            'disabled_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Faculty account disabled successfully'
+        ]);
+    }
+
+    /**
+     * Delete strand
+     */
+    public function deleteStrand($id)
+    {
+        $strand = Strand::findOrFail($id);
+
+        // Check if strand has subjects or students
+        $hasSubjects = Subject::where('strand_id', $id)->exists();
+        $hasStudents = Enrollment::where('strand_id', $id)->exists();
+
+        if ($hasSubjects || $hasStudents) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete strand. It has associated subjects or students.'
+            ], 400);
+        }
+
+        $strand->delete();
+
+        Log::info('Strand deleted', [
+            'strand_id' => $id,
+            'deleted_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Strand deleted successfully'
+        ]);
+    }
+
+    /**
+     * Update subject
+     */
+    public function updateSubject(Request $request, $id)
+    {
+        $subject = Subject::findOrFail($id);
+
+        $request->validate([
+            'subject_name' => 'required|string|max:255',
+            'subject_code' => 'required|string|max:20|unique:subjects,code,' . $id,
+            'strand_id' => 'nullable|exists:strands,id',
+            'semester' => 'required|in:1,2',
+            'grade_level' => 'required|in:11,12'
+        ]);
+
+        $subject->update([
+            'name' => $request->subject_name,
+            'code' => $request->subject_code,
+            'strand_id' => $request->strand_id,
+            'semester' => $request->semester,
+            'year_level' => $request->grade_level
+        ]);
+
+        Log::info('Subject updated', [
+            'subject_id' => $subject->id,
+            'updated_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Subject updated successfully',
+            'subject' => $subject->load('strand')
+        ]);
+    }
+
+    /**
+     * Delete subject
+     */
+    public function deleteSubject($id)
+    {
+        $subject = Subject::findOrFail($id);
+
+        // Check if subject has grades or schedules
+        $hasGrades = Grade::where('subject_id', $id)->exists();
+        
+        if ($hasGrades) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete subject. It has associated grades or schedules.'
+            ], 400);
+        }
+
+        $subject->delete();
+
+        Log::info('Subject deleted', [
+            'subject_id' => $id,
+            'deleted_by' => Auth::id()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Subject deleted successfully'
+        ]);
+    }
+
+    /**
+     * Reject an enrollment
+     */
+    public function rejectEnrollment(Request $request, $id)
+    {
+        $enrollment = Enrollment::findOrFail($id);
+
+        $request->validate([
+            'rejection_reason' => 'required|string|max:500'
+        ]);
+
+        // Get the previously assigned section to update capacity
+        $previousSection = null;
+        if ($enrollment->assigned_section_id) {
+            $previousSection = Section::find($enrollment->assigned_section_id);
+        }
+
+        $enrollment->update([
+            'status' => 'rejected',
+            'rejection_reason' => $request->rejection_reason,
+            'rejected_at' => now(),
+            'rejected_by' => Auth::id(),
+            'assigned_section_id' => null // Remove section assignment on rejection
+        ]);
+
+        // Update capacity status of the previously assigned section
+        if ($previousSection) {
+            $previousSection->updateCapacityStatus();
+        }
+
+        Log::info('Enrollment rejected', [
+            'enrollment_id' => $enrollment->id,
+            'student_id' => $enrollment->student_id,
+            'rejected_by' => Auth::id(),
+            'reason' => $request->rejection_reason,
+            'previous_section_id' => $previousSection ? $previousSection->id : null
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Enrollment rejected successfully'
+        ]);
+    }
+
+    /**
+     * Export report
+     */
+    public function exportReport($type, Request $request)
+    {
+        $format = $request->query('format', 'excel');
+        $range = $request->query('range', 'current');
+
+        // This would typically use Laravel Excel or similar package
+        // For now, return a JSON response
+        return response()->json([
+            'success' => true,
+            'message' => "Export functionality for {$type} report in {$format} format will be implemented",
+            'type' => $type,
+            'format' => $format,
+            'range' => $range
+        ]);
+    }
+
+    /**
+     * Send email to faculty
+     */
+    public function sendFacultyEmail($id)
+    {
+        $faculty = User::findOrFail($id);
+
+        // Generate password if it doesn't exist
+        if (!$faculty->generated_password) {
+            $password = $this->generateSecurePassword();
+            $faculty->update([
+                'generated_password' => $password,
+                'password' => Hash::make($password),
+                'password_change_required' => true,
+                'password_changed' => false
+            ]);
+            
+            Log::info('Generated new password for faculty', [
+                'faculty_id' => $faculty->id,
+                'generated_by' => Auth::id()
+            ]);
+        }
+
+        try {
+            $this->sendFacultyCredentials($faculty, $faculty->generated_password);
+
+            Log::info('Faculty credentials email resent', [
+                'faculty_id' => $faculty->id,
+                'sent_by' => Auth::id()
+            ]);
 
             return response()->json([
                 'success' => true,
-                'schoolYears' => $schoolYears,
-                'sections' => $sections,
-                'strands' => $strands,
-                'faculty' => $faculty
+                'message' => 'Email sent successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to resend faculty credentials email', [
+                'faculty_id' => $faculty->id,
+                'error' => $e->getMessage()
             ]);
 
-        } catch (\Exception $e) {
-            Log::error('Error fetching report filter options: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to load filter options'
+                'message' => 'Failed to send email'
             ], 500);
         }
     }
 
     /**
-     * Generate report based on filters
+     * Sections Management Page
      */
-    public function generateReport(Request $request)
+    public function sectionsPage()
+    {
+        $sections = Section::with(['strand', 'adviser', 'schoolYear'])->orderBy('section_name')->get();
+        
+        // Add capacity information to each section
+        $sections->each(function ($section) {
+            $section->capacity_status = $section->capacity_status;
+            $section->current_enrollment = $section->getCurrentEnrollmentCount();
+        });
+        $strands = Strand::all();
+        
+        // Get faculty and coordinators with proper filtering and debugging
+        $faculty = User::whereIn('role', ['faculty', 'coordinator'])
+            ->where(function($query) {
+                $query->where('is_disabled', false)
+                      ->orWhereNull('is_disabled'); // Include users where is_disabled is null
+            })
+            ->orderBy('firstname')
+            ->orderBy('lastname')
+            ->get(['id', 'firstname', 'lastname', 'email', 'role', 'is_coordinator', 'assigned_strand_id']);
+        
+        // Debug logging for faculty data
+        Log::info('Faculty data for sections dropdown:', [
+            'faculty_count' => $faculty->count(),
+            'faculty_data' => $faculty->toArray()
+        ]);
+        
+        // Filter school years based on semester progression rules
+        $schoolYears = $this->getAvailableSchoolYears();
+
+        return Inertia::render('Registrar/Sections', [
+            'sections' => $sections,
+            'strands' => $strands,
+            'faculty' => $faculty,
+            'schoolYears' => $schoolYears
+        ]);
+    }
+
+    /**
+     * Get available school years based on semester progression rules
+     */
+    private function getAvailableSchoolYears()
+    {
+        // For section creation, allow all school years regardless of dates
+        // Coordinators should be able to create sections for future semesters
+        return SchoolYear::orderBy('year_start', 'desc')
+            ->orderBy('semester', 'asc')
+            ->get();
+    }
+
+    /**
+     * Check if a school year is available based on semester progression rules
+     */
+    private function isSchoolYearAvailable($schoolYear)
+    {
+        // Always allow 1st semester
+        if ($schoolYear->semester === '1st Semester') {
+            return true;
+        }
+        
+        // For 2nd semester, check if 1st semester of the same academic year has ended
+        if ($schoolYear->semester === '2nd Semester') {
+            $firstSemester = SchoolYear::where('year_start', $schoolYear->year_start)
+                ->where('year_end', $schoolYear->year_end)
+                ->where('semester', '1st Semester')
+                ->first();
+
+            if ($firstSemester) {
+                // Check if 1st semester has ended (current date is after 1st semester end date)
+                return now()->gt($firstSemester->end_date);
+            } else {
+                // If no 1st semester exists for this academic year, allow 2nd semester
+                return true;
+            }
+        }
+        
+        // Allow other semester types (if any)
+        return true;
+    }
+
+    /**
+     * Create a new section
+     */
+    public function createSection(Request $request)
     {
         try {
-            $type = $request->get('type', 'students');
-            $filters = $request->only(['schoolYear', 'semester', 'section', 'strand', 'faculty', 'gradeLevel']);
-            $search = $request->get('search', '');
+            $request->validate([
+                'section_name' => 'required|string|max:255',
+                'year_level' => 'required|integer|min:11|max:12',
+                'strand_id' => 'required|exists:strands,id',
+                'adviser_id' => 'nullable|exists:users,id',
+                'school_year_id' => 'required|exists:school_years,id',
+                'max_capacity' => 'required|integer|min:1|max:100',
+            ]);
 
-            if ($type === 'students') {
-                return $this->generateStudentReport($filters, $search);
-            } elseif ($type === 'grades') {
-                return $this->generateGradesReport($filters, $search);
+            // Validate semester progression rules
+            $selectedSchoolYear = SchoolYear::findOrFail($request->school_year_id);
+            if (!$this->isSchoolYearAvailable($selectedSchoolYear)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot select 2nd semester until the 1st semester of the same academic year has ended.',
+                ], 400);
             }
 
+            // Check if section name already exists for the same year level and school year
+            $existingSection = Section::where('section_name', $request->section_name)
+                ->where('year_level', $request->year_level)
+                ->where('school_year_id', $request->school_year_id)
+                ->first();
+
+            if ($existingSection) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Section name already exists for this year level and school year.',
+                ], 400);
+            }
+
+            $section = Section::create([
+                'section_name' => $request->section_name,
+                'year_level' => $request->year_level,
+                'strand_id' => $request->strand_id,
+                'adviser_id' => $request->adviser_id,
+                'school_year_id' => $request->school_year_id,
+                'max_capacity' => $request->max_capacity,
+                'is_full' => false,
+            ]);
+
+            Log::info('Section created', [
+                'section_id' => $section->id,
+                'section_name' => $section->section_name,
+                'created_by' => Auth::id(),
+            ]);
+
             return response()->json([
-                'success' => false,
-                'message' => 'Invalid report type'
-            ], 400);
+                'success' => true,
+                'message' => 'Section created successfully.',
+                'section' => $section->load(['strand', 'adviser', 'schoolYear']),
+            ]);
 
         } catch (\Exception $e) {
-            Log::error('Error generating report: ' . $e->getMessage());
+            Log::error('Failed to create section', [
+                'error' => $e->getMessage(),
+                'created_by' => Auth::id(),
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to generate report'
+                'message' => 'Failed to create section. Please try again.',
             ], 500);
         }
     }
+
+    /**
+     * Update a section
+     */
+    public function updateSection(Request $request, $id)
+    {
+        try {
+            $section = Section::findOrFail($id);
+
+            $request->validate([
+                'section_name' => 'required|string|max:255',
+                'year_level' => 'required|integer|min:11|max:12',
+                'strand_id' => 'required|exists:strands,id',
+                'adviser_id' => 'nullable|exists:users,id',
+                'school_year_id' => 'required|exists:school_years,id',
+                'max_capacity' => 'required|integer|min:1|max:100',
+            ]);
+
+            // Validate semester progression rules
+            $selectedSchoolYear = SchoolYear::findOrFail($request->school_year_id);
+            if (!$this->isSchoolYearAvailable($selectedSchoolYear)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot select 2nd semester until the 1st semester of the same academic year has ended.',
+                ], 400);
+            }
+
+            // Check if section name already exists for the same year level and school year (excluding current section)
+            $existingSection = Section::where('section_name', $request->section_name)
+                ->where('year_level', $request->year_level)
+                ->where('school_year_id', $request->school_year_id)
+                ->where('id', '!=', $id)
+                ->first();
+
+            if ($existingSection) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Section name already exists for this year level and school year.',
+                ], 400);
+            }
+
+            // Check if capacity is being reduced and if it would exceed current enrollment
+            $currentEnrollment = $section->getCurrentEnrollmentCount();
+            if ($request->max_capacity < $currentEnrollment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Cannot reduce capacity to {$request->max_capacity}. Current enrollment is {$currentEnrollment} students.",
+                ], 400);
+            }
+
+            $section->update([
+                'section_name' => $request->section_name,
+                'year_level' => $request->year_level,
+                'strand_id' => $request->strand_id,
+                'adviser_id' => $request->adviser_id,
+                'school_year_id' => $request->school_year_id,
+                'max_capacity' => $request->max_capacity,
+            ]);
+
+            // Update capacity status after changing capacity
+            $section->updateCapacityStatus();
+
+            Log::info('Section updated', [
+                'section_id' => $section->id,
+                'section_name' => $section->section_name,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Section updated successfully.',
+                'section' => $section->fresh()->load(['strand', 'adviser', 'schoolYear']),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update section', [
+                'error' => $e->getMessage(),
+                'section_id' => $id,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update section. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a section
+     */
+    public function deleteSection($id)
+    {
+        try {
+            $section = Section::findOrFail($id);
+
+            // Check if section has enrolled students
+            $hasStudents = $section->enrollments()->count() > 0;
+
+            if ($hasStudents) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete section. It has enrolled students.',
+                ], 400);
+            }
+
+            $sectionName = $section->section_name;
+            $section->delete();
+
+            Log::info('Section deleted', [
+                'section_id' => $id,
+                'section_name' => $sectionName,
+                'deleted_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Section deleted successfully.',
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to delete section', [
+                'error' => $e->getMessage(),
+                'section_id' => $id,
+                'deleted_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete section. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * School Years Management Page
+     */
+    public function schoolYearsPage()
+    {
+        $schoolYears = SchoolYear::orderBy('year_start', 'desc')->get();
+
+        return Inertia::render('Registrar/SchoolYears', [
+            'schoolYears' => $schoolYears
+        ]);
+    }
+
+    /**
+     * Create a new school year
+     */
+    public function createSchoolYear(Request $request)
+    {
+        try {
+            Log::info('School year creation attempt', [
+                'request_data' => $request->all(),
+                'user_id' => Auth::id(),
+            ]);
+            // Semester-specific validation rules
+            $rules = [
+                'year_start' => 'required|integer|min:2020|max:2050',
+                'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
+                'semester' => 'required|in:1st Semester,2nd Semester',
+                'start_date' => 'required|date',
+                'end_date' => 'required|date|after:start_date',
+                'enrollment_start_date' => 'required|date',  // ← FIXED: Use new field names
+                'enrollment_end_date' => 'required|date|after:enrollment_start_date', // ← FIXED: Use new field names
+                'grading_deadline' => 'required|date',
+                'is_active' => 'boolean',
+                'is_enrollment_open' => 'boolean',
+            ];
+
+            // Add semester-specific quarter validation
+            if ($request->semester === '1st Semester') {
+                $rules['quarter_1_start'] = 'required|date';
+                $rules['quarter_1_end'] = 'required|date|after:quarter_1_start';
+                $rules['quarter_2_start'] = 'required|date|after:quarter_1_end';
+                $rules['quarter_2_end'] = 'required|date|after:quarter_2_start';
+                $rules['quarter_3_start'] = 'nullable|date';
+                $rules['quarter_3_end'] = 'nullable|date';
+                $rules['quarter_4_start'] = 'nullable|date';
+                $rules['quarter_4_end'] = 'nullable|date';
+            } else { // 2nd Semester
+                $rules['quarter_1_start'] = 'nullable|date';
+                $rules['quarter_1_end'] = 'nullable|date';
+                $rules['quarter_2_start'] = 'nullable|date';
+                $rules['quarter_2_end'] = 'nullable|date';
+                $rules['quarter_3_start'] = 'required|date';
+                $rules['quarter_3_end'] = 'required|date|after:quarter_3_start';
+                $rules['quarter_4_start'] = 'required|date|after:quarter_3_end';
+                $rules['quarter_4_end'] = 'required|date|after:quarter_4_start';
+            }
+
+            $request->validate($rules);
+
+            // If setting as active, deactivate other school years
+            if ($request->is_active) {
+                SchoolYear::where('is_active', true)->update(['is_active' => false]);
+            }
+
+            $schoolYear = SchoolYear::create([
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => $request->semester,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'enrollment_start_date' => $request->enrollment_start_date,  // New field
+                'enrollment_end_date' => $request->enrollment_end_date,      // New field
+                'enrollment_start' => $request->enrollment_start_date,       // Sync old field
+                'enrollment_end' => $request->enrollment_end_date,           // Sync old field
+                'quarter_1_start' => $request->quarter_1_start ?: null,
+                'quarter_1_end' => $request->quarter_1_end ?: null,
+                'quarter_2_start' => $request->quarter_2_start ?: null,
+                'quarter_2_end' => $request->quarter_2_end ?: null,
+                'quarter_3_start' => $request->quarter_3_start ?: null,
+                'quarter_3_end' => $request->quarter_3_end ?: null,
+                'quarter_4_start' => $request->quarter_4_start ?: null,
+                'quarter_4_end' => $request->quarter_4_end ?: null,
+                'grading_deadline' => $request->grading_deadline,
+                'is_active' => $request->boolean('is_active', false),
+                'is_current_academic_year' => $request->boolean('is_active', false),
+                'is_enrollment_open' => $request->boolean('is_enrollment_open', false),
+            ]);
+
+            Log::info('School year created', [
+                'school_year_id' => $schoolYear->id,
+                'year' => $schoolYear->year_start . '-' . $schoolYear->year_end,
+                'semester' => $schoolYear->semester,
+                'created_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'School year created successfully.',
+                'schoolYear' => $schoolYear,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to create school year', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all(),
+                'created_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create school year: ' . $e->getMessage(),
+                'debug' => app()->environment('local') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Update a school year
+     */
+    public function updateSchoolYear(Request $request, $id)
+    {
+        try {
+            $schoolYear = SchoolYear::findOrFail($id);
+
+            // Semester-specific validation rules
+            $rules = [
+                'year_start' => 'required|integer|min:2020|max:2050',
+                'year_end' => 'required|integer|min:2020|max:2050|gt:year_start',
+                'semester' => 'required|in:1st Semester,2nd Semester',
+                'start_date' => 'required|date',
+                'end_date' => 'required|date|after:start_date',
+                'enrollment_start' => 'nullable|date',
+                'enrollment_end' => 'nullable|date|after:enrollment_start',
+                'grading_deadline' => 'nullable|date',
+                'is_active' => 'boolean',
+                'is_enrollment_open' => 'boolean',
+            ];
+
+            // Add semester-specific quarter validation
+            if ($request->semester === '1st Semester') {
+                $rules['quarter_1_start'] = 'required|date';
+                $rules['quarter_1_end'] = 'required|date|after:quarter_1_start';
+                $rules['quarter_2_start'] = 'required|date|after:quarter_1_end';
+                $rules['quarter_2_end'] = 'required|date|after:quarter_2_start';
+                $rules['quarter_3_start'] = 'nullable|date';
+                $rules['quarter_3_end'] = 'nullable|date';
+                $rules['quarter_4_start'] = 'nullable|date';
+                $rules['quarter_4_end'] = 'nullable|date';
+            } else { // 2nd Semester
+                $rules['quarter_1_start'] = 'nullable|date';
+                $rules['quarter_1_end'] = 'nullable|date';
+                $rules['quarter_2_start'] = 'nullable|date';
+                $rules['quarter_2_end'] = 'nullable|date';
+                $rules['quarter_3_start'] = 'required|date';
+                $rules['quarter_3_end'] = 'required|date|after:quarter_3_start';
+                $rules['quarter_4_start'] = 'required|date|after:quarter_3_end';
+                $rules['quarter_4_end'] = 'required|date|after:quarter_4_start';
+            }
+
+            $request->validate($rules);
+
+            // If setting as active, deactivate other school years
+            if ($request->is_active && !$schoolYear->is_active) {
+                SchoolYear::where('is_active', true)->where('id', '!=', $id)->update(['is_active' => false]);
+            }
+
+            $updateData = [
+                'year_start' => $request->year_start,
+                'year_end' => $request->year_end,
+                'semester' => $request->semester,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'quarter_1_start' => $request->quarter_1_start ?: null,
+                'quarter_1_end' => $request->quarter_1_end ?: null,
+                'quarter_2_start' => $request->quarter_2_start ?: null,
+                'quarter_2_end' => $request->quarter_2_end ?: null,
+                'quarter_3_start' => $request->quarter_3_start ?: null,
+                'quarter_3_end' => $request->quarter_3_end ?: null,
+                'quarter_4_start' => $request->quarter_4_start ?: null,
+                'quarter_4_end' => $request->quarter_4_end ?: null,
+                'is_active' => $request->boolean('is_active', false),
+                'is_current_academic_year' => $request->boolean('is_active', false),
+                'is_enrollment_open' => $request->boolean('is_enrollment_open', false),
+            ];
+
+            // Only update enrollment dates if provided
+            if ($request->has('enrollment_start')) {
+                $updateData['enrollment_start'] = $request->enrollment_start;
+                $updateData['enrollment_start_date'] = $request->enrollment_start;
+            }
+            if ($request->has('enrollment_end')) {
+                $updateData['enrollment_end'] = $request->enrollment_end;
+                $updateData['enrollment_end_date'] = $request->enrollment_end;
+            }
+            if ($request->has('grading_deadline')) {
+                $updateData['grading_deadline'] = $request->grading_deadline;
+            }
+
+            $schoolYear->update($updateData);
+
+            Log::info('School year updated', [
+                'school_year_id' => $schoolYear->id,
+                'year' => $schoolYear->year_start . '-' . $schoolYear->year_end,
+                'semester' => $schoolYear->semester,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'School year updated successfully.',
+                'schoolYear' => $schoolYear->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update school year', [
+                'error' => $e->getMessage(),
+                'school_year_id' => $id,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update school year. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a school year
+     */
+    public function deleteSchoolYear($id)
+    {
+        try {
+            $schoolYear = SchoolYear::findOrFail($id);
+
+            // Check if school year has associated data
+            $hasEnrollments = $schoolYear->enrollments()->count() > 0;
+            $hasGrades = $schoolYear->grades()->count() > 0;
+            $hasSubjects = Subject::where('school_year_id', $id)->count() > 0;
+
+            if ($hasEnrollments || $hasGrades || $hasSubjects) {
+                $associations = [];
+                if ($hasEnrollments) $associations[] = 'enrollments';
+                if ($hasGrades) $associations[] = 'grades';
+                if ($hasSubjects) $associations[] = 'subjects';
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete school year. It has associated ' . implode(', ', $associations) . '. Please remove or reassign these records first.',
+                ], 400);
+            }
+
+            $yearInfo = $schoolYear->year_start . '-' . $schoolYear->year_end . ' (' . $schoolYear->semester . ')';
+            $schoolYear->delete();
+
+            Log::info('School year deleted', [
+                'school_year_id' => $id,
+                'year_info' => $yearInfo,
+                'deleted_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'School year deleted successfully.',
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to delete school year', [
+                'error' => $e->getMessage(),
+                'school_year_id' => $id,
+                'deleted_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete school year. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Toggle school year active status
+     */
+    public function toggleSchoolYearStatus(Request $request, $id)
+    {
+        try {
+            $schoolYear = SchoolYear::findOrFail($id);
+            
+            $request->validate([
+                'is_active' => 'required|boolean',
+            ]);
+
+            // If activating, deactivate other school years
+            if ($request->is_active) {
+                SchoolYear::where('is_active', true)->where('id', '!=', $id)->update(['is_active' => false]);
+            }
+
+            $schoolYear->update([
+                'is_active' => $request->is_active,
+                'is_current_academic_year' => $request->is_active,
+            ]);
+
+            Log::info('School year status toggled', [
+                'school_year_id' => $id,
+                'is_active' => $request->is_active,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'School year status updated successfully.',
+                'schoolYear' => $schoolYear->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to toggle school year status', [
+                'error' => $e->getMessage(),
+                'school_year_id' => $id,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update school year status. Please try again.',
+            ], 500);
+        }
+    }
+
+
+    /**
+     * Toggle faculty status
+     */
+    public function toggleFacultyStatus(Request $request, $id)
+    {
+        try {
+            $faculty = User::findOrFail($id);
+            
+            $request->validate([
+                'is_coordinator' => 'sometimes|boolean',
+                'is_disabled' => 'sometimes|boolean',
+            ]);
+
+            $updateData = [];
+            
+            // Handle coordinator status toggle
+            if ($request->has('is_coordinator')) {
+                $updateData['is_coordinator'] = $request->is_coordinator;
+                $updateData['role'] = $request->is_coordinator ? 'coordinator' : 'faculty';
+            }
+            
+            // Handle enable/disable toggle
+            if ($request->has('is_disabled')) {
+                $updateData['is_disabled'] = $request->is_disabled;
+            }
+
+            $faculty->update($updateData);
+
+            Log::info('Faculty status toggled', [
+                'faculty_id' => $id,
+                'update_data' => $updateData,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Faculty status updated successfully.',
+                'faculty' => $faculty,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to toggle faculty status', [
+                'error' => $e->getMessage(),
+                'faculty_id' => $id,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update faculty status. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Profile Management Page
+     */
+    public function profilePage()
+    {
+        $user = Auth::user();
+
+        return Inertia::render('Registrar/Profile', [
+            'user' => $user
+        ]);
+    }
+
+    /**
+     * Update Profile
+     */
+    public function updateProfile(Request $request)
+    {
+        try {
+            /** @var \App\Models\User $user */
+            $user = Auth::user();
+            
+            $request->validate([
+                'firstname' => 'required|string|max:255',
+                'lastname' => 'required|string|max:255',
+                'email' => 'required|email|unique:users,email,' . $user->id,
+            ]);
+
+            $user->update([
+                'firstname' => $request->firstname,
+                'lastname' => $request->lastname,
+                'email' => $request->email,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile updated successfully.',
+                'user' => $user->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update profile', [
+                'error' => $e->getMessage(),
+                'user_id' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update profile. Please try again.',
+            ], 500);
+        }
+    }
+
+    // ===== ACADEMIC CALENDAR MANAGEMENT =====
+
+    /**
+     * Display academic calendar management page.
+     */
+    public function academicCalendarPage()
+    {
+        $schoolYears = SchoolYear::orderBy('year_start', 'desc')->get();
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+
+        return Inertia::render('Registrar/AcademicCalendar', [
+            'schoolYears' => $schoolYears,
+            'activeSchoolYear' => $activeSchoolYear,
+        ]);
+    }
+
+    /**
+     * Update academic calendar for a school year.
+     */
+    public function updateAcademicCalendar(Request $request, $schoolYearId)
+    {
+        $request->validate([
+            'enrollment_start' => 'nullable|date',
+            'enrollment_end' => 'nullable|date|after_or_equal:enrollment_start',
+            'quarter_1_start' => 'nullable|date',
+            'quarter_1_end' => 'nullable|date|after_or_equal:quarter_1_start',
+            'quarter_2_start' => 'nullable|date',
+            'quarter_2_end' => 'nullable|date|after_or_equal:quarter_2_start',
+            'quarter_3_start' => 'nullable|date',
+            'quarter_3_end' => 'nullable|date|after_or_equal:quarter_3_start',
+            'quarter_4_start' => 'nullable|date',
+            'quarter_4_end' => 'nullable|date|after_or_equal:quarter_4_start',
+            'grading_deadline' => 'nullable|date',
+            'is_enrollment_open' => 'boolean',
+        ]);
+
+        $schoolYear = SchoolYear::findOrFail($schoolYearId);
+
+        try {
+            // Log the incoming data for debugging
+            Log::info('Updating academic calendar', [
+                'school_year_id' => $schoolYearId,
+                'user_id' => Auth::id(),
+                'data' => $request->all()
+            ]);
+
+            $updateData = [
+                'enrollment_start' => $request->enrollment_start,
+                'enrollment_end' => $request->enrollment_end,
+                'quarter_1_start' => $request->quarter_1_start,
+                'quarter_1_end' => $request->quarter_1_end,
+                'quarter_2_start' => $request->quarter_2_start,
+                'quarter_2_end' => $request->quarter_2_end,
+                'quarter_3_start' => $request->quarter_3_start,
+                'quarter_3_end' => $request->quarter_3_end,
+                'quarter_4_start' => $request->quarter_4_start,
+                'quarter_4_end' => $request->quarter_4_end,
+                'grading_deadline' => $request->grading_deadline,
+                'is_enrollment_open' => $request->boolean('is_enrollment_open', false),
+            ];
+
+            // Also update the new field names for consistency
+            if ($request->enrollment_start) {
+                $updateData['enrollment_start_date'] = $request->enrollment_start;
+            }
+            if ($request->enrollment_end) {
+                $updateData['enrollment_end_date'] = $request->enrollment_end;
+            }
+
+            $schoolYear->update($updateData);
+
+            Log::info('Academic calendar updated successfully', [
+                'school_year_id' => $schoolYearId,
+                'updated_by' => Auth::id(),
+                'changes' => $updateData
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Academic calendar updated successfully.',
+                'school_year' => $schoolYear->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update academic calendar', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'school_year_id' => $schoolYearId,
+                'user_id' => Auth::id(),
+                'request_data' => $request->all()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to update academic calendar. Please try again.',
+                'message' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Toggle enrollment status for a school year.
+     */
+    public function toggleEnrollmentStatus(Request $request, $schoolYearId)
+    {
+        $request->validate([
+            'is_enrollment_open' => 'required|boolean',
+        ]);
+
+        $schoolYear = SchoolYear::findOrFail($schoolYearId);
+
+        try {
+            $schoolYear->update([
+                'is_enrollment_open' => $request->is_enrollment_open,
+            ]);
+
+            Log::info('Enrollment status toggled', [
+                'school_year_id' => $schoolYearId,
+                'is_enrollment_open' => $request->is_enrollment_open,
+                'updated_by' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Enrollment status updated successfully.',
+                'is_enrollment_open' => $schoolYear->is_enrollment_open,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to toggle enrollment status', [
+                'error' => $e->getMessage(),
+                'school_year_id' => $schoolYearId,
+                'user_id' => Auth::id(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to update enrollment status. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get academic calendar information for API.
+     */
+    public function getAcademicCalendarInfo($schoolYearId = null)
+    {
+        if ($schoolYearId) {
+            $schoolYear = SchoolYear::findOrFail($schoolYearId);
+        } else {
+            $schoolYear = SchoolYear::where('is_active', true)->first();
+        }
+
+        if (!$schoolYear) {
+            return response()->json([
+                'error' => 'No school year found.',
+            ], 404);
+        }
+
+        return response()->json([
+            'school_year' => $schoolYear,
+            'semester_info' => $schoolYear->getSemesterInfo(),
+            'current_quarter' => $schoolYear->getCurrentQuarter(),
+            'is_enrollment_open' => $schoolYear->isEnrollmentOpen(),
+            'is_grading_open' => $schoolYear->isGradingOpen(),
+        ]);
+    }
+
+    /**
+     * Get enrollment periods for all school years.
+     */
+    public function getEnrollmentPeriods()
+    {
+        $schoolYears = SchoolYear::select([
+            'id', 'year_start', 'year_end', 'semester',
+            'enrollment_start', 'enrollment_end', 'is_enrollment_open', 'is_active'
+        ])->orderBy('year_start', 'desc')->get();
+
+        return response()->json([
+            'enrollment_periods' => $schoolYears->map(function ($schoolYear) {
+                return [
+                    'id' => $schoolYear->id,
+                    'display_name' => $schoolYear->display_name,
+                    'enrollment_start' => $schoolYear->enrollment_start,
+                    'enrollment_end' => $schoolYear->enrollment_end,
+                    'is_enrollment_open' => $schoolYear->isEnrollmentOpen(),
+                    'is_active' => $schoolYear->is_active,
+                ];
+            }),
+        ]);
+    }
+
+    /**
+     * Get grading periods for faculty.
+     */
+    public function getGradingPeriods($schoolYearId = null)
+    {
+        if ($schoolYearId) {
+            $schoolYear = SchoolYear::findOrFail($schoolYearId);
+        } else {
+            $schoolYear = SchoolYear::where('is_active', true)->first();
+        }
+
+        if (!$schoolYear) {
+            return response()->json([
+                'error' => 'No school year found.',
+            ], 404);
+        }
+
+        $quarters = [];
+        for ($i = 1; $i <= 4; $i++) {
+            $startField = "quarter_{$i}_start";
+            $endField = "quarter_{$i}_end";
+            
+            $quarters[] = [
+                'quarter' => $i,
+                'name' => "Quarter {$i}",
+                'start_date' => $schoolYear->$startField,
+                'end_date' => $schoolYear->$endField,
+                'is_active' => $schoolYear->getCurrentQuarter() === $i,
+                'duration_months' => 2.5,
+            ];
+        }
+
+        return response()->json([
+            'school_year' => [
+                'id' => $schoolYear->id,
+                'display_name' => $schoolYear->display_name,
+                'semester' => $schoolYear->semester,
+            ],
+            'quarters' => $quarters,
+            'current_quarter' => $schoolYear->getCurrentQuarter(),
+            'grading_deadline' => $schoolYear->grading_deadline,
+            'is_grading_open' => $schoolYear->isGradingOpen(),
+        ]);
+    }
+
+    // ===== SCHEDULE MANAGEMENT =====
+    // Note: ScheduleController functionality can be moved here if needed
+
+    // ===== FACULTY LOAD MANAGEMENT =====
+    // Note: FacultyLoadController functionality can be moved here if needed
+
+    // ===== NOTIFICATION MANAGEMENT =====
+    // Note: NotificationController functionality can be moved here if needed
+
+    // ===== REPORTS =====
+    // Note: reportsPage() and exportReport() methods already exist above
+
+    // ===== COR
+
+    /**
+     * Display summer schedule management page.
+     */
+    public function summerSchedulePage()
+    {
+        // Get students who need summer classes (failed grades or summer required status)
+        $summerEnrollments = Enrollment::with(['studentPersonalInfo.user', 'schoolYear', 'assignedSection'])
+            ->where(function($query) {
+                $query->where('enrollment_type', 'summer')
+                      ->orWhere('academic_year_status', 'summer_required')
+                      ->orWhere('academic_year_status', 'failed');
+            })
+            ->where('status', 'enrolled')
+            ->get();
+
+        // Get students with failed grades using Eloquent for better relationship handling
+        $failedGradeStudentIds = Grade::where('semester_grade', '<', 75)
+            ->where('status', 'approved')
+            ->pluck('student_id')
+            ->unique();
+
+        // Get enrollments for students with failed grades
+        $failedGradeEnrollments = collect();
+        if ($failedGradeStudentIds->isNotEmpty()) {
+            $failedGradeEnrollments = Enrollment::with(['studentPersonalInfo.user', 'schoolYear', 'assignedSection'])
+                ->whereIn('student_id', $failedGradeStudentIds)
+                ->where('status', 'enrolled')
+                ->get();
+        }
+
+        // Merge both collections and remove duplicates
+        $allSummerEnrollments = $summerEnrollments->concat($failedGradeEnrollments)->unique('id');
+
+        $subjects = Subject::where('is_summer_subject', true)->get();
+        $faculty = User::where('role', 'faculty')->get();
+        $schoolYears = SchoolYear::all();
+
+        return Inertia::render('Registrar/SummerSchedule', [
+            'summerEnrollments' => $allSummerEnrollments->values(),
+            'subjects' => $subjects,
+            'faculty' => $faculty,
+            'schoolYears' => $schoolYears
+        ]);
+    }
+
+    /**
+     * Get summer schedules.
+     */
+    public function getSummerSchedules(Request $request)
+    {
+        $query = SummerClassSchedule::with([
+            'enrollment.studentPersonalInfo.user',
+            'subject',
+            'faculty',
+            'schoolYear'
+        ]);
+
+        if ($request->has('school_year_id')) {
+            $query->where('school_year_id', $request->school_year_id);
+        }
+
+        if ($request->has('faculty_id')) {
+            $query->where('faculty_id', $request->faculty_id);
+        }
+
+        if ($request->has('schedule_type')) {
+            $query->where('schedule_type', $request->schedule_type);
+        }
+
+        $schedules = $query->orderBy('start_date')
+            ->orderBy('start_time')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'schedules' => $schedules
+        ]);
+    }
+
+    /**
+     * Create a new summer schedule.
+     */
+    public function createSummerSchedule(Request $request)
+    {
+        $request->validate([
+            'enrollment_id' => 'required|exists:enrollments,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'faculty_id' => 'required|exists:users,id',
+            'school_year_id' => 'required|exists:school_years,id',
+            'schedule_type' => 'required|in:intensive,regular,weekend',
+            'class_days' => 'required|array',
+            'class_days.*' => 'in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+            'start_time' => 'required|date_format:H:i',
+            'end_time' => 'required|date_format:H:i|after:start_time',
+            'room' => 'nullable|string|max:100',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
+            'total_hours' => 'required|integer|min:1|max:200'
+        ]);
+
+        try {
+            // Check for conflicts
+            $conflicts = SummerClassSchedule::where('faculty_id', $request->faculty_id)
+                ->where('school_year_id', $request->school_year_id)
+                ->where('is_active', true)
+                ->where(function ($query) use ($request) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('start_time', '<', $request->end_time)
+                          ->where('end_time', '>', $request->start_time);
+                    });
+                })
+                ->where(function ($query) use ($request) {
+                    $query->where('start_date', '<=', $request->end_date)
+                          ->where('end_date', '>=', $request->start_date);
+                })
+                ->whereRaw('JSON_OVERLAPS(class_days, ?)', [json_encode($request->class_days)])
+                ->exists();
+
+            if ($conflicts) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Schedule conflict detected with existing faculty schedule.'
+                ], 422);
+            }
+
+            $schedule = SummerClassSchedule::create($request->all());
+
+            Log::info('Summer schedule created', [
+                'schedule_id' => $schedule->id,
+                'created_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Summer schedule created successfully.',
+                'schedule' => $schedule->load(['enrollment.studentPersonalInfo.user', 'subject', 'faculty'])
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to create summer schedule', [
+                'error' => $e->getMessage(),
+                'user_id' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to create summer schedule. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Update a summer schedule.
+     */
+    public function updateSummerSchedule(Request $request, $id)
+    {
+        $request->validate([
+            'enrollment_id' => 'required|exists:enrollments,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'faculty_id' => 'required|exists:users,id',
+            'school_year_id' => 'required|exists:school_years,id',
+            'schedule_type' => 'required|in:intensive,regular,weekend',
+            'class_days' => 'required|array',
+            'class_days.*' => 'in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+            'start_time' => 'required|date_format:H:i',
+            'end_time' => 'required|date_format:H:i|after:start_time',
+            'room' => 'nullable|string|max:100',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
+            'total_hours' => 'required|integer|min:1|max:200',
+            'is_active' => 'boolean'
+        ]);
+
+        try {
+            $schedule = SummerClassSchedule::findOrFail($id);
+
+            // Check for conflicts (excluding current schedule)
+            $conflicts = SummerClassSchedule::where('faculty_id', $request->faculty_id)
+                ->where('school_year_id', $request->school_year_id)
+                ->where('is_active', true)
+                ->where('id', '!=', $id)
+                ->where(function ($query) use ($request) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('start_time', '<', $request->end_time)
+                          ->where('end_time', '>', $request->start_time);
+                    });
+                })
+                ->where(function ($query) use ($request) {
+                    $query->where('start_date', '<=', $request->end_date)
+                          ->where('end_date', '>=', $request->start_date);
+                })
+                ->whereRaw('JSON_OVERLAPS(class_days, ?)', [json_encode($request->class_days)])
+                ->exists();
+
+            if ($conflicts) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Schedule conflict detected with existing faculty schedule.'
+                ], 422);
+            }
+
+            $schedule->update($request->all());
+
+            Log::info('Summer schedule updated', [
+                'schedule_id' => $schedule->id,
+                'updated_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Summer schedule updated successfully.',
+                'schedule' => $schedule->load(['enrollment.studentPersonalInfo.user', 'subject', 'faculty'])
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update summer schedule', [
+                'error' => $e->getMessage(),
+                'schedule_id' => $id,
+                'user_id' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to update summer schedule. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a summer schedule.
+     */
+    public function deleteSummerSchedule($id)
+    {
+        try {
+            $schedule = SummerClassSchedule::findOrFail($id);
+            $schedule->delete();
+
+            Log::info('Summer schedule deleted', [
+                'schedule_id' => $id,
+                'deleted_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Summer schedule deleted successfully.'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to delete summer schedule', [
+                'error' => $e->getMessage(),
+                'schedule_id' => $id,
+                'user_id' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete summer schedule. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Update student enrollment status based on failed grades.
+     * This method should be called after grades are approved.
+     */
+    public function updateSummerRequiredStatus()
+    {
+        try {
+            // Get students with failed grades (below 75)
+            $studentsWithFailedGrades = DB::table('grades as g')
+                ->join('enrollments as e', 'g.student_id', '=', 'e.student_id')
+                ->where('g.semester_grade', '<', 75)
+                ->where('g.status', 'approved')
+                ->where('e.status', 'enrolled')
+                ->select('e.id', 'e.student_id')
+                ->distinct()
+                ->get();
+
+            // Update their enrollment status to summer_required
+            foreach ($studentsWithFailedGrades as $student) {
+                Enrollment::where('id', $student->id)
+                    ->update(['academic_year_status' => 'summer_required']);
+            }
+
+            Log::info('Updated summer required status', [
+                'students_updated' => $studentsWithFailedGrades->count(),
+                'updated_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Updated {$studentsWithFailedGrades->count()} students to summer required status.",
+                'students_updated' => $studentsWithFailedGrades->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update summer required status', [
+                'error' => $e->getMessage(),
+                'user_id' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to update summer required status.'
+            ], 500);
+        }
+    }
+
+    /**
+     * View COR in browser.
+     */
+    public function viewCOR($studentId)
+    {
+        // Implementation for viewing COR
+        return response()->json(['message' => 'COR view not implemented yet']);
+    }
+
+    /**
+     * Generate COR as PDF.
+     */
+    public function generateCORPDF($studentId)
+    {
+        // Implementation for generating COR PDF
+        return response()->json(['message' => 'COR PDF generation not implemented yet']);
+    }
+
+    /**
+     * Get section schedules for API.
+     */
+    public function getSectionSchedulesAPI($sectionId)
+    {
+        // Implementation for getting section schedules
+        return response()->json(['message' => 'Section schedules API not implemented yet']);
+    }
+
+    /**
+     * Get available sections for enrollment (sections that are not full).
+     */
+    public function getAvailableSections(Request $request)
+    {
+        $query = Section::with(['strand', 'adviser', 'schoolYear']);
+
+        // Filter by strand if provided
+        if ($request->strand_id) {
+            $query->where('strand_id', $request->strand_id);
+        }
+
+        // Filter by year level if provided
+        if ($request->year_level) {
+            $query->where('year_level', $request->year_level);
+        }
+
+        // Filter by school year if provided
+        if ($request->school_year_id) {
+            $query->where('school_year_id', $request->school_year_id);
+        }
+
+        $sections = $query->orderBy('section_name')->get();
+
+        // Add capacity information and filter out full sections
+        $availableSections = $sections->filter(function ($section) {
+            $section->capacity_status = $section->capacity_status;
+            $section->current_enrollment = $section->getCurrentEnrollmentCount();
+            return $section->hasAvailableSlots();
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'sections' => $availableSections
+        ]);
+    }
+
+    /**
+     * Get pending grade input requests for registrar approval.
+     */
+    public function getPendingGradeInputRequests()
+    {
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return Inertia::render('Registrar/GradeInputRequests', [
+                'error' => 'No active school year found',
+                'requests' => []
+            ]);
+        }
+
+        $requests = GradeInputRequest::pending()
+                                   ->where('school_year_id', $activeSchoolYear->id)
+                                   ->with(['faculty', 'class.subject', 'class.section'])
+                                   ->orderBy('is_urgent', 'desc')
+                                   ->orderBy('created_at', 'asc')
+                                   ->get()
+                                   ->map(function ($request) {
+                                       return [
+                                           'id' => $request->id,
+                                           'faculty_name' => $request->faculty->firstname . ' ' . $request->faculty->lastname,
+                                           'faculty_email' => $request->faculty->email,
+                                           'class_name' => $request->class->subject->name . ' - ' . $request->class->section->section_name,
+                                           'quarter' => $request->quarter,
+                                           'reason' => $request->reason,
+                                           'is_urgent' => $request->is_urgent,
+                                           'students_count' => count($request->student_list ?? []),
+                                           'students_without_grades' => $request->student_list ?? [],
+                                           'created_at' => $request->created_at,
+                                           'days_pending' => $request->created_at->diffInDays(now()),
+                                           'quarter_status' => 'ended' // Since request was allowed, quarter must have ended
+                                       ];
+                                   });
+
+        return Inertia::render('Registrar/GradeInputRequests', [
+            'requests' => $requests,
+            'stats' => [
+                'total_pending' => $requests->count(),
+                'urgent_requests' => $requests->where('is_urgent', true)->count(),
+                'overdue_requests' => $requests->where('days_pending', '>', 3)->count()
+            ]
+        ]);
+    }
+
+    /**
+     * Approve a grade input request.
+     */
+    public function approveGradeInputRequest(Request $request, $id)
+    {
+        try {
+            $request->validate([
+                'notes' => 'nullable|string|max:1000',
+                'expires_in_days' => 'integer|min:1|max:30'
+            ]);
+
+            $gradeInputRequest = GradeInputRequest::findOrFail($id);
+
+            if (!$gradeInputRequest->isPending()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This request has already been processed'
+                ], 400);
+            }
+
+            $expiresInDays = $request->input('expires_in_days', 7);
+            $gradeInputRequest->approve(Auth::id(), $request->notes, $expiresInDays);
+
+            Log::info('Grade input request approved', [
+                'request_id' => $gradeInputRequest->id,
+                'faculty_id' => $gradeInputRequest->faculty_id,
+                'class_id' => $gradeInputRequest->class_id,
+                'quarter' => $gradeInputRequest->quarter,
+                'approved_by' => Auth::id(),
+                'expires_at' => $gradeInputRequest->expires_at
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Grade input request approved successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error approving grade input request', [
+                'request_id' => $id,
+                'error' => $e->getMessage(),
+                'approved_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to approve request. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Reject a grade input request.
+     */
+    public function rejectGradeInputRequest(Request $request, $id)
+    {
+        try {
+            $request->validate([
+                'notes' => 'required|string|max:1000'
+            ]);
+
+            $gradeInputRequest = GradeInputRequest::findOrFail($id);
+
+            if (!$gradeInputRequest->isPending()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This request has already been processed'
+                ], 400);
+            }
+
+            $gradeInputRequest->reject(Auth::id(), $request->notes);
+
+            Log::info('Grade input request rejected', [
+                'request_id' => $gradeInputRequest->id,
+                'faculty_id' => $gradeInputRequest->faculty_id,
+                'class_id' => $gradeInputRequest->class_id,
+                'quarter' => $gradeInputRequest->quarter,
+                'rejected_by' => Auth::id(),
+                'reason' => $request->notes
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Grade input request rejected successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error rejecting grade input request', [
+                'request_id' => $id,
+                'error' => $e->getMessage(),
+                'rejected_by' => Auth::id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to reject request. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all grade input requests (for history/management).
+     */
+    public function getAllGradeInputRequests(Request $request)
+    {
+        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$activeSchoolYear) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No active school year found'
+            ], 400);
+        }
+
+        $status = $request->get('status', 'all');
+        $query = GradeInputRequest::where('school_year_id', $activeSchoolYear->id)
+                                 ->with(['faculty', 'class.subject', 'class.section', 'approvedBy']);
+
+        if ($status !== 'all') {
+            $query->where('status', $status);
+        }
+
+        $requests = $query->orderBy('created_at', 'desc')
+                         ->get()
+                         ->map(function ($request) {
+                             return [
+                                 'id' => $request->id,
+                                 'faculty_name' => $request->faculty->firstname . ' ' . $request->faculty->lastname,
+                                 'faculty_email' => $request->faculty->email,
+                                 'class_name' => $request->class->subject->name . ' - ' . $request->class->section->section_name,
+                                 'quarter' => $request->quarter,
+                                 'status' => $request->status,
+                                 'status_text' => $request->getStatusText(),
+                                 'status_color' => $request->getStatusColor(),
+                                 'reason' => $request->reason,
+                                 'registrar_notes' => $request->registrar_notes,
+                                 'is_urgent' => $request->is_urgent,
+                                 'students_count' => count($request->student_list ?? []),
+                                 'created_at' => $request->created_at,
+                                 'approved_at' => $request->approved_at,
+                                 'expires_at' => $request->expires_at,
+                                 'approved_by_name' => $request->approvedBy ? 
+                                     $request->approvedBy->firstname . ' ' . $request->approvedBy->lastname : null,
+                                 'is_expired' => $request->isExpired(),
+                                 'days_since_created' => $request->created_at->diffInDays(now())
+                             ];
+                         });
+
+        return response()->json([
+            'success' => true,
+            'requests' => $requests
+        ]);
+    }
+
+    // ===== SUMMER ENROLLMENT =====
+
+    /**
+     * Generate summer enrollment eligibility
+     */
+    public function generateSummerEnrollment()
+    {
+        return response()->json(['message' => 'Summer enrollment eligibility not implemented yet']);
+    }
+
+    /**
+     * Process summer enrollment
+     */
+    public function processSummerEnrollment(Request $request)
+    {
+        return response()->json(['message' => 'Summer enrollment processing not implemented yet']);
+    }
+
+    /**
+     * Get class schedules for enrollment
+     */
+    public function getClassSchedules($enrollmentId)
+    {
+        return response()->json(['message' => 'Class schedules for enrollment not implemented yet']);
+    }
+
+    // ===== REPORT GENERATION METHODS =====
 
     /**
      * Generate student list report
      */
-    private function generateStudentReport($filters, $search)
+    public function generateStudentListReport(Request $request)
     {
         try {
-            // Enhanced query to show all students with proper relationships
-            $query = DB::table('users')
-                ->leftJoin('enrollments', 'users.id', '=', 'enrollments.student_id')
-                ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
-                ->leftJoin('strands', function($join) {
-                    $join->on('enrollments.strand_id', '=', 'strands.id')
-                         ->orOn('enrollments.first_strand_choice_id', '=', 'strands.id');
-                })
-                ->leftJoin('school_years', 'enrollments.school_year_id', '=', 'school_years.id')
-                ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
-                ->leftJoin('transferee_previous_schools', 'users.id', '=', 'transferee_previous_schools.student_id')
-                ->select(
-                    'users.id as user_id',
-                    'users.firstname',
-                    'users.lastname', 
-                    'users.email',
-                    'users.student_type',
-                    'student_personal_info.grade_level',
-                    'sections.section_name',
-                    'strands.code as strand_code',
-                    'strands.name as strand_name',
-                    DB::raw("CASE 
-                        WHEN school_years.year_start IS NOT NULL AND school_years.year_end IS NOT NULL 
-                        THEN CONCAT(school_years.year_start, '-', school_years.year_end, ' (', COALESCE(school_years.semester, 'N/A'), ')') 
-                        ELSE 'N/A' 
-                    END as school_year"),
-                    DB::raw("COALESCE(enrollments.status, 'not_enrolled') as status"),
-                    'enrollments.enrollment_date',
-                    'transferee_previous_schools.last_school as previous_school',
-                    'enrollments.id as enrollment_id'
-                )
-                ->where('users.role', 'student');
-
-            // Apply filters only if they have values - use whereHas for better filtering
-            if (!empty($filters['schoolYear']) && $filters['schoolYear'] !== '') {
-                $query->where('enrollments.school_year_id', $filters['schoolYear']);
-            }
-
-            if (!empty($filters['section']) && $filters['section'] !== '') {
-                $query->where('enrollments.assigned_section_id', $filters['section']);
-            }
-
-            if (!empty($filters['strand']) && $filters['strand'] !== '') {
-                $query->where(function($q) use ($filters) {
-                    $q->where('enrollments.strand_id', $filters['strand'])
-                      ->orWhere('enrollments.first_strand_choice_id', $filters['strand']);
-                });
-            }
-
-            if (!empty($filters['gradeLevel']) && $filters['gradeLevel'] !== '') {
-                $query->where('student_personal_info.grade_level', $filters['gradeLevel']);
-            }
-
-            // Apply search
-            if (!empty($search) && $search !== '') {
-                $query->where(function($q) use ($search) {
-                    $q->where('users.firstname', 'like', "%{$search}%")
-                      ->orWhere('users.lastname', 'like', "%{$search}%")
-                      ->orWhere('users.email', 'like', "%{$search}%");
-                    
-                    // Only search in sections/strands if they exist
-                    if (Schema::hasTable('sections')) {
-                        $q->orWhere('sections.section_name', 'like', "%{$search}%");
-                    }
-                    if (Schema::hasTable('strands')) {
-                        $q->orWhere('strands.name', 'like', "%{$search}%");
-                    }
-                });
-            }
-
-            // Add debugging information
-            $hasFilters = !empty(array_filter($filters)) || !empty($search);
-            
-            // Get results with proper ordering
-            $students = $query->orderBy('users.lastname')->get();
-            
-            // If no results and no filters applied, get all students as fallback
-            if ($students->isEmpty() && !$hasFilters) {
-                Log::info('No students found with joins, trying fallback query');
-                $students = DB::table('users')
-                    ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
-                    ->select(
-                        'users.id as user_id',
-                        'users.firstname',
-                        'users.lastname', 
-                        'users.email',
-                        'users.student_type',
-                        'student_personal_info.grade_level',
-                        DB::raw("'N/A' as section_name"),
-                        DB::raw("'N/A' as strand_code"),
-                        DB::raw("'N/A' as strand_name"),
-                        DB::raw("'N/A' as school_year"),
-                        DB::raw("'not_enrolled' as status"),
-                        DB::raw("NULL as enrollment_date"),
-                        DB::raw("NULL as previous_school"),
-                        DB::raw("NULL as enrollment_id")
-                    )
-                    ->where('users.role', 'student')
-                    ->orderBy('users.lastname')
-                    ->get();
-            }
-
-            // Log detailed query information for debugging
-            Log::info('Student report query executed', [
-                'filters_applied' => $filters,
-                'search_term' => $search,
-                'has_filters' => $hasFilters,
-                'result_count' => $students->count(),
-                'total_students_in_db' => DB::table('users')->where('role', 'student')->count(),
-                'sample_students' => $students->take(3)->toArray(),
-                'query_method_used' => $students->isEmpty() && !$hasFilters ? 'fallback' : 'main'
+            Log::info('Student list report request data', [
+                'request_data' => $request->all(),
+                'semester_value' => $request->semester,
+                'semester_type' => gettype($request->semester)
             ]);
 
-            // Calculate statistics
-            $statistics = [
-                'totalStudents' => $students->count(),
-                'enrolledStudents' => $students->where('status', 'enrolled')->count(),
-                'pendingStudents' => $students->where('status', 'pending')->count(),
-                'rejectedStudents' => $students->where('status', 'rejected')->count(),
-                'approvedStudents' => $students->where('status', 'approved')->count(),
-                'notEnrolledStudents' => $students->where('status', 'not_enrolled')->count()
-            ];
+            $request->validate([
+                'section_id' => 'nullable|exists:sections,id',
+                'strand_id' => 'nullable|exists:strands,id',
+                'semester' => 'nullable|string|in:,1st,2nd,1st Semester,2nd Semester,First Semester,Second Semester,1,2',
+                'school_year_id' => 'nullable|exists:school_years,id',
+                'grade_status' => 'nullable|in:passed,failed,incomplete,honor',
+                'enrollment_status' => 'nullable|in:enrolled,pending,dropped,graduated',
+                'date_range' => 'nullable|string',
+                'grade_threshold' => 'nullable|integer|min:60|max:100',
+                'format' => 'required|in:excel,pdf,json'
+            ]);
 
-            return response()->json([
-                'success' => true,
-                'data' => $students,
-                'statistics' => $statistics,
-                'debug_info' => [
-                    'query_executed' => true,
-                    'filters_applied' => $hasFilters,
-                    'total_db_students' => DB::table('users')->where('role', 'student')->count()
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            $schoolYearId = $request->school_year_id ?? $activeSchoolYear->id;
+            
+            Log::info('Student report query setup', [
+                'active_school_year' => $activeSchoolYear ? $activeSchoolYear->toArray() : null,
+                'school_year_id' => $schoolYearId,
+                'enrollment_status' => $request->enrollment_status
+            ]);
+
+            // First, let's try a simpler query to see if we can find any enrollments
+            $simpleCount = DB::table('enrollments as e')
+                ->join('users as u', 'e.student_id', '=', 'u.id')
+                ->where('e.school_year_id', $schoolYearId)
+                ->where('u.role', 'student')
+                ->count();
+
+            // Check enrolled students specifically
+            $enrolledCount = DB::table('enrollments as e')
+                ->join('users as u', 'e.student_id', '=', 'u.id')
+                ->where('e.school_year_id', $schoolYearId)
+                ->where('u.role', 'student')
+                ->whereIn('e.status', ['enrolled', 'approved'])
+                ->count();
+
+            // Check what statuses exist
+            $statusBreakdown = DB::table('enrollments as e')
+                ->join('users as u', 'e.student_id', '=', 'u.id')
+                ->where('e.school_year_id', $schoolYearId)
+                ->where('u.role', 'student')
+                ->select('e.status', DB::raw('COUNT(*) as count'))
+                ->groupBy('e.status')
+                ->get();
+                
+            Log::info('Enrollment analysis', [
+                'school_year_id' => $schoolYearId,
+                'total_enrollments' => $simpleCount,
+                'enrolled_students' => $enrolledCount,
+                'status_breakdown' => $statusBreakdown->toArray(),
+                'request_filters' => [
+                    'report_type' => $request->report_type,
+                    'section_id' => $request->section_id,
+                    'strand_id' => $request->strand_id,
+                    'enrollment_status' => $request->enrollment_status
                 ]
             ]);
+
+            Log::info('Using class_details table for enrolled students report', [
+                'school_year_id' => $schoolYearId,
+                'report_type' => $request->report_type
+            ]);
+
+            // Use class_details as primary source for enrolled students
+            $query = DB::table('class_details as cd')
+                ->join('users as u', 'cd.student_id', '=', 'u.id')
+                ->join('enrollments as e', 'cd.enrollment_id', '=', 'e.id')
+                ->join('class as c', 'cd.class_id', '=', 'c.id')
+                ->join('sections as s', 'c.section_id', '=', 's.id')
+                ->join('subjects as subj', 'c.subject_id', '=', 'subj.id')
+                ->leftJoin('student_personal_info as spi', 'u.id', '=', 'spi.user_id')
+                ->leftJoin('strands as st_section', 's.strand_id', '=', 'st_section.id')
+                ->leftJoin('strands as st_enrollment', 'e.strand_id', '=', 'st_enrollment.id')
+                ->leftJoin('grades as g', function($join) use ($schoolYearId) {
+                    $join->on('u.id', '=', 'g.student_id')
+                         ->where('g.school_year_id', '=', $schoolYearId);
+                })
+                ->where('c.school_year_id', $schoolYearId)
+                ->where('cd.is_enrolled', true)
+                ->where('u.role', 'student');
+
+            // Filter by enrollment status - focus on enrolled students for enrolled students report
+            if ($request->enrollment_status) {
+                $query->where('e.status', $request->enrollment_status);
+                Log::info('Filtering by specific enrollment status', [
+                    'enrollment_status' => $request->enrollment_status
+                ]);
+            } else {
+                // For enrolled students report, focus on actually enrolled students
+                if ($request->report_type === 'enrolled_students') {
+                    $query->whereIn('e.status', ['enrolled', 'approved']);
+                    Log::info('Enrolled students report - filtering for enrolled/approved only', [
+                        'statuses' => ['enrolled', 'approved']
+                    ]);
+                } else {
+                    $query->whereIn('e.status', ['enrolled', 'approved', 'pending', 'pending_evaluation']);
+                    Log::info('General report - including all active statuses', [
+                        'default_statuses' => ['enrolled', 'approved', 'pending', 'pending_evaluation']
+                    ]);
+                }
+            }
+
+            // Store original query for fallback
+            $originalQuery = clone $query;
+            
+            if ($request->section_id) {
+                // Filter by section from class_details (more accurate)
+                $query->where('s.id', $request->section_id);
+                Log::info('Filtering by section from class_details', [
+                    'section_id' => $request->section_id
+                ]);
+            }
+
+            if ($request->strand_id) {
+                // Filter by strand from either section or enrollment
+                $query->where(function($q) use ($request) {
+                    $q->where('st_section.id', $request->strand_id)
+                      ->orWhere('st_enrollment.id', $request->strand_id);
+                });
+                Log::info('Filtering by strand', [
+                    'strand_id' => $request->strand_id
+                ]);
+            }
+
+            // Filter by grade status
+            $gradeThreshold = $request->grade_threshold ?? 75;
+            if ($request->grade_status) {
+                switch ($request->grade_status) {
+                    case 'passed':
+                        $query->where('g.semester_grade', '>=', $gradeThreshold);
+                        break;
+                    case 'failed':
+                        $query->where('g.semester_grade', '<', $gradeThreshold)
+                              ->whereNotNull('g.semester_grade');
+                        break;
+                    case 'honor':
+                        $query->where('g.semester_grade', '>=', 90);
+                        break;
+                    case 'incomplete':
+                        $query->whereNull('g.semester_grade');
+                        break;
+                }
+            }
+
+            $students = $query->select([
+                'u.id',
+                'u.username',
+                'u.firstname',
+                'u.lastname',
+                'u.email',
+                DB::raw('COALESCE(spi.lrn, "N/A") as lrn'),
+                DB::raw('COALESCE(spi.grade_level, "N/A") as grade_level'),
+                DB::raw('COALESCE(spi.student_status, "N/A") as student_status'),
+                DB::raw('COALESCE(s.section_name, "N/A") as section_name'),
+                DB::raw('COALESCE(COALESCE(st_section.name, st_enrollment.name), "N/A") as strand_name'),
+                DB::raw('COALESCE(COALESCE(st_section.code, st_enrollment.code), "N/A") as strand_code'),
+                'e.enrollment_date',
+                'e.status as enrollment_status',
+                'e.intended_grade_level',
+                'e.enrollment_type',
+                DB::raw('COUNT(DISTINCT cd.class_id) as total_classes'),
+                DB::raw('GROUP_CONCAT(DISTINCT subj.name SEPARATOR ", ") as subjects_enrolled')
+            ])
+            ->groupBy([
+                'u.id', 'u.username', 'u.firstname', 'u.lastname', 'u.email', 'spi.lrn', 'spi.grade_level', 
+                'spi.student_status', 's.section_name', 'st_section.name', 
+                'st_enrollment.name', 'st_section.code', 'st_enrollment.code',
+                'e.enrollment_date', 'e.status', 'e.intended_grade_level', 'e.enrollment_type'
+            ])
+            ->orderBy('u.username')->get();
+
+            // Fallback: If no students found with section filter, try without section filter
+            if ($students->isEmpty() && $request->section_id) {
+                Log::info('No students found with section filter, trying without section filter');
+                
+                $fallbackStudents = $originalQuery->select([
+                    'u.id',
+                    'u.username',
+                    'u.firstname',
+                    'u.lastname',
+                    'u.email',
+                    DB::raw('COALESCE(spi.lrn, "N/A") as lrn'),
+                    DB::raw('COALESCE(spi.grade_level, "N/A") as grade_level'),
+                    DB::raw('COALESCE(spi.student_status, "N/A") as student_status'),
+                    DB::raw('COALESCE(s.section_name, "N/A") as section_name'),
+                    DB::raw('COALESCE(COALESCE(st_section.name, st_enrollment.name), "N/A") as strand_name'),
+                    DB::raw('COALESCE(COALESCE(st_section.code, st_enrollment.code), "N/A") as strand_code'),
+                    'e.enrollment_date',
+                    'e.status as enrollment_status',
+                    'e.intended_grade_level',
+                    'e.enrollment_type',
+                    DB::raw('COUNT(DISTINCT cd.class_id) as total_classes'),
+                    DB::raw('GROUP_CONCAT(DISTINCT subj.name SEPARATOR ", ") as subjects_enrolled')
+                ])
+                ->groupBy([
+                    'u.id', 'u.username', 'u.firstname', 'u.lastname', 'u.email', 'spi.lrn', 'spi.grade_level', 
+                    'spi.student_status', 's.section_name', 'st_section.name', 
+                    'st_enrollment.name', 'st_section.code', 'st_enrollment.code',
+                    'e.enrollment_date', 'e.status', 'e.intended_grade_level', 'e.enrollment_type'
+                ])
+                ->orderBy('u.username')->get();
+                
+                Log::info('Fallback query results', [
+                    'fallback_students_found' => $fallbackStudents->count()
+                ]);
+                
+                if ($fallbackStudents->isNotEmpty()) {
+                    $students = $fallbackStudents;
+                    Log::info('Using fallback results without section filter');
+                }
+            }
+            
+            // Debug: Log the actual query and first few results
+            Log::info('Student query executed', [
+                'query_sql' => $query->toSql(),
+                'query_bindings' => $query->getBindings(),
+                'first_student_data' => $students->first() ? (array) $students->first() : null,
+                'total_found' => $students->count()
+            ]);
+
+            Log::info('Student report query results', [
+                'total_students_found' => $students->count(),
+                'first_student_sample' => $students->first() ? $students->first() : 'No students found',
+                'query_filters' => [
+                    'school_year_id' => $schoolYearId,
+                    'enrollment_status' => $request->enrollment_status,
+                    'section_id' => $request->section_id,
+                    'strand_id' => $request->strand_id
+                ]
+            ]);
+
+            if ($request->format === 'json') {
+                // Calculate comprehensive statistics
+                $totalStudents = $students->count();
+                
+                // Count approved/enrolled students (multiple status values)
+                $enrolledStudents = $students->whereIn('enrollment_status', ['enrolled', 'approved'])->count();
+                $pendingStudents = $students->whereIn('enrollment_status', ['pending', 'pending_evaluation'])->count();
+                $rejectedStudents = $students->where('enrollment_status', 'rejected')->count();
+                
+                // Debug logging to see actual status values
+                $statusBreakdown = $students->groupBy('enrollment_status')->map->count();
+                Log::info('Actual enrollment status breakdown', [
+                    'status_breakdown' => $statusBreakdown->toArray(),
+                    'sample_students' => $students->take(3)->pluck('enrollment_status', 'username')->toArray()
+                ]);
+                
+                // Count unique sections
+                $sectionsCount = $students->whereNotNull('section_name')->unique('section_name')->count();
+                
+                // Count by strand
+                $strandStats = $students->groupBy('strand_name')->map(function($group) {
+                    return $group->count();
+                });
+                
+                Log::info('Student report statistics calculated', [
+                    'total_students' => $totalStudents,
+                    'enrolled_students' => $enrolledStudents,
+                    'pending_students' => $pendingStudents,
+                    'rejected_students' => $rejectedStudents,
+                    'sections_count' => $sectionsCount,
+                    'strand_stats' => $strandStats->toArray()
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $students,
+                    'total' => (int) $totalStudents,
+                    'summary' => [
+                        'total_students' => (int) $totalStudents,
+                        'enrolled_students' => (int) $enrolledStudents,
+                        'pending_students' => (int) $pendingStudents,
+                        'rejected_students' => (int) $rejectedStudents,
+                        'sections_count' => (int) $sectionsCount,
+                        'strand_stats' => $strandStats,
+                        'enrollment_rate' => $totalStudents > 0 ? ($enrolledStudents / $totalStudents) * 100 : 0,
+                        'strand_distribution' => $students->groupBy('strand_name')->map->count(),
+                        'section_distribution' => $students->groupBy('section_name')->map->count()
+                    ],
+                    'filters' => $request->only(['section_id', 'strand_id', 'semester', 'school_year_id', 'grade_status', 'enrollment_status', 'grade_threshold'])
+                ]);
+            }
+
+            // For Excel/PDF export, we'll implement this later
+            return $this->exportStudentList($students, $request->format, $request->all());
 
         } catch (\Exception $e) {
-            Log::error('Error in generateStudentReport: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-            
-            // Return a simple fallback response
+            Log::error('Error generating student list report', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Database error: ' . $e->getMessage(),
-                'data' => [],
-                'statistics' => [
-                    'totalStudents' => 0,
-                    'enrolledStudents' => 0,
-                    'pendingStudents' => 0,
-                    'rejectedStudents' => 0
-                ]
-            ]);
+                'message' => 'Failed to generate student list report. Please try again.'
+            ], 500);
         }
     }
 
     /**
      * Generate grades report
      */
-    private function generateGradesReport($filters, $search)
+    public function generateGradesReport(Request $request)
     {
         try {
-            // Check if grades table exists
-            if (!Schema::hasTable('grades')) {
-                return response()->json([
-                    'success' => true,
-                    'data' => [],
-                    'statistics' => [
-                        'totalGrades' => 0,
-                        'passedGrades' => 0,
-                        'failedGrades' => 0,
-                        'averageGrade' => 0,
-                        'transfereeGrades' => 0,
-                        'regularGrades' => 0
-                    ]
-                ]);
+            $request->validate([
+                'subject_id' => 'nullable|exists:subjects,id',
+                'section_id' => 'nullable|exists:sections,id',
+                'semester' => 'nullable|in:1st,2nd',
+                'school_year_id' => 'nullable|exists:school_years,id',
+                'faculty_id' => 'nullable|exists:users,id',
+                'grade_status' => 'nullable|in:passed,failed',
+                'grade_threshold' => 'nullable|numeric|min:0|max:100',
+                'format' => 'required|in:excel,pdf,json'
+            ]);
+
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            $schoolYearId = $request->school_year_id ?? $activeSchoolYear->id;
+
+            $query = Grade::with(['student', 'subject', 'faculty', 'schoolYear'])
+                ->where('school_year_id', $schoolYearId);
+
+            if ($request->subject_id) {
+                $query->where('subject_id', $request->subject_id);
             }
 
-            // Get regular grades from current enrollment
-            $regularGradesQuery = DB::table('grades')
-                ->join('users', 'grades.student_id', '=', 'users.id')
-                ->leftJoin('class', 'grades.class_id', '=', 'class.id')
-                ->leftJoin('subjects', 'class.subject_id', '=', 'subjects.id')
-                ->leftJoin('sections', 'class.section_id', '=', 'sections.id')
-                ->leftJoin('school_years', 'grades.school_year_id', '=', 'school_years.id')
-                ->leftJoin('users as faculty', 'class.faculty_id', '=', 'faculty.id')
-                ->select(
-                    DB::raw("CONCAT(COALESCE(users.firstname, ''), ' ', COALESCE(users.lastname, '')) as student_name"),
-                    DB::raw("COALESCE(subjects.name, 'Unknown Subject') as subject_name"),
-                    DB::raw("COALESCE(sections.section_name, 'N/A') as section_name"),
-                    DB::raw("CONCAT(COALESCE(faculty.firstname, ''), ' ', COALESCE(faculty.lastname, '')) as faculty_name"),
-                    'grades.semester',
-                    'grades.semester_grade',
-                    'grades.approval_status',
-                    'grades.created_at',
-                    DB::raw("'regular' as grade_type"),
-                    DB::raw("NULL as previous_school")
-                )
-                ->where('users.role', 'student');
-
-            // Get transferee credited subjects (transferee_grades) - only if table exists
-            $transfereeGrades = collect([]);
-            if (Schema::hasTable('transferee_credited_subjects')) {
-                $transfereeGradesQuery = DB::table('transferee_credited_subjects')
-                    ->join('users', 'transferee_credited_subjects.student_id', '=', 'users.id')
-                    ->join('subjects', 'transferee_credited_subjects.subject_id', '=', 'subjects.id')
-                    ->leftJoin('transferee_previous_schools', 'transferee_credited_subjects.student_id', '=', 'transferee_previous_schools.student_id')
-                    ->select(
-                        DB::raw("CONCAT(users.firstname, ' ', users.lastname) as student_name"),
-                        'subjects.name as subject_name',
-                        DB::raw("'Transferee' as section_name"),
-                        DB::raw("'Previous School' as faculty_name"),
-                        'transferee_credited_subjects.semester',
-                        'transferee_credited_subjects.grade as semester_grade',
-                        DB::raw("'approved' as approval_status"),
-                        'transferee_credited_subjects.created_at',
-                        DB::raw("'transferee' as grade_type"),
-                        'transferee_previous_schools.last_school as previous_school'
-                    )
-                    ->where('users.role', 'student');
-                
-                $transfereeGrades = $transfereeGradesQuery->get();
+            if ($request->semester) {
+                $query->where('semester', $request->semester);
             }
 
-            // Get regular grades
-            $regularGrades = $regularGradesQuery->get();
-            
-            // Merge the collections
-            $allGrades = $regularGrades->merge($transfereeGrades);
+            if ($request->faculty_id) {
+                $query->where('faculty_id', $request->faculty_id);
+            }
 
-            // Simple processing for now
-            $processedGrades = $allGrades->map(function($grade) {
+            // Filter by section through class relationship
+            if ($request->section_id) {
+                $query->whereHas('class', function($q) use ($request) {
+                    $q->where('section_id', $request->section_id);
+                });
+            }
+
+            // Filter by grade status (Passed/Failed)
+            $gradeThreshold = $request->grade_threshold ?? 75; // Default passing grade is 75
+            if ($request->grade_status) {
+                switch ($request->grade_status) {
+                    case 'passed':
+                        $query->where('semester_grade', '>=', $gradeThreshold);
+                        Log::info('Filtering for passed grades', [
+                            'threshold' => $gradeThreshold
+                        ]);
+                        break;
+                    case 'failed':
+                        $query->where(function($q) use ($gradeThreshold) {
+                            $q->where('semester_grade', '<', $gradeThreshold)
+                              ->whereNotNull('semester_grade'); // Only include students with actual grades
+                        });
+                        Log::info('Filtering for failed grades', [
+                            'threshold' => $gradeThreshold
+                        ]);
+                        break;
+                }
+            }
+
+            $grades = $query->orderBy('created_at', 'desc')->get()->map(function($grade) {
                 return [
-                    'student_name' => $grade->student_name,
-                    'subject_name' => $grade->subject_name,
-                    'section_name' => $grade->section_name,
-                    'faculty_name' => $grade->faculty_name ?? 'N/A',
-                    'first_sem_avg' => $grade->semester === '1st' ? $grade->semester_grade : null,
-                    'second_sem_avg' => $grade->semester === '2nd' ? $grade->semester_grade : null,
-                    'final_grade' => $grade->semester_grade,
-                    'remarks' => $grade->semester_grade >= 75 ? 'Passed' : 'Failed',
-                    'grade_source' => $grade->grade_type === 'transferee' ? 'Transferee Credit' : 'Regular',
-                    'previous_school' => $grade->previous_school ?? null
+                    'id' => $grade->id,
+                    'student_name' => $grade->student->firstname . ' ' . $grade->student->lastname,
+                    'student_lrn' => $grade->student->studentPersonalInfo->lrn ?? 'N/A',
+                    'subject_name' => $grade->subject->name,
+                    'subject_code' => $grade->subject->code,
+                    'faculty_name' => $grade->faculty->firstname . ' ' . $grade->faculty->lastname,
+                    'semester' => $grade->semester,
+                    'first_quarter' => $grade->first_quarter,
+                    'second_quarter' => $grade->second_quarter,
+                    'semester_grade' => $grade->semester_grade,
+                    'remarks' => $grade->remarks,
+                    'status' => $grade->status,
+                    'school_year' => $grade->schoolYear->year_start . '-' . $grade->schoolYear->year_end,
+                    'submitted_at' => $grade->updated_at
                 ];
             });
 
-            // Calculate statistics
-            $statistics = [
-                'totalGrades' => $processedGrades->count(),
-                'passedGrades' => $processedGrades->where('final_grade', '>=', 75)->count(),
-                'failedGrades' => $processedGrades->where('final_grade', '<', 75)->count(),
-                'averageGrade' => $processedGrades->where('final_grade', '!=', null)->avg('final_grade'),
-                'transfereeGrades' => $processedGrades->where('grade_source', 'like', '%Transferee%')->count(),
-                'regularGrades' => $processedGrades->where('grade_source', 'Regular')->count()
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $processedGrades->values()->all(),
-                'statistics' => $statistics
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Error in generateGradesReport: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Database error: ' . $e->getMessage(),
-                'data' => [],
-                'statistics' => [
-                    'totalGrades' => 0,
-                    'passedGrades' => 0,
-                    'failedGrades' => 0,
-                    'averageGrade' => 0,
-                    'transfereeGrades' => 0,
-                    'regularGrades' => 0
-                ]
-            ]);
-        }
-    }
-
-    /**
-     * Export report to PDF or Excel
-     */
-    public function exportReport(Request $request)
-    {
-        try {
-            $type = $request->get('type', 'students');
-            $format = $request->get('format', 'xlsx');
-            $filters = $request->only(['schoolYear', 'semester', 'section', 'strand', 'faculty', 'gradeLevel']);
-            $search = $request->get('search', '');
-
-            // Generate the report data
-            if ($type === 'students') {
-                $reportResponse = $this->generateStudentReport($filters, $search);
-            } elseif ($type === 'grades') {
-                $reportResponse = $this->generateGradesReport($filters, $search);
-            } else {
-                return response()->json(['error' => 'Invalid report type'], 400);
-            }
-
-            $reportData = json_decode($reportResponse->getContent(), true);
-            
-            if (!$reportData['success']) {
-                return response()->json(['error' => 'Failed to generate report data'], 500);
-            }
-
-            $data = $reportData['data'];
-
-            if ($format === 'xlsx') {
-                return $this->exportToExcel($data, $type);
-            } elseif ($format === 'pdf') {
-                return $this->exportToPdf($data, $type);
-            }
-
-            return response()->json(['error' => 'Invalid export format'], 400);
-
-        } catch (\Exception $e) {
-            Log::error('Error exporting report: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to export report'], 500);
-        }
-    }
-
-    /**
-     * Export data to Excel format
-     */
-    private function exportToExcel($data, $type)
-    {
-        $filename = $type . '_report_' . date('Y-m-d') . '.xlsx';
-        
-        if ($type === 'students') {
-            $headers = [
-                'Student Name', 'Email', 'Student Type', 'Grade Level', 'Section', 'Strand', 'School Year', 'Status', 'Previous School', 'Enrollment Date'
-            ];
-            
-            $csvContent = implode(',', $headers) . "\n";
-            
-            foreach ($data as $student) {
-                $row = [
-                    $student['firstname'] . ' ' . $student['lastname'],
-                    $student['email'],
-                    $student['student_type'] === 'transferee' ? 'Transferee' : 'Regular',
-                    'Grade ' . $student['grade_level'],
-                    $student['section_name'] ?? 'N/A',
-                    ($student['strand_code'] ?? '') . ' - ' . ($student['strand_name'] ?? ''),
-                    $student['school_year'],
-                    ucfirst($student['status']),
-                    $student['previous_school'] ?? 'N/A',
-                    $student['enrollment_date'] ?? 'N/A'
-                ];
-                $csvContent .= '"' . implode('","', $row) . '"' . "\n";
-            }
-        } else {
-            $headers = [
-                'Student Name', 'Subject', 'Section', 'Faculty', '1st Sem AVG', '2nd Sem AVG', 'Final Grade', 'Grade Source', 'Previous School', 'Remarks'
-            ];
-            
-            $csvContent = implode(',', $headers) . "\n";
-            
-            foreach ($data as $grade) {
-                $row = [
-                    $grade['student_name'],
-                    $grade['subject_name'],
-                    $grade['section_name'] ?? 'N/A',
-                    $grade['faculty_name'] ?? 'N/A',
-                    $grade['first_sem_avg'] ?? 'N/A',
-                    $grade['second_sem_avg'] ?? 'N/A',
-                    $grade['final_grade'] ?? 'N/A',
-                    $grade['grade_source'] ?? 'Regular',
-                    $grade['previous_school'] ?? 'N/A',
-                    $grade['remarks']
-                ];
-                $csvContent .= '"' . implode('","', $row) . '"' . "\n";
-            }
-        }
-
-        return response($csvContent, 200, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
-            'Cache-Control' => 'no-cache, no-store, must-revalidate',
-            'Pragma' => 'no-cache',
-            'Expires' => '0'
-        ]);
-    }
-
-    /**
-     * Export data to PDF format
-     */
-    private function exportToPdf($data, $type)
-    {
-        $filename = $type . '_report_' . date('Y-m-d') . '.pdf';
-        
-        // For now, return CSV format as PDF generation requires additional libraries
-        // This can be enhanced with libraries like DomPDF or TCPDF
-        return $this->exportToExcel($data, $type);
-    }
-
-    /**
-     * Fix enrollment and class assignment issues
-     */
-    public function fixEnrollmentIssues()
-    {
-        try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            
-            if (!$activeSchoolYear) {
+            if ($request->format === 'json') {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'No active school year found'
+                    'success' => true,
+                    'data' => $grades,
+                    'total' => $grades->count(),
+                    'summary' => [
+                        'total_grades' => $grades->count(),
+                        'approved' => $grades->where('status', 'approved')->count(),
+                        'pending' => $grades->where('status', 'pending_approval')->count(),
+                        'ongoing' => $grades->where('status', 'ongoing')->count(),
+                        'average_grade' => $grades->where('semester_grade', '!=', null)->avg('semester_grade')
+                    ],
+                    'filters' => $request->only(['subject_id', 'section_id', 'semester', 'school_year_id', 'faculty_id'])
                 ]);
             }
 
-            $results = [
-                'fixed_enrollments' => 0,
-                'created_class_details' => 0,
-                'created_missing_classes' => 0,
-                'issues_found' => []
-            ];
-
-            // Step 1: Find enrollments without assigned sections
-            $enrollmentsWithoutSections = DB::table('enrollments')
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->where('status', 'enrolled')
-                ->whereNull('assigned_section_id')
-                ->get();
-
-            Log::info('Found enrollments without sections', [
-                'count' => $enrollmentsWithoutSections->count(),
-                'enrollments' => $enrollmentsWithoutSections->pluck('id')->toArray()
-            ]);
-
-            foreach ($enrollmentsWithoutSections as $enrollment) {
-                // Try to find a matching section
-                $matchingSection = DB::table('sections')
-                    ->where('strand_id', $enrollment->strand_id)
-                    ->where('school_year_id', $activeSchoolYear->id)
-                    ->first();
-
-                if ($matchingSection) {
-                    // Update enrollment with section assignment
-                    DB::table('enrollments')
-                        ->where('id', $enrollment->id)
-                        ->update(['assigned_section_id' => $matchingSection->id]);
-
-                    $results['fixed_enrollments']++;
-
-                    Log::info('Fixed enrollment section assignment', [
-                        'enrollment_id' => $enrollment->id,
-                        'student_id' => $enrollment->student_id,
-                        'section_id' => $matchingSection->id,
-                        'section_name' => $matchingSection->section_name
-                    ]);
-                } else {
-                    $results['issues_found'][] = "No matching section found for enrollment {$enrollment->id} with strand {$enrollment->strand_id}";
-                }
-            }
-
-            // Step 2: Find all enrolled students and ensure they have class_details
-            $allEnrolledStudents = DB::table('enrollments')
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->where('status', 'enrolled')
-                ->whereNotNull('assigned_section_id')
-                ->get();
-
-            Log::info('Processing enrolled students for class_details', [
-                'count' => $allEnrolledStudents->count()
-            ]);
-
-            foreach ($allEnrolledStudents as $enrollment) {
-                // Check if student has class_details
-                $hasClassDetails = DB::table('class_details')
-                    ->where('enrollment_id', $enrollment->id)
-                    ->exists();
-
-                if (!$hasClassDetails) {
-                    // Create class_details for this enrollment
-                    $classSchedules = DB::table('class')
-                        ->join('subjects', 'class.subject_id', '=', 'subjects.id')
-                        ->where('class.section_id', $enrollment->assigned_section_id)
-                        ->where('class.school_year_id', $activeSchoolYear->id)
-                        ->where('subjects.strand_id', $enrollment->strand_id)
-                        ->where('class.is_active', true)
-                        ->select('class.id as class_id')
-                        ->get();
-
-                    if ($classSchedules->count() > 0) {
-                        foreach ($classSchedules as $class) {
-                            DB::table('class_details')->updateOrInsert(
-                                [
-                                    'class_id' => $class->class_id,
-                                    'enrollment_id' => $enrollment->id
-                                ],
-                                [
-                                    'student_id' => $enrollment->student_id,
-                                    'section_id' => $enrollment->assigned_section_id,
-                                    'is_enrolled' => true,
-                                    'enrolled_at' => now(),
-                                    'created_at' => now(),
-                                    'updated_at' => now()
-                                ]
-                            );
-                            $results['created_class_details']++;
-                        }
-
-                        Log::info('Created class_details for enrollment', [
-                            'enrollment_id' => $enrollment->id,
-                            'student_id' => $enrollment->student_id,
-                            'class_details_created' => $classSchedules->count()
-                        ]);
-                    } else {
-                        $results['issues_found'][] = "No classes found for enrollment {$enrollment->id} in section {$enrollment->assigned_section_id} with strand {$enrollment->strand_id}";
-                    }
-                }
-            }
-
-            // Step 3: Check for missing class records and create them if needed
-            $sections = DB::table('sections')
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->get();
-
-            foreach ($sections as $section) {
-                $strandSubjects = DB::table('subjects')
-                    ->where('strand_id', $section->strand_id)
-                    ->get();
-
-                foreach ($strandSubjects as $subject) {
-                    $classExists = DB::table('class')
-                        ->where('section_id', $section->id)
-                        ->where('subject_id', $subject->id)
-                        ->where('school_year_id', $activeSchoolYear->id)
-                        ->exists();
-
-                    if (!$classExists) {
-                        // Find a faculty member who can teach this subject
-                        $faculty = DB::table('users')
-                            ->where('role', 'faculty')
-                            ->first();
-
-                        if ($faculty) {
-                            DB::table('class')->insert([
-                                'section_id' => $section->id,
-                                'subject_id' => $subject->id,
-                                'faculty_id' => $faculty->id,
-                                'school_year_id' => $activeSchoolYear->id,
-                                'day_of_week' => 'Monday',
-                                'start_time' => '08:00:00',
-                                'duration' => 120,
-                                'end_time' => '10:00:00',
-                                'semester' => 1,
-                                'school_year' => $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end,
-                                'is_active' => true,
-                                'created_at' => now(),
-                                'updated_at' => now()
-                            ]);
-
-                            $results['created_missing_classes']++;
-
-                            Log::info('Created missing class record', [
-                                'section_id' => $section->id,
-                                'subject_id' => $subject->id,
-                                'faculty_id' => $faculty->id
-                            ]);
-                        }
-                    }
-                }
-            }
-
-            $message = "Fixed {$results['fixed_enrollments']} enrollments, created {$results['created_class_details']} class detail records, and {$results['created_missing_classes']} missing class records.";
-            
-            if (!empty($results['issues_found'])) {
-                $message .= " Issues found: " . implode('; ', $results['issues_found']);
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => $message,
-                'results' => $results
-            ]);
+            return $this->exportGradesList($grades, $request->format, $request->all());
 
         } catch (\Exception $e) {
-            Log::error('Error fixing enrollment issues: ' . $e->getMessage());
+            Log::error('Error generating grades report', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error fixing enrollment issues: ' . $e->getMessage()
+                'message' => 'Failed to generate grades report. Please try again.'
             ], 500);
         }
     }
 
     /**
-     * Faculty Assignment Management Methods
-     * Following HCI Principle 2: Match between system and real world - Role-based assignments
+     * Generate subjects report
      */
-    
+    public function generateSubjectsReport(Request $request)
+    {
+        return response()->json(['message' => 'Subjects report generation not implemented yet']);
+    }
+
     /**
-     * Get faculty assignments data
+     * Generate faculty loads report
      */
-    public function getFacultyAssignments(Request $request)
+    public function generateFacultyLoadsReport(Request $request)
     {
         try {
-            $schoolYearId = $request->input('school_year_id');
+            Log::info('Faculty loads report request', [
+                'request_data' => $request->all()
+            ]);
+            
+            $schoolYearId = $request->school_year_id;
+            $semester = $request->semester;
+            
+            // Get active school year if not specified
+            if (!$schoolYearId) {
+                $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+                $schoolYearId = $activeSchoolYear ? $activeSchoolYear->id : null;
+            }
             
             if (!$schoolYearId) {
-                return response()->json(['error' => 'School year ID is required'], 400);
-            }
-            
-            // Get adviser assignments
-            $adviserAssignments = Section::where('school_year_id', $schoolYearId)
-                ->whereNotNull('adviser_id')
-                ->with(['adviser', 'strand'])
-                ->get()
-                ->map(function($section) {
-                    $studentCount = Enrollment::where('assigned_section_id', $section->id)
-                        ->whereIn('status', ['enrolled', 'approved'])
-                        ->count();
-                        
-                    return [
-                        'id' => $section->id,
-                        'faculty_id' => $section->adviser_id,
-                        'faculty_name' => $section->adviser->firstname . ' ' . $section->adviser->lastname,
-                        'section_id' => $section->id,
-                        'section_name' => $section->section_name,
-                        'strand_name' => $section->strand->name ?? 'N/A',
-                        'student_count' => $studentCount,
-                        'assignment_type' => 'adviser'
-                    ];
-                });
-            
-            // Get teaching assignments
-            $teachingAssignments = ClassSchedule::where('school_year_id', $schoolYearId)
-                ->where('is_active', true)
-                ->with(['faculty', 'subject', 'section'])
-                ->get()
-                ->groupBy('faculty_id')
-                ->map(function($assignments, $facultyId) {
-                    $faculty = $assignments->first()->faculty;
-                    $subjects = $assignments->pluck('subject.name')->toArray();
-                    
-                    return [
-                        'id' => $facultyId,
-                        'faculty_id' => $facultyId,
-                        'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname,
-                        'subject_count' => count($subjects),
-                        'subjects' => $subjects,
-                        'assignment_type' => 'teaching'
-                    ];
-                })
-                ->values();
-            
-            return response()->json([
-                'adviser_assignments' => $adviserAssignments,
-                'teaching_assignments' => $teachingAssignments
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Error getting faculty assignments: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to load assignments'], 500);
-        }
-    }
-    
-    /**
-     * Assign faculty as section adviser
-     * Following HCI Principle 5: Error prevention - Validate assignments
-     */
-    public function assignAdviser(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'faculty_id' => 'required|exists:users,id',
-                'section_id' => 'required|exists:sections,id',
-                'school_year_id' => 'required|exists:school_years,id'
-            ]);
-            
-            // Check if faculty exists and has correct role
-            $faculty = User::where('id', $validated['faculty_id'])
-                ->where('role', 'faculty')
-                ->first();
-                
-            if (!$faculty) {
-                return response()->json(['error' => 'Faculty member not found'], 404);
-            }
-            
-            // Check if section already has an adviser
-            $section = Section::find($validated['section_id']);
-            if ($section->adviser_id) {
                 return response()->json([
-                    'error' => 'Section already has an adviser assigned. Please remove the current adviser first.'
+                    'success' => false,
+                    'message' => 'No school year specified and no active school year found'
                 ], 400);
             }
             
-            // Check if faculty is already an adviser for another section in the same school year
-            $existingAdviserAssignment = Section::where('school_year_id', $validated['school_year_id'])
-                ->where('adviser_id', $validated['faculty_id'])
-                ->first();
-                
-            if ($existingAdviserAssignment) {
-                return response()->json([
-                    'error' => 'Faculty member is already an adviser for section ' . $existingAdviserAssignment->section_name
-                ], 400);
+            // Build query for faculty loads
+            $query = DB::table('class')
+                ->join('users as faculty', 'class.faculty_id', '=', 'faculty.id')
+                ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+                ->join('sections', 'class.section_id', '=', 'sections.id')
+                ->join('strands', 'sections.strand_id', '=', 'strands.id')
+                ->where('class.school_year_id', $schoolYearId)
+                ->where('faculty.role', 'faculty');
+            
+            // Apply semester filter if specified
+            if ($semester) {
+                // Handle different semester formats
+                if ($semester === '1st' || $semester === '1st Semester' || $semester === 'First Semester') {
+                    $query->where('subjects.semester', 1);
+                } elseif ($semester === '2nd' || $semester === '2nd Semester' || $semester === 'Second Semester') {
+                    $query->where('subjects.semester', 2);
+                } elseif (is_numeric($semester)) {
+                    $query->where('subjects.semester', $semester);
+                }
             }
             
-            DB::beginTransaction();
+            $facultyLoads = $query->select([
+                'faculty.id as faculty_id',
+                'faculty.username as faculty_name',
+                'faculty.email',
+                'subjects.name as subject_name',
+                'subjects.code as subject_code',
+                'subjects.semester',
+                'sections.section_name',
+                'strands.name as strand_name',
+                'strands.code as strand_code',
+                'class.day_of_week',
+                'class.start_time',
+                'class.end_time'
+            ])
+            ->orderBy('faculty.username')
+            ->orderBy('subjects.semester')
+            ->get();
             
-            // Assign adviser to section
-            $section->adviser_id = $validated['faculty_id'];
-            $section->save();
-            
-            DB::commit();
-            
-            Log::info('Adviser assigned successfully', [
-                'faculty_id' => $validated['faculty_id'],
-                'section_id' => $validated['section_id'],
-                'assigned_by' => Auth::id()
-            ]);
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Faculty member assigned as adviser successfully',
-                'assignment' => [
-                    'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname,
-                    'section_name' => $section->section_name
+            Log::info('Faculty loads query results', [
+                'total_faculty_loads' => $facultyLoads->count(),
+                'sample_faculty_load' => $facultyLoads->first() ? $facultyLoads->first() : 'No faculty loads found',
+                'query_filters' => [
+                    'school_year_id' => $schoolYearId,
+                    'semester' => $semester
                 ]
             ]);
             
-        } catch (\Exception $e) {
-            DB::rollback();
-            Log::error('Error assigning adviser: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to assign adviser'], 500);
-        }
-    }
-    
-    /**
-     * Assign teaching subjects to faculty (up to 4 subjects)
-     * Following HCI Principle 5: Error prevention - Limit to 4 subjects
-     */
-    public function assignTeaching(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'faculty_id' => 'required|exists:users,id',
-                'subject_ids' => 'required|array|max:4',
-                'subject_ids.*' => 'exists:subjects,id',
-                'section_id' => 'required|exists:sections,id',
-                'school_year_id' => 'required|exists:school_years,id'
-            ]);
-            
-            // Check if faculty exists
-            $faculty = User::where('id', $validated['faculty_id'])
-                ->where('role', 'faculty')
-                ->first();
-                
-            if (!$faculty) {
-                return response()->json(['error' => 'Faculty member not found'], 404);
-            }
-            
-            // Check current teaching load (should not exceed 4 subjects)
-            $currentAssignments = ClassSchedule::where('faculty_id', $validated['faculty_id'])
-                ->where('school_year_id', $validated['school_year_id'])
-                ->where('is_active', true)
-                ->count();
-                
-            if ($currentAssignments + count($validated['subject_ids']) > 4) {
-                return response()->json([
-                    'error' => 'Faculty member would exceed maximum of 4 subject assignments. Current: ' . $currentAssignments
-                ], 400);
-            }
-            
-            DB::beginTransaction();
-            
-            $createdAssignments = [];
-            
-            foreach ($validated['subject_ids'] as $subjectId) {
-                // Check if this subject is already assigned to this faculty in this section
-                $existingAssignment = ClassSchedule::where('faculty_id', $validated['faculty_id'])
-                    ->where('subject_id', $subjectId)
-                    ->where('section_id', $validated['section_id'])
-                    ->where('school_year_id', $validated['school_year_id'])
-                    ->first();
-                    
-                if ($existingAssignment) {
-                    continue; // Skip if already assigned
+            // Group by faculty for summary
+            $facultySummary = [];
+            foreach ($facultyLoads as $load) {
+                $facultyKey = $load->faculty_id;
+                if (!isset($facultySummary[$facultyKey])) {
+                    $facultySummary[$facultyKey] = [
+                        'faculty_id' => $load->faculty_id,
+                        'name' => $load->faculty_name,
+                        'email' => $load->email,
+                        'total_subjects' => 0,
+                        'subjects_by_semester' => ['1st' => 0, '2nd' => 0],
+                        'subjects' => []
+                    ];
                 }
                 
-                // Create class schedule entry
-                $schedule = ClassSchedule::create([
-                    'faculty_id' => $validated['faculty_id'],
-                    'subject_id' => $subjectId,
-                    'section_id' => $validated['section_id'],
-                    'school_year_id' => $validated['school_year_id'],
-                    'day_of_week' => 'Monday', // Default - can be updated later
-                    'start_time' => '08:00:00', // Default - can be updated later
-                    'end_time' => '10:00:00', // Default - can be updated later
-                    'semester' => 1, // Default - can be updated later
-                    'is_active' => true
-                ]);
+                $facultySummary[$facultyKey]['total_subjects']++;
                 
-                $createdAssignments[] = $schedule;
+                // Convert numeric semester to readable format
+                $semesterKey = $load->semester == 1 ? '1st' : ($load->semester == 2 ? '2nd' : $load->semester);
+                $facultySummary[$facultyKey]['subjects_by_semester'][$semesterKey]++;
+                
+                $facultySummary[$facultyKey]['subjects'][] = [
+                    'subject_name' => $load->subject_name,
+                    'subject_code' => $load->subject_code,
+                    'semester' => $load->semester,
+                    'section' => $load->section_name,
+                    'strand' => $load->strand_name,
+                    'schedule' => $load->day_of_week . ' ' . $load->start_time . '-' . $load->end_time
+                ];
             }
             
-            DB::commit();
+            if ($request->format === 'json') {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'faculty_loads' => $facultyLoads,
+                        'faculty_summary' => array_values($facultySummary),
+                        'total_faculty' => count($facultySummary),
+                        'filters' => $request->all()
+                    ],
+                    'total' => $facultyLoads->count()
+                ]);
+            }
             
-            Log::info('Teaching assignments created successfully', [
-                'faculty_id' => $validated['faculty_id'],
-                'subject_count' => count($createdAssignments),
-                'assigned_by' => Auth::id()
+            // Export as Excel/PDF
+            return $this->exportFacultyLoads(array_values($facultySummary), $request->format, $request->all());
+            
+        } catch (\Exception $e) {
+            Log::error('Error generating faculty loads report', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
-                'success' => true,
-                'message' => 'Teaching assignments created successfully',
-                'assignments_created' => count($createdAssignments),
-                'faculty_name' => $faculty->firstname . ' ' . $faculty->lastname
-            ]);
-            
-        } catch (\Exception $e) {
-            DB::rollback();
-            Log::error('Error assigning teaching subjects: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to assign teaching subjects'], 500);
+                'success' => false,
+                'message' => 'Failed to generate faculty loads report. Please try again.'
+            ], 500);
         }
     }
     
     /**
-     * Remove adviser assignment
+     * Export faculty loads data
      */
-    public function removeAdviser(Request $request)
+    private function exportFacultyLoads($facultyLoads, $format, $filters)
     {
-        try {
-            $validated = $request->validate([
-                'assignment_id' => 'required|exists:sections,id'
-            ]);
+        $filename = 'faculty_loads_report_' . date('Y-m-d_H-i-s');
+        
+        if ($format === 'excel') {
+            $headers = [
+                'Faculty Name',
+                'Email',
+                'Total Subjects',
+                '1st Semester Subjects',
+                '2nd Semester Subjects',
+                'Subject Details'
+            ];
             
-            $section = Section::find($validated['assignment_id']);
-            
-            if (!$section->adviser_id) {
-                return response()->json(['error' => 'Section does not have an adviser assigned'], 400);
+            $data = [];
+            foreach ($facultyLoads as $faculty) {
+                $subjectDetails = [];
+                foreach ($faculty['subjects'] as $subject) {
+                    $subjectDetails[] = $subject['subject_code'] . ' - ' . $subject['subject_name'] . 
+                                      ' (' . $subject['semester'] . ' Sem, ' . $subject['section'] . ')';
+                }
+                
+                $data[] = [
+                    $faculty['name'],
+                    $faculty['email'],
+                    $faculty['total_subjects'],
+                    $faculty['subjects_by_semester']['1st'],
+                    $faculty['subjects_by_semester']['2nd'],
+                    implode('; ', $subjectDetails)
+                ];
             }
             
-            DB::beginTransaction();
-            
-            $section->adviser_id = null;
-            $section->save();
-            
-            DB::commit();
-            
-            Log::info('Adviser assignment removed', [
-                'section_id' => $section->id,
-                'removed_by' => Auth::id()
-            ]);
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Adviser assignment removed successfully'
-            ]);
-            
-        } catch (\Exception $e) {
-            DB::rollback();
-            Log::error('Error removing adviser assignment: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to remove adviser assignment'], 500);
+            return $this->generateExcelReport($headers, $data, $filename);
         }
+        
+        // Default to JSON if format not supported
+        return response()->json([
+            'success' => true,
+            'data' => $facultyLoads,
+            'message' => 'Faculty loads report generated successfully'
+        ]);
     }
-    
+
     /**
-     * Remove teaching assignments
+     * Export student list in various formats
      */
-    public function removeTeaching(Request $request)
+    private function exportStudentList($students, $format, $filters)
+    {
+        $filename = 'student_list_' . date('Y-m-d_H-i-s');
+        
+        if ($format === 'excel') {
+            // Generate proper Excel-formatted CSV with better compatibility
+            return $this->generateExcelFormattedCSV($students, $filename);
+        }
+
+        if ($format === 'pdf') {
+            return $this->generateStudentListPDF($students, $filters, $filename);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Export format not yet implemented',
+            'format' => $format
+        ]);
+    }
+
+    /**
+     * Export grades list in various formats
+     */
+    private function exportGradesList($grades, $format, $filters)
+    {
+        $filename = 'grades_report_' . date('Y-m-d_H-i-s');
+        
+        if ($format === 'excel') {
+            $headers = [
+                'Content-Type' => 'application/vnd.ms-excel',
+                'Content-Disposition' => "attachment; filename=\"{$filename}.xlsx\"",
+            ];
+
+            $callback = function() use ($grades) {
+                $file = fopen('php://output', 'w');
+                fputcsv($file, ['Student Name', 'LRN', 'Subject', 'Faculty', 'Semester', 'Q1', 'Q2', 'Semester Grade', 'Remarks', 'Status']);
+                
+                foreach ($grades as $grade) {
+                    fputcsv($file, [
+                        $grade['student_name'],
+                        $grade['student_lrn'],
+                        $grade['subject_name'] . ' (' . $grade['subject_code'] . ')',
+                        $grade['faculty_name'],
+                        $grade['semester'],
+                        $grade['first_quarter'],
+                        $grade['second_quarter'],
+                        $grade['semester_grade'],
+                        $grade['remarks'],
+                        $grade['status']
+                    ]);
+                }
+                fclose($file);
+            };
+
+            return response()->stream($callback, 200, $headers);
+        }
+
+        if ($format === 'pdf') {
+            return $this->generateGradesPDF($grades, $filters, $filename);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Export format not yet implemented',
+            'format' => $format
+        ]);
+    }
+
+    /**
+     * Generate PDF for grades report
+     */
+    private function generateGradesPDF($grades, $filters, $filename)
     {
         try {
-            $validated = $request->validate([
-                'assignment_id' => 'required|exists:users,id' // Faculty ID
-            ]);
+            // Get school information
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            $schoolYear = $activeSchoolYear ? $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end : 'N/A';
             
-            DB::beginTransaction();
+            // Create HTML content for PDF
+            $html = $this->buildGradesPDFHTML($grades, $filters, $schoolYear);
             
-            // Remove all teaching assignments for this faculty
-            $removedCount = ClassSchedule::where('faculty_id', $validated['assignment_id'])
-                ->where('is_active', true)
-                ->update(['is_active' => false]);
-            
-            DB::commit();
-            
-            Log::info('Teaching assignments removed', [
-                'faculty_id' => $validated['assignment_id'],
-                'removed_count' => $removedCount,
-                'removed_by' => Auth::id()
-            ]);
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Teaching assignments removed successfully',
-                'removed_count' => $removedCount
+            // Use simple HTML response that can be printed to PDF by browser
+            return response($html, 200, [
+                'Content-Type' => 'text/html',
+                'Content-Disposition' => "inline; filename=\"{$filename}.html\"",
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Expires' => '0'
             ]);
             
         } catch (\Exception $e) {
-            DB::rollback();
-            Log::error('Error removing teaching assignments: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to remove teaching assignments'], 500);
+            Log::error('Error generating grades PDF', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            // Return error response
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate PDF: ' . $e->getMessage()
+            ], 500);
         }
     }
 
+    /**
+     * Build HTML content for grades PDF
+     */
+    private function buildGradesPDFHTML($grades, $filters, $schoolYear)
+    {
+        $html = '
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Grades Report</title>
+            <style>
+                @media print {
+                    body { margin: 0; }
+                    .no-print { display: none; }
+                    @page { size: A4 landscape; margin: 0.5in; }
+                }
+                body { 
+                    font-family: Arial, sans-serif; 
+                    font-size: 11px; 
+                    margin: 20px;
+                    line-height: 1.4;
+                }
+                .header { 
+                    text-align: center; 
+                    margin-bottom: 20px; 
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 10px;
+                }
+                .header h1 { 
+                    color: #333; 
+                    margin: 0; 
+                    font-size: 18px;
+                }
+                .header h2 { 
+                    color: #666; 
+                    margin: 5px 0; 
+                    font-size: 14px;
+                }
+                .info { 
+                    margin-bottom: 15px; 
+                    background-color: #f8f9fa;
+                    padding: 10px;
+                    border-radius: 5px;
+                }
+                .info p { margin: 3px 0; }
+                .print-button {
+                    background-color: #007bff;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    margin-bottom: 20px;
+                    font-size: 14px;
+                }
+                table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    margin-top: 10px; 
+                    font-size: 10px;
+                }
+                th, td { 
+                    border: 1px solid #ddd; 
+                    padding: 6px; 
+                    text-align: left; 
+                    vertical-align: top;
+                }
+                th { 
+                    background-color: #f5f5f5; 
+                    font-weight: bold; 
+                    font-size: 9px;
+                    text-transform: uppercase;
+                }
+                .text-center { text-align: center; }
+                .grade-excellent { background-color: #d4edda; }
+                .grade-good { background-color: #fff3cd; }
+                .grade-needs-improvement { background-color: #f8d7da; }
+                .footer { 
+                    margin-top: 20px; 
+                    text-align: center; 
+                    font-size: 9px; 
+                    color: #666; 
+                    border-top: 1px solid #ddd;
+                    padding-top: 10px;
+                }
+            </style>
+            <script>
+                function printReport() {
+                    window.print();
+                }
+                window.onload = function() {
+                    setTimeout(function() {
+                        window.print();
+                    }, 1000);
+                }
+            </script>
+        </head>
+        <body>
+            <button onclick="printReport()" class="print-button no-print">🖨️ Print Report</button>
+            
+            <div class="header">
+                <h1>ONSTS - Grades Report</h1>
+                <h2>School Year: ' . $schoolYear . '</h2>
+                <p>Generated on: ' . date('F j, Y \a\t g:i A') . '</p>
+            </div>
+            
+            <div class="info">
+                <p><strong>Report Filters:</strong></p>';
+                
+        if (!empty($filters['section_id'])) {
+            $html .= '<p>Section ID: ' . $filters['section_id'] . '</p>';
+        }
+        if (!empty($filters['strand_id'])) {
+            $html .= '<p>Strand ID: ' . $filters['strand_id'] . '</p>';
+        }
+        if (!empty($filters['semester'])) {
+            $html .= '<p>Semester: ' . $filters['semester'] . '</p>';
+        }
+        
+        $html .= '
+                <p>Total Records: ' . count($grades) . '</p>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Student Name</th>
+                        <th>LRN</th>
+                        <th>Subject</th>
+                        <th>Faculty</th>
+                        <th>Semester</th>
+                        <th class="text-center">Q1</th>
+                        <th class="text-center">Q2</th>
+                        <th class="text-center">Final Grade</th>
+                        <th>Remarks</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>';
+                
+        foreach ($grades as $grade) {
+            $gradeClass = '';
+            $finalGrade = $grade['semester_grade'];
+            if ($finalGrade >= 90) {
+                $gradeClass = 'grade-excellent';
+            } elseif ($finalGrade >= 80) {
+                $gradeClass = 'grade-good';
+            } elseif ($finalGrade < 75 && $finalGrade > 0) {
+                $gradeClass = 'grade-needs-improvement';
+            }
+            
+            $html .= '
+                    <tr class="' . $gradeClass . '">
+                        <td>' . htmlspecialchars($grade['student_name']) . '</td>
+                        <td>' . htmlspecialchars($grade['student_lrn']) . '</td>
+                        <td>' . htmlspecialchars($grade['subject_name'] . ' (' . $grade['subject_code'] . ')') . '</td>
+                        <td>' . htmlspecialchars($grade['faculty_name']) . '</td>
+                        <td class="text-center">' . htmlspecialchars($grade['semester']) . '</td>
+                        <td class="text-center">' . ($grade['first_quarter'] ?: '-') . '</td>
+                        <td class="text-center">' . ($grade['second_quarter'] ?: '-') . '</td>
+                        <td class="text-center">' . ($grade['semester_grade'] ?: '-') . '</td>
+                        <td>' . htmlspecialchars($grade['remarks'] ?: '-') . '</td>
+                        <td>' . htmlspecialchars($grade['status']) . '</td>
+                    </tr>';
+        }
+        
+        $html .= '
+                </tbody>
+            </table>
+            
+            <div class="footer">
+                <p>This report was generated automatically by the ONSTS system.</p>
+                <p>For questions or concerns, please contact the registrar\'s office.</p>
+            </div>
+        </body>
+        </html>';
+        
+        return $html;
+    }
+
+    /**
+     * Generate simple PDF fallback
+     */
+    private function generateSimpleGradesPDF($grades, $filters, $filename)
+    {
+        // Simple HTML response that browsers can print to PDF
+        $html = $this->buildGradesPDFHTML($grades, $filters, 'Current School Year');
+        
+        return response($html, 200, [
+            'Content-Type' => 'text/html',
+            'Content-Disposition' => "inline; filename=\"{$filename}.html\"",
+        ]);
+    }
+
+    /**
+     * Display the registrar settings page.
+     */
+    public function settingsPage()
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return redirect('/login')->with('error', 'Access denied');
+        }
+
+        // Get current school year
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get enrollment statistics
+        $enrollmentStats = [];
+        if ($currentSchoolYear) {
+            $enrollmentStats = [
+                'total' => Enrollment::where('school_year_id', $currentSchoolYear->id)->count(),
+                'pending' => Enrollment::where('school_year_id', $currentSchoolYear->id)
+                    ->whereIn('status', ['pending_approval', 'pending'])->count(),
+                'approved' => Enrollment::where('school_year_id', $currentSchoolYear->id)
+                    ->whereIn('status', ['enrolled', 'approved'])->count(),
+                'rejected' => Enrollment::where('school_year_id', $currentSchoolYear->id)
+                    ->where('status', 'rejected')->count(),
+            ];
+        }
+        
+        // Get enrollment settings (for backward compatibility)
+        $enrollmentSettings = [
+            'is_enrollment_open' => $currentSchoolYear ? $currentSchoolYear->is_enrollment_open : false,
+            'enrollment_start' => $currentSchoolYear ? $currentSchoolYear->enrollment_start : null,
+            'enrollment_end' => $currentSchoolYear ? $currentSchoolYear->enrollment_end : null,
+            'enrollment_start_date' => $currentSchoolYear ? $currentSchoolYear->enrollment_start_date : null,
+            'enrollment_end_date' => $currentSchoolYear ? $currentSchoolYear->enrollment_end_date : null,
+            'current_school_year' => $currentSchoolYear ? [
+                'id' => $currentSchoolYear->id,
+                'year_start' => $currentSchoolYear->year_start,
+                'year_end' => $currentSchoolYear->year_end,
+                'semester' => $currentSchoolYear->semester
+            ] : null
+        ];
+
+        return Inertia::render('Registrar/Settings', [
+            'auth' => [
+                'user' => $user
+            ],
+            'enrollmentSettings' => $enrollmentSettings,
+            'currentSchoolYear' => $currentSchoolYear,
+            'enrollmentStats' => $enrollmentStats
+        ]);
+    }
+
+    /**
+     * Toggle enrollment status.
+     */
+    public function toggleEnrollment(Request $request)
+    {
+        $user = Auth::user();
+
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+
+        if (!$currentSchoolYear) {
+            return response()->json(['error' => 'No active school year found'], 404);
+        }
+
+        $request->validate([
+            'is_enrollment_open' => 'required|boolean'
+        ]);
+
+        $updateData = [
+            'is_enrollment_open' => $request->is_enrollment_open
+        ];
+
+        // If opening enrollment and no enrollment dates are set, set default dates
+        if ($request->is_enrollment_open && (!$currentSchoolYear->enrollment_start_date || !$currentSchoolYear->enrollment_end_date)) {
+            $updateData['enrollment_start_date'] = now();
+            $updateData['enrollment_end_date'] = now()->addDays(30);
+            // Sync both old and new fields
+            $updateData['enrollment_start'] = now();
+            $updateData['enrollment_end'] = now()->addDays(30);
+        }
+
+        $currentSchoolYear->update($updateData);
+
+        return response()->json([
+            'success' => true,
+            'message' => $request->is_enrollment_open ? 'Enrollment opened successfully' : 'Enrollment closed successfully',
+            'settings' => [
+                'is_enrollment_open' => $currentSchoolYear->fresh()->is_enrollment_open,
+                'enrollment_start' => $currentSchoolYear->fresh()->enrollment_start,
+                'enrollment_end' => $currentSchoolYear->fresh()->enrollment_end,
+                'enrollment_start_date' => $currentSchoolYear->fresh()->enrollment_start_date,
+                'enrollment_end_date' => $currentSchoolYear->fresh()->enrollment_end_date
+            ]
+        ]);
+    }
+
+    /**
+     * Show enrollment settings page
+     */
+    public function enrollmentSettings()
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return redirect('/login')->with('error', 'Access denied.');
+        }
+
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        // Get enrollment statistics
+        $enrollmentStats = [];
+        if ($currentSchoolYear) {
+            $enrollmentStats = $currentSchoolYear->getEnrollmentStats();
+        }
+
+        return Inertia::render('Registrar/EnrollmentSettings', [
+            'currentSchoolYear' => $currentSchoolYear,
+            'enrollmentStats' => $enrollmentStats,
+            'auth' => ['user' => $user]
+        ]);
+    }
+
+    /**
+     * Update enrollment settings
+     */
+    public function updateEnrollmentSettings(Request $request, $schoolYearId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $request->validate([
+            'is_enrollment_open' => 'required|boolean',
+            'enrollment_start_date' => 'nullable|date',
+            'enrollment_end_date' => 'nullable|date|after:enrollment_start_date',
+            'allow_new_students' => 'boolean',
+            'allow_continuing_students' => 'boolean',
+            'allow_transferees' => 'boolean'
+        ]);
+
+        $schoolYear = SchoolYear::findOrFail($schoolYearId);
+
+        try {
+            $updateData = [
+                'is_enrollment_open' => $request->is_enrollment_open,
+                'enrollment_start_date' => $request->enrollment_start_date,
+                'enrollment_end_date' => $request->enrollment_end_date,
+                // Sync both old and new fields to prevent confusion
+                'enrollment_start' => $request->enrollment_start_date,
+                'enrollment_end' => $request->enrollment_end_date
+            ];
+
+            $schoolYear->update($updateData);
+
+            Log::info('Enrollment settings updated', [
+                'school_year_id' => $schoolYearId,
+                'updated_by' => $user->id,
+                'settings' => $updateData
+            ]);
+
+            // Refresh the school year data to get the updated values
+            $schoolYear->refresh();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Enrollment settings updated successfully.',
+                'settings' => [
+                    'is_enrollment_open' => $schoolYear->is_enrollment_open,
+                    'enrollment_start_date' => $schoolYear->enrollment_start_date,
+                    'enrollment_end_date' => $schoolYear->enrollment_end_date,
+                    'enrollment_start' => $schoolYear->enrollment_start,
+                    'enrollment_end' => $schoolYear->enrollment_end
+                ],
+                'school_year' => $schoolYear
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update enrollment settings', [
+                'school_year_id' => $schoolYearId,
+                'error' => $e->getMessage(),
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to update enrollment settings.',
+                'details' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Get COR preview for an enrollment (Registrar version)
+     */
+    public function getCORPreview($enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        try {
+            // Get enrollment details
+            $enrollment = DB::table('enrollments')
+                ->join('users', 'enrollments.student_id', '=', 'users.id')
+                ->leftJoin('student_personal_info', 'users.id', '=', 'student_personal_info.user_id')
+                ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
+                ->where('enrollments.id', $enrollmentId)
+                ->select([
+                    'enrollments.*',
+                    'users.firstname',
+                    'users.lastname',
+                    'users.email',
+                    'users.student_type',
+                    'student_personal_info.grade_level',
+                    'student_personal_info.student_status',
+                    'strands.name as strand_name',
+                    'strands.code as strand_code'
+                ])
+                ->first();
+
+            if (!$enrollment) {
+                return response()->json(['error' => 'Enrollment not found'], 404);
+            }
+
+            // Get current school year
+            $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$currentSchoolYear) {
+                return response()->json(['error' => 'No active school year found'], 404);
+            }
+
+            // Get student's COR if it exists
+            $cor = DB::table('certificates_of_registration')
+                ->where('student_id', $enrollment->student_id)
+                ->where('school_year_id', $currentSchoolYear->id)
+                ->where('status', 'active')
+                ->first();
+
+            // Get student's schedule from class_details
+            $schedule = $this->getStudentScheduleFromEnrollment($enrollment->id, $currentSchoolYear->id);
+            
+            // Debug logging
+            Log::info('COR Preview Debug', [
+                'enrollment_id' => $enrollment->id,
+                'school_year_id' => $currentSchoolYear->id,
+                'schedule_count' => count($schedule),
+                'schedule_data' => $schedule
+            ]);
+
+            // Get assigned section
+            $assignedSection = null;
+            if ($cor) {
+                $classDetail = DB::table('class_details')
+                    ->join('class', 'class_details.class_id', '=', 'class.id')
+                    ->join('sections', 'class.section_id', '=', 'sections.id')
+                    ->where('class_details.enrollment_id', $enrollment->id)
+                    ->select('sections.section_name as section_name')
+                    ->first();
+                
+                if ($classDetail) {
+                    $assignedSection = $classDetail->section_name;
+                }
+            }
+
+            // Prepare student data
+            $studentData = [
+                'firstname' => $enrollment->firstname,
+                'lastname' => $enrollment->lastname,
+                'email' => $enrollment->email,
+                'student_id' => $enrollment->student_id ?? 'N/A',
+                'student_type' => $enrollment->student_type,
+                'grade_level' => $enrollment->grade_level ?? 'Grade 11',
+                'strand_name' => $enrollment->strand_name,
+                'section_name' => $assignedSection
+            ];
+
+            return response()->json([
+                'success' => true,
+                'cor' => $cor,
+                'schedule' => $schedule,
+                'student' => $studentData,
+                'schoolYear' => $currentSchoolYear,
+                'enrollment' => $enrollment
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load COR data',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Handle COR printing settings
+     */
+    public function updateCORPrintingSettings(Request $request)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        try {
+            $enabled = $request->boolean('enabled');
+            
+            // Store the setting in a configuration table or cache
+            // For now, we'll use a simple cache approach
+            cache(['cor_printing_enabled' => $enabled], now()->addDays(30));
+            
+            Log::info('COR printing settings updated', [
+                'enabled' => $enabled,
+                'updated_by' => $user->id,
+                'updated_by_name' => $user->firstname . ' ' . $user->lastname
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'COR printing settings updated successfully',
+                'enabled' => $enabled
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to update COR printing settings', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to update COR printing settings',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get student schedule from enrollment (helper method)
+     */
+    private function getStudentScheduleFromEnrollment($enrollmentId, $schoolYearId)
+    {
+        // Get class details for the enrollment
+        $classDetails = DB::table('class_details')
+            ->join('class', 'class_details.class_id', '=', 'class.id')
+            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
+            ->join('users as faculty', 'class.faculty_id', '=', 'faculty.id')
+            ->where('class_details.enrollment_id', $enrollmentId)
+            ->where('class_details.is_enrolled', true)
+            ->where('class.school_year_id', $schoolYearId)
+            ->select([
+                'class.id as class_id',
+                'subjects.code as subject_code',
+                'subjects.name as subject_name',
+                'class.day_of_week',
+                'class.start_time',
+                'class.end_time',
+                'faculty.firstname as faculty_firstname',
+                'faculty.lastname as faculty_lastname'
+            ])
+            ->get();
+            
+        // Debug logging for schedule fetching
+        Log::info('Schedule Query Debug', [
+            'enrollment_id' => $enrollmentId,
+            'school_year_id' => $schoolYearId,
+            'class_details_count' => $classDetails->count(),
+            'raw_class_details' => $classDetails->toArray()
+        ]);
+
+        // Convert to flat array for COR display
+        $schedule = [];
+        
+        foreach ($classDetails as $class) {
+            $schedule[] = [
+                'class_id' => $class->class_id,
+                'subject_code' => $class->subject_code,
+                'subject_name' => $class->subject_name,
+                'start_time' => $class->start_time,
+                'end_time' => $class->end_time,
+                'faculty_name' => $class->faculty_firstname . ' ' . $class->faculty_lastname,
+                'day_of_week' => $class->day_of_week,
+                'room' => 'TBA' // Room information not available in class table
+            ];
+        }
+
+        return $schedule;
+    }
+
+    /**
+     * Display transferee evaluations for registrar approval
+     */
+    public function transfereeApprovals()
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return redirect()->route('login');
+        }
+
+        // Get current school year
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$currentSchoolYear) {
+            return Inertia::render('Registrar/Registrar_TransfereeApprovals', [
+                'user' => $user,
+                'evaluations' => [],
+                'stats' => [],
+                'error' => 'No active school year found.'
+            ]);
+        }
+
+        // Get transferee evaluations that need registrar approval
+        $evaluations = Enrollment::where('school_year_id', $currentSchoolYear->id)
+            ->where('enrollment_type', 'transferee')
+            ->where('status', 'evaluated')
+            ->with([
+                'studentPersonalInfo.user',
+                'strand',
+                'coordinator'
+            ])
+            ->orderBy('updated_at', 'desc')
+            ->get()
+            ->map(function ($enrollment) {
+                $studentInfo = $enrollment->studentPersonalInfo;
+                $user = $studentInfo->user ?? null;
+                $coordinator = $enrollment->coordinator;
+                
+                // Get credited subjects for this student
+                $creditedSubjects = TransfereeCreditedSubject::where('student_id', $user->id ?? 0)->get();
+                
+                // Get previous school info through student personal info
+                $previousSchool = null;
+                if ($studentInfo && $studentInfo->id) {
+                    $previousSchool = TransfereePreviousSchool::where('student_personal_info_id', $studentInfo->id)->first();
+                }
+                
+                return [
+                    'id' => $enrollment->id,
+                    'student_name' => $user ? ($user->firstname . ' ' . $user->lastname) : 'Unknown Student',
+                    'student_email' => $user->email ?? 'No Email',
+                    'student_lrn' => $studentInfo->lrn ?? 'No LRN',
+                    'intended_grade_level' => $enrollment->intended_grade_level,
+                    'recommended_strand' => $enrollment->strand->name ?? 'No Strand',
+                    'previous_school' => $previousSchool->last_school ?? ($studentInfo->previous_school ?? 'Not specified'),
+                    'coordinator_name' => $coordinator ? ($coordinator->firstname . ' ' . $coordinator->lastname) : 'Unknown',
+                    'evaluation_date' => $enrollment->updated_at,
+                    'credited_subjects_count' => $creditedSubjects->count()
+                ];
+            });
+
+        // Calculate stats
+        $stats = [
+            'total_evaluations' => $evaluations->count(),
+            'pending_approval' => $evaluations->count(),
+            'total_credited_subjects' => $evaluations->sum('credited_subjects_count')
+        ];
+
+        return Inertia::render('Registrar/Registrar_TransfereeApprovals', [
+            'user' => $user,
+            'evaluations' => $evaluations,
+            'stats' => $stats,
+            'currentSchoolYear' => $currentSchoolYear
+        ]);
+    }
+
+    /**
+     * Approve a transferee evaluation
+     */
+    public function approveTransfereeEvaluation(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        try {
+            $enrollment = Enrollment::with(['studentPersonalInfo.user'])
+                ->findOrFail($enrollmentId);
+
+            if ($enrollment->enrollment_type !== 'transferee' || $enrollment->status !== 'evaluated') {
+                return response()->json([
+                    'error' => 'Invalid evaluation',
+                    'message' => 'This enrollment is not a transferee evaluation or has already been processed.'
+                ], 422);
+            }
+
+            // Update enrollment status to approved by registrar
+            $enrollment->update([
+                'status' => 'approved_by_registrar',
+                'registrar_id' => $user->id,
+                'registrar_approval_date' => now(),
+                'registrar_notes' => $request->notes ?? null
+            ]);
+
+            // Get credited subjects count for logging
+            $creditedSubjectsCount = TransfereeCreditedSubject::where('student_id', $enrollment->studentPersonalInfo->user_id)->count();
+            
+            Log::info('Transferee evaluation approved by registrar', [
+                'enrollment_id' => $enrollment->id,
+                'student_name' => $enrollment->studentPersonalInfo->user->firstname . ' ' . $enrollment->studentPersonalInfo->user->lastname,
+                'registrar_id' => $user->id,
+                'registrar_name' => $user->firstname . ' ' . $user->lastname,
+                'credited_subjects' => $creditedSubjectsCount
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transferee evaluation approved successfully. The coordinator can now proceed with enrollment.',
+                'enrollment' => [
+                    'id' => $enrollment->id,
+                    'status' => $enrollment->status,
+                    'student_name' => $enrollment->studentPersonalInfo->user->firstname . ' ' . $enrollment->studentPersonalInfo->user->lastname
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to approve transferee evaluation', [
+                'enrollment_id' => $enrollmentId,
+                'registrar_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to approve evaluation',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reject a transferee evaluation
+     */
+    public function rejectTransfereeEvaluation(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $request->validate([
+            'rejection_reason' => 'required|string|max:500'
+        ]);
+
+        try {
+            $enrollment = Enrollment::with(['studentPersonalInfo.user'])
+                ->findOrFail($enrollmentId);
+
+            if ($enrollment->enrollment_type !== 'transferee' || $enrollment->status !== 'evaluated') {
+                return response()->json([
+                    'error' => 'Invalid evaluation',
+                    'message' => 'This enrollment is not a transferee evaluation or has already been processed.'
+                ], 422);
+            }
+
+            // Update enrollment status back to pending evaluation with rejection reason
+            $enrollment->update([
+                'status' => 'pending_evaluation',
+                'registrar_rejection_reason' => $request->rejection_reason,
+                'registrar_rejection_date' => now(),
+                'registrar_id' => $user->id
+            ]);
+
+            Log::info('Transferee evaluation rejected by registrar', [
+                'enrollment_id' => $enrollment->id,
+                'student_name' => $enrollment->studentPersonalInfo->user->firstname . ' ' . $enrollment->studentPersonalInfo->user->lastname,
+                'registrar_id' => $user->id,
+                'rejection_reason' => $request->rejection_reason
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transferee evaluation rejected. The coordinator will need to re-evaluate.',
+                'enrollment' => [
+                    'id' => $enrollment->id,
+                    'status' => $enrollment->status,
+                    'student_name' => $enrollment->studentPersonalInfo->user->firstname . ' ' . $enrollment->studentPersonalInfo->user->lastname
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to reject transferee evaluation', [
+                'enrollment_id' => $enrollmentId,
+                'registrar_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to reject evaluation',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Display enrolled students page for COR printing
+     */
+    public function enrolledStudentsPage()
+    {
+        try {
+            $user = Auth::user();
+            
+            if ($user->role !== 'registrar') {
+                return redirect()->route('login')->with('error', 'Unauthorized access');
+            }
+
+            // Get active school year
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            
+            if (!$activeSchoolYear) {
+                return Inertia::render('Registrar/EnrolledStudents', [
+                    'enrolledStudents' => [],
+                    'sections' => [],
+                    'strands' => [],
+                    'schoolYear' => null,
+                    'message' => 'No active school year found'
+                ]);
+            }
+
+            // Get all enrolled students with their details
+            $enrolledStudents = DB::table('enrollments')
+                ->join('student_personal_info', 'enrollments.student_personal_info_id', '=', 'student_personal_info.id')
+                ->join('users', 'student_personal_info.user_id', '=', 'users.id')
+                ->leftJoin('sections', 'enrollments.assigned_section_id', '=', 'sections.id')
+                ->leftJoin('strands', 'enrollments.strand_id', '=', 'strands.id')
+                ->where('enrollments.school_year_id', $activeSchoolYear->id)
+                ->where('enrollments.status', 'enrolled')
+                ->where('users.role', 'student')
+                ->select([
+                    'users.id',
+                    'users.firstname',
+                    'users.lastname',
+                    'users.email',
+                    'users.id as student_id',
+                    'enrollments.id as enrollment_id',
+                    'enrollments.intended_grade_level as grade_level',
+                    'enrollments.created_at as enrollment_date',
+                    'enrollments.enrollment_type',
+                    'sections.id as section_id',
+                    'sections.section_name',
+                    'sections.year_level as section_grade',
+                    'strands.id as strand_id',
+                    'strands.name as strand_name',
+                    'strands.code as strand_code',
+                    'student_personal_info.lrn'
+                ])
+                ->orderBy('users.lastname')
+                ->orderBy('users.firstname')
+                ->get();
+
+            // Get all sections for filtering
+            $sections = Section::with('strand')
+                ->where('school_year_id', $activeSchoolYear->id)
+                ->orderBy('section_name')
+                ->get();
+
+            // Get all strands for filtering
+            $strands = Strand::orderBy('name')->get();
+
+            // Log debug information
+            Log::info('Enrolled Students Page Data', [
+                'enrolled_students_count' => $enrolledStudents->count(),
+                'sections_count' => $sections->count(),
+                'strands_count' => $strands->count(),
+                'active_school_year' => $activeSchoolYear->id,
+                'sample_student' => $enrolledStudents->first()
+            ]);
+
+            return Inertia::render('Registrar/EnrolledStudents', [
+                'enrolledStudents' => $enrolledStudents,
+                'sections' => $sections,
+                'strands' => $strands,
+                'schoolYear' => $activeSchoolYear,
+                'debug' => [
+                    'total_enrolled' => $enrolledStudents->count(),
+                    'query_executed' => true,
+                    'school_year_id' => $activeSchoolYear->id
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to load enrolled students page', [
+                'error' => $e->getMessage(),
+                'user_id' => Auth::id()
+            ]);
+
+            return Inertia::render('Registrar/EnrolledStudents', [
+                'enrolledStudents' => [],
+                'sections' => [],
+                'strands' => [],
+                'schoolYear' => null,
+                'error' => 'Failed to load enrolled students data'
+            ]);
+        }
+    }
+
+    public function getEnrollmentAnalytics(Request $request)
+    {
+        try {
+            $schoolYearId = $request->school_year_id ?: SchoolYear::where('is_active', true)->first()?->id;
+            
+            if (!$schoolYearId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No active school year found',
+                    'trends' => [],
+                    'demographics' => []
+                ]);
+            }
+
+            // Get enrollment trends
+            $thisWeek = DB::table('enrollments')
+                ->where('school_year_id', $schoolYearId)
+                ->where('created_at', '>=', now()->startOfWeek())
+                ->count();
+
+            $thisMonth = DB::table('enrollments')
+                ->where('school_year_id', $schoolYearId)
+                ->where('created_at', '>=', now()->startOfMonth())
+                ->count();
+
+            // Calculate average processing time
+            $avgProcessingDays = DB::table('enrollments')
+                ->where('school_year_id', $schoolYearId)
+                ->where('status', 'enrolled')
+                ->whereNotNull('updated_at')
+                ->selectRaw('AVG(DATEDIFF(updated_at, created_at)) as avg_days')
+                ->value('avg_days') ?? 0;
+
+            // Get enrollment by strand for demographics
+            $strandEnrollments = DB::table('enrollments as e')
+                ->join('strands as s', 'e.strand_id', '=', 's.id')
+                ->where('e.school_year_id', $schoolYearId)
+                ->groupBy('s.id', 's.name', 's.code')
+                ->select('s.name', 's.code', DB::raw('COUNT(*) as count'))
+                ->get();
+
+            // Get enrollment by status
+            $statusBreakdown = DB::table('enrollments')
+                ->where('school_year_id', $schoolYearId)
+                ->groupBy('status')
+                ->select('status', DB::raw('COUNT(*) as count'))
+                ->get();
+
+            Log::info('Enrollment analytics generated', [
+                'school_year_id' => $schoolYearId,
+                'this_week' => $thisWeek,
+                'this_month' => $thisMonth,
+                'avg_processing_days' => round($avgProcessingDays, 1),
+                'strand_enrollments' => $strandEnrollments->count(),
+                'status_breakdown' => $statusBreakdown->count()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'trends' => [
+                    'this_week' => $thisWeek,
+                    'this_month' => $thisMonth,
+                    'avg_processing_days' => round($avgProcessingDays, 1)
+                ],
+                'demographics' => [
+                    'by_strand' => $strandEnrollments,
+                    'by_status' => $statusBreakdown
+                ],
+                'school_year_id' => $schoolYearId
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error generating enrollment analytics', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate analytics',
+                'trends' => [
+                    'this_week' => 0,
+                    'this_month' => 0,
+                    'avg_processing_days' => 0
+                ],
+                'demographics' => [
+                    'by_strand' => [],
+                    'by_status' => []
+                ]
+            ]);
+        }
+    }
+
+    /**
+     * Generate PDF for student list report
+     */
+    private function generateStudentListPDF($students, $filters, $filename)
+    {
+        try {
+            // Get school information
+            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+            $schoolYear = $activeSchoolYear ? $activeSchoolYear->year_start . '-' . $activeSchoolYear->year_end : 'N/A';
+            
+            // Create HTML content for PDF
+            $html = $this->buildStudentListPDFHTML($students, $filters, $schoolYear);
+            
+            // Use simple HTML response that can be printed to PDF by browser
+            return response($html, 200, [
+                'Content-Type' => 'text/html',
+                'Content-Disposition' => "inline; filename=\"{$filename}.html\"",
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Expires' => '0'
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error generating student list PDF', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            // Return error response
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate PDF: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Build HTML content for student list PDF
+     */
+    private function buildStudentListPDFHTML($students, $filters, $schoolYear)
+    {
+        $html = '
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Enrolled Students Report</title>
+            <style>
+                @media print {
+                    body { margin: 0; }
+                    .no-print { display: none; }
+                    @page { size: A4 landscape; margin: 0.5in; }
+                }
+                body { 
+                    font-family: Arial, sans-serif; 
+                    font-size: 11px; 
+                    margin: 20px;
+                    line-height: 1.4;
+                }
+                .header { 
+                    text-align: center; 
+                    margin-bottom: 20px; 
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 10px;
+                }
+                .header h1 { 
+                    color: #333; 
+                    margin: 0; 
+                    font-size: 18px;
+                }
+                .header h2 { 
+                    color: #666; 
+                    margin: 5px 0; 
+                    font-size: 14px;
+                }
+                .info { 
+                    margin-bottom: 15px; 
+                    background-color: #f8f9fa;
+                    padding: 10px;
+                    border-radius: 5px;
+                }
+                .info p { margin: 3px 0; }
+                .print-button {
+                    background-color: #007bff;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    margin-bottom: 20px;
+                    font-size: 14px;
+                }
+                table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    margin-top: 10px; 
+                    font-size: 10px;
+                }
+                th, td { 
+                    border: 1px solid #ddd; 
+                    padding: 8px; 
+                    text-align: left; 
+                    vertical-align: top;
+                }
+                th { 
+                    background-color: #f5f5f5; 
+                    font-weight: bold; 
+                    font-size: 9px;
+                    text-transform: uppercase;
+                }
+                .text-center { text-align: center; }
+                .status-enrolled { background-color: #d4edda; }
+                .status-pending { background-color: #fff3cd; }
+                .status-approved { background-color: #d1ecf1; }
+                .footer { 
+                    margin-top: 20px; 
+                    text-align: center; 
+                    font-size: 9px; 
+                    color: #666; 
+                    border-top: 1px solid #ddd;
+                    padding-top: 10px;
+                }
+            </style>
+            <script>
+                function printReport() {
+                    window.print();
+                }
+                window.onload = function() {
+                    setTimeout(function() {
+                        window.print();
+                    }, 1000);
+                }
+            </script>
+        </head>
+        <body>
+            <button onclick="printReport()" class="print-button no-print">🖨️ Print Report</button>
+            
+            <div class="header">
+                <h1>ONSTS - Enrolled Students Report</h1>
+                <h2>School Year: ' . $schoolYear . '</h2>
+                <p>Generated on: ' . date('F j, Y \a\t g:i A') . '</p>
+            </div>
+            
+            <div class="info">
+                <p><strong>Report Filters:</strong></p>';
+                
+        if (!empty($filters['section_id'])) {
+            $html .= '<p>Section ID: ' . $filters['section_id'] . '</p>';
+        }
+        if (!empty($filters['strand_id'])) {
+            $html .= '<p>Strand ID: ' . $filters['strand_id'] . '</p>';
+        }
+        if (!empty($filters['semester'])) {
+            $html .= '<p>Semester: ' . $filters['semester'] . '</p>';
+        }
+        
+        $html .= '
+                <p>Total Records: ' . count($students) . '</p>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Section</th>
+                        <th>Grade Level</th>
+                        <th>Classes</th>
+                        <th>Subjects</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>';
+                
+        foreach ($students as $student) {
+            $statusClass = '';
+            $status = $student->enrollment_status ?: $student->student_status ?: 'N/A';
+            if ($status === 'enrolled' || $status === 'approved') {
+                $statusClass = 'status-enrolled';
+            } elseif ($status === 'pending') {
+                $statusClass = 'status-pending';
+            }
+            
+            // Format proper name using firstname and lastname
+            $firstName = trim($student->firstname ?: '');
+            $lastName = trim($student->lastname ?: '');
+            $fullName = trim($firstName . ' ' . $lastName) ?: trim($student->username ?: 'N/A');
+            
+            $html .= '
+                    <tr class="' . $statusClass . '">
+                        <td>' . htmlspecialchars($fullName) . '</td>
+                        <td>' . htmlspecialchars($student->email ?: 'N/A') . '</td>
+                        <td>' . htmlspecialchars($student->section_name ?: 'N/A') . '</td>
+                        <td class="text-center">' . htmlspecialchars($student->grade_level ?: 'N/A') . '</td>
+                        <td class="text-center">' . ($student->total_classes ?: '0') . '</td>
+                        <td>' . htmlspecialchars($student->subjects_enrolled ?: 'No subjects') . '</td>
+                        <td class="text-center">' . htmlspecialchars($status) . '</td>
+                    </tr>';
+        }
+        
+        $html .= '
+                </tbody>
+            </table>
+            
+            <div class="footer">
+                <p>This report was generated automatically by the ONSTS system.</p>
+                <p>For questions or concerns, please contact the registrar\'s office.</p>
+            </div>
+        </body>
+        </html>';
+        
+        return $html;
+    }
+
+    /**
+     * Generate Excel-formatted CSV with proper layout
+     */
+    private function generateExcelFormattedCSV($students, $filename)
+    {
+        $headers = [
+            'Content-Type' => 'text/csv; charset=utf-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}.csv\"",
+            'Cache-Control' => 'no-cache, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0'
+        ];
+
+        $callback = function() use ($students) {
+            $file = fopen('php://output', 'w');
+            
+            // Set UTF-8 BOM for proper Excel encoding
+            fwrite($file, "\xEF\xBB\xBF");
+            
+            // Create header row with clear column names
+            fputcsv($file, [
+                'Full Name',
+                'Email Address', 
+                'Section',
+                'Grade Level',
+                'Enrollment Status'
+            ]);
+            
+            // Add data rows with proper formatting
+            foreach ($students as $student) {
+                // Format proper name using firstname and lastname
+                $firstName = trim($student->firstname ?: '');
+                $lastName = trim($student->lastname ?: '');
+                $fullName = trim($firstName . ' ' . $lastName) ?: trim($student->username ?: 'N/A');
+                
+                // Clean and format other fields
+                $email = trim($student->email ?: 'N/A');
+                $section = trim($student->section_name ?: 'N/A');
+                $gradeLevel = trim($student->grade_level ?: 'N/A');
+                $status = trim($student->enrollment_status ?: $student->student_status ?: 'N/A');
+                
+                // Write row with proper text formatting
+                fputcsv($file, [
+                    $fullName,
+                    $email,
+                    $section,
+                    $gradeLevel,
+                    $status
+                ]);
+            }
+            
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
+    }
 }

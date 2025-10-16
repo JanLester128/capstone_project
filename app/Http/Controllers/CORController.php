@@ -2,280 +2,331 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
+use App\Models\CertificateOfRegistration;
 use App\Models\Enrollment;
-use App\Models\Section;
-use App\Models\Subject;
-use App\Models\SchoolYear;
+use App\Services\CORService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
-use Barryvdh\DomPDF\Facade\Pdf;
+// PDF functionality will be added when DomPDF package is installed
 
 class CORController extends Controller
 {
-    /**
-     * Display COR for a student based on their assigned section schedules
-     */
-    public function viewCOR($studentId)
+    protected $corService;
+
+    public function __construct(CORService $corService)
     {
-        try {
-            // Get student and validate access
-            $student = User::where('id', $studentId)
-                ->where('role', 'student')
-                ->firstOrFail();
+        $this->corService = $corService;
+    }
 
-            // Get active school year
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            if (!$activeSchoolYear) {
-                return response()->json(['error' => 'No active school year found'], 404);
-            }
+    /**
+     * Display COR for a student
+     */
+    public function show($corId)
+    {
+        $user = Auth::user();
+        
+        $cor = CertificateOfRegistration::with([
+            'classDetails.class.subject',
+            'classDetails.class.faculty',
+            'student',
+            'section',
+            'strand',
+            'schoolYear',
+            'enrollment.studentPersonalInfo'
+        ])->findOrFail($corId);
 
-            // Get student's enrollment and assigned section
-            $enrollment = Enrollment::where('student_id', $studentId)
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->where('status', 'enrolled')
-                ->first();
+        // Check permissions
+        if ($user->role === 'student' && $cor->student_id !== $user->id) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
 
-            if (!$enrollment || !$enrollment->assigned_section_id) {
-                return response()->json(['error' => 'Student not enrolled or not assigned to a section'], 404);
-            }
+        if (!in_array($user->role, ['student', 'registrar', 'coordinator', 'faculty'])) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
 
-            // Get section details
-            $section = Section::with('strand')->find($enrollment->assigned_section_id);
-            if (!$section) {
-                return response()->json(['error' => 'Section not found'], 404);
-            }
-
-            // Get student personal info
-            $studentPersonalInfo = DB::table('student_personal_info')
-                ->where('user_id', $studentId)
-                ->first();
-
-            // Get all schedules for the student's section grouped by semester
-            $schedules = $this->getSectionSchedules($section->id, $activeSchoolYear->id);
-
-            // Build COR data
-            $corData = [
+        return Inertia::render('COR/ViewCOR', [
+            'cor' => [
+                'id' => $cor->id,
+                'cor_number' => $cor->cor_number,
+                'registration_date' => $cor->registration_date->format('F d, Y'),
+                'semester' => $cor->semester,
+                'year_level' => $cor->year_level,
+                'status' => $cor->status,
+                'print_count' => $cor->print_count,
                 'student' => [
-                    'id' => $student->id,
-                    'firstname' => $student->firstname,
-                    'lastname' => $student->lastname,
-                    'middlename' => $student->middlename ?? '',
-                    'lrn' => $studentPersonalInfo->lrn ?? 'Not provided',
-                    'grade_level' => $enrollment->grade_level ?? 'Grade 11',
+                    'id' => $cor->student->id,
+                    'name' => $cor->student->firstname . ' ' . $cor->student->lastname,
+                    'email' => $cor->student->email,
+                    'lrn' => $cor->studentPersonalInfo->lrn ?? 'N/A'
                 ],
-                'section' => $section,
-                'strand' => $section->strand,
-                'school_year' => $activeSchoolYear,
-                'schedules' => $schedules,
-                'generated_date' => now()->format('F d, Y'),
-                'enrollment' => $enrollment
-            ];
+                'section' => [
+                    'id' => $cor->section->id,
+                    'name' => $cor->section->section_name,
+                    'year_level' => $cor->section->year_level
+                ],
+                'strand' => [
+                    'id' => $cor->strand->id,
+                    'name' => $cor->strand->name,
+                    'code' => $cor->strand->code ?? $cor->strand->name
+                ],
+                'school_year' => [
+                    'id' => $cor->schoolYear->id,
+                    'year_range' => $cor->schoolYear->year_start . '-' . $cor->schoolYear->year_end,
+                    'semester' => $cor->schoolYear->semester
+                ],
+                'subjects' => $cor->classDetails->map(function ($classDetail) {
+                    $class = $classDetail->class;
+                    $subject = $class->subject;
+                    $faculty = $class->faculty;
+                    
+                    return [
+                        'id' => $classDetail->id,
+                        'subject_code' => $subject->code ?? 'N/A',
+                        'subject_name' => $subject->name ?? 'N/A',
+                        'units' => 1.0, // Default units
+                        'schedule' => $class->day_of_week . ' ' . 
+                            date('g:i A', strtotime($class->start_time)) . ' - ' . 
+                            date('g:i A', strtotime($class->end_time)),
+                        'faculty_name' => $faculty ? $faculty->firstname . ' ' . $faculty->lastname : 'TBA',
+                        'room' => 'TBA',
+                        'is_credited' => false
+                    ];
+                })
+            ],
+            'user' => $user,
+            'canPrint' => true
+        ]);
+    }
 
-            Log::info('COR generated for student', [
-                'student_id' => $studentId,
-                'section_id' => $section->id,
-                'schedules_count' => [
-                    '1st_semester' => count($schedules['first_semester'] ?? []),
-                    '2nd_semester' => count($schedules['second_semester'] ?? [])
+    /**
+     * Get student's current COR
+     */
+    public function studentCOR()
+    {
+        $user = Auth::user();
+        
+        if ($user->role !== 'student') {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        $cor = $this->corService->getCORForStudent($user->id);
+
+        if (!$cor) {
+            return response()->json([
+                'message' => 'No COR found. Please ensure your enrollment has been approved.',
+                'cor' => null
+            ]);
+        }
+
+        return response()->json([
+            'cor' => [
+                'id' => $cor->id,
+                'cor_number' => $cor->cor_number,
+                'registration_date' => $cor->registration_date->format('F d, Y'),
+                'semester' => $cor->semester,
+                'year_level' => $cor->year_level,
+                'status' => $cor->status,
+                'section_name' => $cor->section->section_name,
+                'strand_name' => $cor->strand->name,
+                'school_year' => $cor->schoolYear->year_start . '-' . $cor->schoolYear->year_end,
+                'subjects_count' => $cor->classDetails->count()
+            ]
+        ]);
+    }
+
+    /**
+     * Print COR as PDF
+     */
+    public function printCOR($corId)
+    {
+        $user = Auth::user();
+        
+        $cor = CertificateOfRegistration::with([
+            'classDetails.class.subject',
+            'classDetails.class.faculty',
+            'student',
+            'section',
+            'strand',
+            'schoolYear',
+            'enrollment.studentPersonalInfo'
+        ])->findOrFail($corId);
+
+        // Check permissions
+        if ($user->role === 'student' && $cor->student_id !== $user->id) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        // Mark as printed
+        $cor->markAsPrinted();
+
+        // Prepare data for PDF
+        $data = [
+            'cor' => $cor,
+            'student' => $cor->student,
+            'studentInfo' => $cor->enrollment->studentPersonalInfo,
+            'section' => $cor->section,
+            'strand' => $cor->strand,
+            'schoolYear' => $cor->schoolYear,
+            'subjects' => $cor->classDetails->map(function ($classDetail) {
+                $class = $classDetail->class;
+                $subject = $class->subject;
+                $faculty = $class->faculty;
+                
+                return (object) [
+                    'subject_code' => $subject->code ?? 'N/A',
+                    'subject_name' => $subject->name ?? 'N/A',
+                    'units' => 1.0,
+                    'day_of_week' => $class->day_of_week,
+                    'start_time' => $class->start_time,
+                    'end_time' => $class->end_time,
+                    'faculty_name' => $faculty ? $faculty->firstname . ' ' . $faculty->lastname : 'TBA',
+                    'is_credited' => false
+                ];
+            }),
+            'printDate' => now()->format('F d, Y'),
+            'printTime' => now()->format('h:i A')
+        ];
+
+        // TODO: Install DomPDF package: composer require barryvdh/laravel-dompdf
+        // For now, return the view directly
+        Log::info('COR printed', [
+            'cor_id' => $cor->id,
+            'printed_by' => $user->id,
+            'print_count' => $cor->print_count
+        ]);
+
+        // Return HTML view for now (can be printed from browser)
+        return view('cor.print', $data);
+    }
+
+    /**
+     * Generate COR for an enrollment (admin only)
+     */
+    public function generateCOR(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        try {
+            $enrollment = Enrollment::findOrFail($enrollmentId);
+            
+            if ($enrollment->status !== 'enrolled') {
+                return response()->json([
+                    'error' => 'Cannot generate COR for non-enrolled student'
+                ], 422);
+            }
+
+            $cor = $this->corService->generateCOR($enrollment, $user->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'COR generated successfully',
+                'cor' => [
+                    'id' => $cor->id,
+                    'cor_number' => $cor->cor_number
                 ]
             ]);
 
-            return Inertia::render('Student/CORView', $corData);
-
         } catch (\Exception $e) {
-            Log::error('Error generating COR', [
-                'student_id' => $studentId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
-            return response()->json(['error' => 'Failed to generate COR'], 500);
-        }
-    }
-
-    /**
-     * Generate and download COR as PDF
-     */
-    public function generateCORPDF($studentId)
-    {
-        try {
-            // Get the same data as viewCOR
-            $student = User::where('id', $studentId)
-                ->where('role', 'student')
-                ->firstOrFail();
-
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            if (!$activeSchoolYear) {
-                return response()->json(['error' => 'No active school year found'], 404);
-            }
-
-            $enrollment = Enrollment::where('student_id', $studentId)
-                ->where('school_year_id', $activeSchoolYear->id)
-                ->where('status', 'enrolled')
-                ->first();
-
-            if (!$enrollment || !$enrollment->assigned_section_id) {
-                return response()->json(['error' => 'Student not enrolled or not assigned to a section'], 404);
-            }
-
-            $section = Section::with('strand')->find($enrollment->assigned_section_id);
-            $studentPersonalInfo = DB::table('student_personal_info')
-                ->where('user_id', $studentId)
-                ->first();
-
-            $schedules = $this->getSectionSchedules($section->id, $activeSchoolYear->id);
-
-            $corData = [
-                'student' => [
-                    'id' => $student->id,
-                    'firstname' => $student->firstname,
-                    'lastname' => $student->lastname,
-                    'middlename' => $student->middlename ?? '',
-                    'lrn' => $studentPersonalInfo->lrn ?? 'Not provided',
-                    'grade_level' => $enrollment->grade_level ?? 'Grade 11',
-                ],
-                'section' => $section,
-                'strand' => $section->strand,
-                'school_year' => $activeSchoolYear,
-                'schedules' => $schedules,
-                'generated_date' => now()->format('F d, Y'),
-                'enrollment' => $enrollment
-            ];
-
-            // Generate PDF using Blade view
-            $pdf = Pdf::loadView('cor.certificate', $corData);
-            $pdf->setPaper('A4', 'portrait');
-
-            $filename = "COR_{$student->lastname}_{$student->firstname}_{$activeSchoolYear->year_start}-{$activeSchoolYear->year_end}.pdf";
-
-            // Update enrollment to mark COR as generated
-            $enrollment->update([
-                'cor_generated' => true,
-                'cor_generated_at' => now()
-            ]);
-
-            Log::info('COR PDF generated', [
-                'student_id' => $studentId,
-                'filename' => $filename
-            ]);
-
-            return $pdf->download($filename);
-
-        } catch (\Exception $e) {
-            Log::error('Error generating COR PDF', [
-                'student_id' => $studentId,
+            Log::error('Failed to generate COR', [
+                'enrollment_id' => $enrollmentId,
+                'user_id' => $user->id,
                 'error' => $e->getMessage()
             ]);
-            
-            return response()->json(['error' => 'Failed to generate COR PDF'], 500);
+
+            return response()->json([
+                'error' => 'Failed to generate COR: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     /**
-     * Get all schedules for a section grouped by semester using the existing class table
+     * Regenerate COR (admin only)
      */
-    private function getSectionSchedules($sectionId, $schoolYearId)
+    public function regenerateCOR($corId)
     {
-        // Get all class schedules for this section from the existing 'class' table
-        $schedules = DB::table('class')
-            ->join('subjects', 'class.subject_id', '=', 'subjects.id')
-            ->leftJoin('users as teachers', 'class.faculty_id', '=', 'teachers.id')
-            ->where('class.section_id', $sectionId)
-            ->where('class.school_year_id', $schoolYearId)
-            ->where('class.is_active', true)
-            ->select([
-                'subjects.subject_code',
-                'subjects.subject_name',
-                'subjects.units',
-                'class.semester',
-                'class.day_of_week',
-                'class.start_time',
-                'class.end_time',
-                'class.room',
-                'teachers.firstname as teacher_firstname',
-                'teachers.lastname as teacher_lastname'
-            ])
-            ->orderBy('class.semester')
-            ->orderBy('subjects.subject_code')
-            ->get();
-
-        // Group by semester
-        $groupedSchedules = [
-            'first_semester' => [],
-            'second_semester' => []
-        ];
-
-        foreach ($schedules as $schedule) {
-            $semesterKey = $schedule->semester === '1st Semester' ? 'first_semester' : 'second_semester';
-            
-            $subjectCode = $schedule->subject_code;
-            
-            // Build teacher name
-            $teacherName = 'TBA';
-            if ($schedule->teacher_firstname && $schedule->teacher_lastname) {
-                $teacherName = $schedule->teacher_firstname . ' ' . $schedule->teacher_lastname;
-            }
-            
-            // If subject already exists, add this schedule to it
-            if (isset($groupedSchedules[$semesterKey][$subjectCode])) {
-                $groupedSchedules[$semesterKey][$subjectCode]['schedules'][] = [
-                    'day' => $schedule->day_of_week,
-                    'time' => $schedule->start_time . ' - ' . $schedule->end_time,
-                    'room' => $schedule->room
-                ];
-            } else {
-                // Create new subject entry
-                $groupedSchedules[$semesterKey][$subjectCode] = [
-                    'subject_code' => $schedule->subject_code,
-                    'subject_name' => $schedule->subject_name,
-                    'units' => $schedule->units,
-                    'teacher' => $teacherName,
-                    'schedules' => [[
-                        'day' => $schedule->day_of_week,
-                        'time' => $schedule->start_time . ' - ' . $schedule->end_time,
-                        'room' => $schedule->room
-                    ]]
-                ];
-            }
+        $user = Auth::user();
+        
+        if (!in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied'], 403);
         }
 
-        // Convert to indexed arrays for easier iteration in views
-        return [
-            'first_semester' => array_values($groupedSchedules['first_semester']),
-            'second_semester' => array_values($groupedSchedules['second_semester'])
-        ];
-    }
-
-    /**
-     * Get section schedules API endpoint for frontend
-     */
-    public function getSectionSchedulesAPI($sectionId)
-    {
         try {
-            $activeSchoolYear = SchoolYear::where('is_active', true)->first();
-            if (!$activeSchoolYear) {
-                return response()->json(['error' => 'No active school year found'], 404);
-            }
+            $cor = CertificateOfRegistration::findOrFail($corId);
+            $updatedCOR = $this->corService->regenerateCOR($cor, $user->id);
 
-            $schedules = $this->getSectionSchedules($sectionId, $activeSchoolYear->id);
-            
             return response()->json([
                 'success' => true,
-                'schedules' => $schedules,
-                'school_year' => $activeSchoolYear
+                'message' => 'COR regenerated successfully',
+                'cor' => [
+                    'id' => $updatedCOR->id,
+                    'cor_number' => $updatedCOR->cor_number
+                ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error fetching section schedules', [
-                'section_id' => $sectionId,
+            Log::error('Failed to regenerate COR', [
+                'cor_id' => $corId,
+                'user_id' => $user->id,
                 'error' => $e->getMessage()
             ]);
-            
-            return response()->json(['error' => 'Failed to fetch schedules'], 500);
+
+            return response()->json([
+                'error' => 'Failed to regenerate COR: ' . $e->getMessage()
+            ], 500);
         }
+    }
+
+    /**
+     * List CORs for admin
+     */
+    public function index(Request $request)
+    {
+        $user = Auth::user();
+        
+        if (!in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied'], 403);
+        }
+
+        $query = CertificateOfRegistration::with([
+            'student',
+            'section',
+            'strand',
+            'schoolYear'
+        ]);
+
+        // Apply filters
+        if ($request->school_year_id) {
+            $query->where('school_year_id', $request->school_year_id);
+        }
+
+        if ($request->semester) {
+            $query->where('semester', $request->semester);
+        }
+
+        if ($request->strand_id) {
+            $query->where('strand_id', $request->strand_id);
+        }
+
+        if ($request->section_id) {
+            $query->where('section_id', $request->section_id);
+        }
+
+        $cors = $query->orderBy('created_at', 'desc')->paginate(20);
+
+        return response()->json([
+            'cors' => $cors->items(),
+            'pagination' => [
+                'current_page' => $cors->currentPage(),
+                'last_page' => $cors->lastPage(),
+                'per_page' => $cors->perPage(),
+                'total' => $cors->total()
+            ]
+        ]);
     }
 }

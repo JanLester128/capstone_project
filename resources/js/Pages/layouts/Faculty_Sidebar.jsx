@@ -12,8 +12,6 @@ import {
   FaSchool,
   FaChalkboardTeacher,
   FaUserGraduate,
-  FaUserCheck,
-  FaUserPlus,
   FaExchangeAlt,
   FaBars,
   FaTimes,
@@ -24,7 +22,8 @@ import {
   FaPalette,
   FaBell,
   FaCog,
-  FaLevelUpAlt
+  FaLevelUpAlt,
+  FaChartBar
 } from "react-icons/fa";
 import Swal from 'sweetalert2';
 import { AuthManager } from '../../auth';
@@ -428,29 +427,18 @@ export default function FacultySidebar({ onToggle }) {
   // Base menu items for all faculty
   const baseMenuItems = [
     { name: "Dashboard", href: "/faculty/dashboard", icon: FaHome, description: "Overview and quick stats" },
+    { name: "My Classes", href: "/faculty/classes", icon: FaUsers, description: "View and manage your classes" },
     { name: "My Schedule", href: "/faculty/schedule", icon: FaCalendarAlt, description: "View your class timetable" },
-    { name: "Class Lists", href: "/faculty/classes", icon: FaUsers, description: "Manage your classes" },
-    { name: "Grade Input", href: "/faculty/grades", icon: FaGraduationCap, description: "Input student grades" },
+    { name: "Teaching Loads", href: "/faculty/loads", icon: FaChalkboardTeacher, description: "View your teaching assignments" },
+    { name: "Grade Management", href: "/faculty/semester", icon: FaGraduationCap, description: "Manage quarterly grading and semester timeline" },
+    { name: "Reports", href: "/faculty/reports", icon: FaChartBar, description: "Generate student and grade reports" },
   ];
 
   // Additional menu items for coordinators with student type separation
   const coordinatorMenuItems = [
     { name: "Enrollment Management", href: "/faculty/enrollment", icon: FaUserGraduate, description: "Review student enrollments" },
-    { name: "Manual Enrollment", href: "/faculty/manual-enrollment", icon: FaUserPlus, description: "Enroll students manually (for those without internet/email)" },
-    { name: "Grade Progression", href: "/faculty/grade-progression", icon: FaLevelUpAlt, description: "Progress Grade 11 students to Grade 12" },
-    { 
-      name: "Student Management", 
-      href: "/faculty/students", 
-      icon: FaUserCheck, 
-      description: "View enrolled students by type and section",
-      hasSubmenu: true,
-      submenu: [
-        { name: "All Students", href: "/faculty/students?type=all", icon: FaUsers, description: "View all enrolled students" },
-        { name: "New Students", href: "/faculty/students?type=new", icon: FaUserPlus, description: "First-time enrollees" },
-        { name: "Continuing Students", href: "/faculty/students?type=continuing", icon: FaUserCheck, description: "Grade 12 and returning students" },
-        { name: "Transferees", href: "/faculty/students?type=transferee", icon: FaExchangeAlt, description: "Students from other schools" }
-      ]
-    },
+    { name: "Transferee Evaluation", href: "/enrollment/transferee/management", icon: FaExchangeAlt, description: "Evaluate transferee subject credits" },
+    { name: "Semester Progression", href: "/faculty/semester-progression", icon: FaLevelUpAlt, description: "Enroll students for 2nd semester, Grade 12, and summer classes" },
   ];
 
   // Combine menu items based on coordinator status
@@ -498,13 +486,26 @@ export default function FacultySidebar({ onToggle }) {
       <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-500 to-indigo-600`}>
         {!isCollapsed && (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <FaSchool className="text-blue-600 text-lg" />
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+              <img 
+                src="/onsts.png" 
+                alt="ONSTS Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
             <div>
               <h1 className="text-white font-bold text-lg">ONSTS</h1>
               <p className="text-blue-100 text-xs">Faculty Portal</p>
             </div>
+          </div>
+        )}
+        {isCollapsed && (
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+            <img 
+              src="/onsts.png" 
+              alt="ONSTS Logo" 
+              className="w-full h-full object-contain"
+            />
           </div>
         )}
         <button

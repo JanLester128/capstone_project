@@ -1,505 +1,310 @@
-import React, { useState, useEffect } from "react";
-import FacultySidebar from "../layouts/Faculty_Sidebar";
+import React, { useState } from 'react';
+import { Head, Link } from '@inertiajs/react';
+import Faculty_Sidebar from '../layouts/Faculty_Sidebar';
 import { 
-  FaCalendarAlt, 
-  FaClock, 
-  FaMapMarkerAlt,
-  FaUsers,
-  FaChevronLeft,
-  FaChevronRight,
-  FaFilter,
-  FaBook,
-  FaList,
-  FaTable
-} from "react-icons/fa";
+    FaCalendarAlt, 
+    FaClock, 
+    FaMapMarkerAlt, 
+    FaBook, 
+    FaUsers,
+    FaExclamationTriangle,
+    FaChevronLeft,
+    FaChevronRight
+} from 'react-icons/fa';
 
-export default function FacultySchedule({ schedules: initialSchedules = [], activeSchoolYear, displaySchoolYear, auth, message, debugInfo }) {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const saved = localStorage.getItem('faculty-sidebar-collapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
-  const [currentWeek, setCurrentWeek] = useState(0);
-  const [viewType, setViewType] = useState("timetable"); 
-  const [selectedSemester, setSelectedSemester] = useState("1st Semester");
-  // Use the prop directly instead of local state to prevent infinite loops
-  const schedules = initialSchedules || [];
-  
+export default function Faculty_Schedule({ 
+    schedule = [], 
+    academicCalendar = {},
+    error = null 
+}) {
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [selectedDay, setSelectedDay] = useState('all');
 
-  const formatTime12Hour = (time24) => {
-    if (!time24) return '';
+    const handleSidebarToggle = (collapsed) => {
+        setSidebarCollapsed(collapsed);
+    };
+
+    const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     
-    // Handle different time formats (HH:MM, HH:MM:SS, or datetime strings)
-    let timeString = time24;
-    if (time24.includes('T') || time24.includes(' ')) {
-      // Extract time from datetime string
-      timeString = time24.split('T')[1] || time24.split(' ')[1] || time24;
-    }
-    
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  const getCurrentWeekDates = () => {
-    const today = new Date();
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay() + 1 + (currentWeek * 7));
-    
-    const weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    return weekDays.map((day, index) => {
-      const date = new Date(startOfWeek);
-      date.setDate(startOfWeek.getDate() + index);
-      return {
-        day,
-        date: date.getDate(),
-        month: date.toLocaleDateString('en-US', { month: 'short' }),
-        fullDate: date
-      };
-    });
-  };
-
-  const weekDates = getCurrentWeekDates();
-
-  const getSchedulesForSemester = () => {
-    // Check if schedules have semester data
-    const schedulesWithSemester = schedules.filter(s => s.semester);
-    const schedulesWithoutSemester = schedules.filter(s => !s.semester);
-    
-    
-    // If no schedules have semester data, split them artificially
-    if (schedulesWithoutSemester.length > 0 && schedulesWithSemester.length === 0) {
-      // Split schedules artificially: first half = 1st semester, second half = 2nd semester
-      const midpoint = Math.ceil(schedulesWithoutSemester.length / 2);
-      
-      if (selectedSemester === "1st Semester") {
-        const firstHalf = schedulesWithoutSemester.slice(0, midpoint);
-        return firstHalf;
-      } else if (selectedSemester === "2nd Semester") {
-        const secondHalf = schedulesWithoutSemester.slice(midpoint);
-        return secondHalf;
-      }
-    }
-    
-    // Normal filtering when schedules have semester data
-    const filtered = schedules.filter(schedule => {
-      // Try exact match first
-      if (schedule.semester === selectedSemester) {
-        return true;
-      }
-      
-      // Try flexible matching for different semester formats
-      const semesterLower = (schedule.semester || '').toLowerCase();
-      const selectedLower = selectedSemester.toLowerCase();
-      
-      if (selectedSemester === "1st Semester") {
-        return semesterLower.includes('1st') || 
-               semesterLower.includes('first') || 
-               semesterLower.includes('1') ||
-               !schedule.semester; // Default to 1st if no semester
-      } else if (selectedSemester === "2nd Semester") {
-        return semesterLower.includes('2nd') || 
-               semesterLower.includes('second') || 
-               semesterLower.includes('2');
-      }
-      
-      return false;
-    });
-    
-    // If still no match, split artificially by schedule ID
-    if (filtered.length === 0 && schedules.length > 0) {
-      const midpoint = Math.ceil(schedules.length / 2);
-      
-      if (selectedSemester === "1st Semester") {
-        return schedules.slice(0, midpoint);
-      } else if (selectedSemester === "2nd Semester") {
-        return schedules.slice(midpoint);
-      }
-      
-      // Final fallback: return all schedules
-      return schedules;
-    }
-    
-    return filtered;
-  };
-
-  const getSchedulesForWeek = () => {
-    return getSchedulesForSemester();
-  };
-
-  const weekSchedules = getSchedulesForWeek();
-  
-  
-  // Get semester statistics
-  const schedulesWithSemester = schedules.filter(s => s.semester);
-  const schedulesWithoutSemester = schedules.filter(s => !s.semester);
-  
-  let firstSemesterCount, secondSemesterCount;
-  
-  if (schedulesWithSemester.length === 0 && schedulesWithoutSemester.length > 0) {
-    // Artificial split when no semester data exists
-    const midpoint = Math.ceil(schedulesWithoutSemester.length / 2);
-    firstSemesterCount = midpoint;
-    secondSemesterCount = schedulesWithoutSemester.length - midpoint;
-  } else {
-    // Normal counting when semester data exists
-    firstSemesterCount = schedules.filter(s => s.semester === "1st Semester" || (!s.semester && schedulesWithSemester.length === 0)).length;
-    secondSemesterCount = schedules.filter(s => s.semester === "2nd Semester").length;
-  }
-
-  return (
-    <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
-      <FacultySidebar onToggle={setIsCollapsed} />
-      
-      <div className={`flex-1 ${isCollapsed ? 'ml-16' : 'ml-64'} p-6 transition-all duration-300`}>
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-            My Schedule
-          </h1>
-          <p className="text-gray-600">View your weekly class schedule and manage your time</p>
-          
-          {/* Show message if provided */}
-          {message && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-yellow-800">{message}</p>
-            </div>
-          )}
-          
-          {/* Show debug info if no schedules and debugInfo available */}
-          {schedules.length === 0 && debugInfo && (
-            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h3 className="text-blue-800 font-semibold mb-2">Schedule Status</h3>
-              <div className="text-sm text-blue-700 space-y-1">
-                <p>Total schedules in system: {debugInfo.total_schedules}</p>
-                <p>Active schedules: {debugInfo.active_schedules}</p>
-                <p>Schedules for current school year: {debugInfo.school_year_schedules}</p>
-                <p>Unassigned schedules: {debugInfo.unassigned_schedules}</p>
-                <p>Your assigned schedules: {debugInfo.faculty_schedules}</p>
-                {debugInfo.unassigned_schedules > 0 && (
-                  <p className="text-blue-600 font-medium">
-                    There are {debugInfo.unassigned_schedules} unassigned schedules that could be assigned to you.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Semester Selection */}
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100 mb-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <h2 className="text-lg font-semibold text-gray-800">Select Semester:</h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSelectedSemester("1st Semester")}
-                  className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                    selectedSemester === "1st Semester" 
-                      ? "bg-blue-600 text-white" 
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  1st Semester ({firstSemesterCount})
-                </button>
-                <button
-                  onClick={() => setSelectedSemester("2nd Semester")}
-                  className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                    selectedSemester === "2nd Semester" 
-                      ? "bg-blue-600 text-white" 
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  2nd Semester ({secondSemesterCount})
-                </button>
-              </div>
-            </div>
+    const formatTime = (timeString) => {
+        if (!timeString) return '';
+        
+        try {
+            // Handle both HH:MM and HH:MM:SS formats
+            const [hours, minutes] = timeString.split(':').map(Number);
+            const date = new Date();
+            date.setHours(hours, minutes, 0, 0);
             
-            <div className="text-sm text-gray-600">
-              Showing {weekSchedules.length} classes for {selectedSemester}
-            </div>
-          </div>
-        </div>
+            return date.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch (error) {
+            return timeString; // Return original if formatting fails
+        }
+    };
 
-        {/* Week Navigation and View Controls */}
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100 mb-6">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setCurrentWeek(currentWeek - 1)}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-              >
-                <FaChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="text-lg font-semibold text-gray-800">
-                Week of {weekDates[0].month} {weekDates[0].date} - {weekDates[5].month} {weekDates[5].date}
-              </div>
-              <button
-                onClick={() => setCurrentWeek(currentWeek + 1)}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-              >
-                <FaChevronRight className="w-4 h-4" />
-              </button>
+    const getTimeSlot = (startTime, endTime) => {
+        return `${formatTime(startTime)} - ${formatTime(endTime)}`;
+    };
+
+    const getDayColor = (day) => {
+        const colors = {
+            'Monday': 'bg-blue-100 text-blue-800',
+            'Tuesday': 'bg-green-100 text-green-800',
+            'Wednesday': 'bg-yellow-100 text-yellow-800',
+            'Thursday': 'bg-purple-100 text-purple-800',
+            'Friday': 'bg-red-100 text-red-800',
+            'Saturday': 'bg-indigo-100 text-indigo-800',
+            'Sunday': 'bg-pink-100 text-pink-800'
+        };
+        return colors[day] || 'bg-gray-100 text-gray-800';
+    };
+
+    const filteredSchedule = selectedDay === 'all' 
+        ? schedule 
+        : schedule.filter(item => item.day_of_week === selectedDay);
+
+    const groupedSchedule = daysOfWeek.reduce((acc, day) => {
+        acc[day] = schedule.filter(item => item.day_of_week === day)
+                          .sort((a, b) => a.start_time.localeCompare(b.start_time));
+        return acc;
+    }, {});
+
+    if (error) {
+        return (
+            <div className="min-h-screen bg-gray-50">
+                <Head title="Faculty Schedule - Error" />
+                <Faculty_Sidebar onToggle={handleSidebarToggle} />
+                
+                <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+                    <div className="p-8">
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                            <strong className="font-bold">Error: </strong>
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    </div>
+                </div>
             </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <Head title="My Schedule - Faculty" />
+            <Faculty_Sidebar onToggle={handleSidebarToggle} />
             
-            <div className="flex gap-2">
-              <button
-                onClick={() => setViewType("timetable")}
-                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                  viewType === "timetable" 
-                    ? "bg-purple-600 text-white" 
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                <FaTable className="w-4 h-4" />
-                Timetable
-              </button>
-              <button
-                onClick={() => setViewType("list")}
-                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                  viewType === "list" 
-                    ? "bg-purple-600 text-white" 
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                <FaList className="w-4 h-4" />
-                List View
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {viewType === "timetable" ? (
-          <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px]">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300 w-24">
-                      Time
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Monday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Tuesday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Wednesday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Thursday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Friday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-r border-gray-300">
-                      Saturday
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">
-                      Sunday
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const timeSlots = [
-                      '7:30 - 8:00', '8:00 - 8:30', '8:30 - 9:00', '9:00 - 9:30', '9:30 - 10:00',
-                      '10:00 - 10:30', '10:30 - 11:00', '11:00 - 11:30', '11:30 - 12:00', '12:00 - 12:30',
-                      '12:30 - 1:00', '1:00 - 1:30', '1:30 - 2:00', '2:00 - 2:30', '2:30 - 3:00',
-                      '3:00 - 3:30', '3:30 - 4:00', '4:00 - 4:30', '4:30 - 5:00', '5:00 - 5:30',
-                      '5:30 - 6:00', '6:00 - 6:30', '6:30 - 7:00', '7:00 - 7:30', '7:30 - 8:00',
-                      '8:00 - 8:30', '8:30 - 9:00'
-                    ];
-                    
-                    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-                    
-                    const grid = {};
-                    days.forEach(day => {
-                      grid[day] = {};
-                    });
-                    
-                    const timeToSlotIndex = (timeStr) => {
-                      const [time, period] = timeStr.split(' ');
-                      let [hours, minutes] = time.split(':').map(Number);
-                      
-                      if (period === 'PM' && hours !== 12) hours += 12;
-                      if (period === 'AM' && hours === 12) hours = 0;
-                      
-                      const totalMinutes = hours * 60 + minutes;
-                      const startMinutes = 7 * 60 + 30; 
-                      const slotMinutes = (totalMinutes - startMinutes) / 30;
-                      
-                      return Math.floor(slotMinutes);
-                    };
-                    
-                    
-                    if (weekSchedules && weekSchedules.length > 0) {
-                      weekSchedules.forEach(schedule => {
-                        if (schedule.start_time && schedule.end_time && schedule.day_of_week) {
-                          const startTime = formatTime12Hour(schedule.start_time);
-                          const endTime = formatTime12Hour(schedule.end_time);
-                          const startSlot = timeToSlotIndex(startTime);
-                          const endSlot = timeToSlotIndex(endTime);
-                          
-                          if (startSlot >= 0 && startSlot < timeSlots.length && endSlot > startSlot) {
-                            const duration = endSlot - startSlot;
-                            grid[schedule.day_of_week][startSlot] = {
-                              ...schedule,
-                              duration: duration
-                            };
-                            
-                            for (let i = startSlot + 1; i < endSlot; i++) {
-                              grid[schedule.day_of_week][i] = 'occupied';
-                            }
-                          }
-                        }
-                      });
-                    }
-                    
-                    const getSubjectColor = (subject) => {
-                      const colors = {
-                        'IT Elective 6: Internet of Things': 'bg-green-400',
-                        'Capstone Project and Research 2': 'bg-yellow-400',
-                        'Systems Administration and Maintenance': 'bg-yellow-300',
-                        'IT Elective 5: Cloud Computing': 'bg-green-300'
-                      };
-                      return colors[subject] || 'bg-blue-300';
-                    };
-                    
-                    return timeSlots.map((timeSlot, index) => (
-                      <tr key={index} className="border-b border-gray-200">
-                        <td className="px-2 py-2 text-xs text-center font-medium text-gray-700 border-r border-gray-300 bg-gray-50">
-                          {timeSlot}
-                        </td>
-                        {days.map(day => {
-                          const cell = grid[day][index];
-                          
-                          if (cell === 'occupied') {
-                            return null; 
-                          }
-                          
-                          if (cell && typeof cell === 'object') {
-                            return (
-                              <td 
-                                key={day} 
-                                className={`px-2 py-1 text-xs text-center border-r border-gray-300 ${getSubjectColor(cell.subject?.name)} text-gray-800`}
-                                rowSpan={cell.duration}
-                              >
-                                <div className="font-semibold leading-tight">
-                                  {cell.subject?.name || 'Subject TBA'}
-                                </div>
-                                <div className="text-xs mt-1">
-                                  Room: {cell.room || 'TBA'}
-                                </div>
-                                <div className="text-xs">
-                                  {cell.section?.section_name || 'Section TBA'}
-                                </div>
-                                <div className="text-xs mt-1">
-                                  <span className="px-1 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
-                                    {cell.semester || '1st Sem'}
-                                  </span>
-                                </div>
-                              </td>
-                            );
-                          }
-                          
-                          return (
-                            <td key={day} className="px-2 py-2 border-r border-gray-300 bg-white">
-                              {/* Empty cell */}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {weekSchedules.map((schedule) => (
-              <div key={schedule.id} className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h3 className="text-xl font-bold text-gray-800 mb-3">
-                  {schedule.subject?.name || 'Subject TBA'}
-                </h3>
-                <div className="flex items-center gap-4 text-gray-600 mb-3">
-                  <div className="flex items-center gap-2">
-                    <FaClock className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm">{schedule.day_of_week} {formatTime12Hour(schedule.start_time)} - {formatTime12Hour(schedule.end_time)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <FaUsers className="w-4 h-4 text-indigo-500" />
-                    <span className="text-sm">{schedule.section?.section_name || 'Section TBA'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <FaMapMarkerAlt className="w-4 h-4 text-green-500" />
-                    <span className="text-sm">{schedule.room || 'No Room Assigned'}</span>
-                  </div>
+            <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+                {/* Header */}
+                <div className="bg-white shadow-sm border-b border-gray-200 p-6">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                                <FaCalendarAlt className="mr-3 text-blue-600" />
+                                My Schedule
+                            </h1>
+                            <p className="text-gray-600 mt-1">
+                                Your class timetable for {academicCalendar.semester} {academicCalendar.year_start}-{academicCalendar.year_end}
+                            </p>
+                        </div>
+                        
+                        <div className="flex items-center space-x-4">
+                            <div className="text-right">
+                                <p className="text-sm text-gray-600">Total Classes</p>
+                                <p className="font-semibold text-blue-600">{schedule.length}</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                    {schedule.subject?.strand?.name || 'No Strand'}
-                  </span>
-                  <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                    {schedule.semester || '1st Semester'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
 
-        <div className="mt-6 bg-white rounded-xl shadow-md p-4 border border-gray-100">
-          <h3 className="text-lg font-bold text-gray-800 mb-4">{selectedSemester} Schedule Summary</h3>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div className="text-center p-3 bg-purple-50 rounded-lg">
-              <div className="text-xl font-bold text-purple-600">{weekSchedules.length}</div>
-              <div className="text-sm text-gray-600">Classes This Semester</div>
+                <div className="p-6">
+                    {/* Day Filter */}
+                    <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                onClick={() => setSelectedDay('all')}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                    selectedDay === 'all' 
+                                        ? 'bg-blue-600 text-white' 
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                            >
+                                All Days
+                            </button>
+                            {daysOfWeek.map(day => (
+                                <button
+                                    key={day}
+                                    onClick={() => setSelectedDay(day)}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        selectedDay === day 
+                                            ? 'bg-blue-600 text-white' 
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {day}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {schedule.length === 0 ? (
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
+                            <FaExclamationTriangle className="text-gray-400 text-4xl mx-auto mb-4" />
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">No Schedule Available</h3>
+                            <p className="text-gray-600">You don't have any classes scheduled yet. Contact the registrar for class assignments.</p>
+                        </div>
+                    ) : (
+                        <>
+                            {/* Weekly View */}
+                            {selectedDay === 'all' ? (
+                                <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
+                                    {daysOfWeek.map(day => (
+                                        <div key={day} className="bg-white rounded-lg shadow-sm border border-gray-200">
+                                            <div className={`p-4 rounded-t-lg ${getDayColor(day)}`}>
+                                                <h3 className="font-semibold text-center">{day}</h3>
+                                                <p className="text-xs text-center mt-1">
+                                                    {groupedSchedule[day].length} {groupedSchedule[day].length === 1 ? 'class' : 'classes'}
+                                                </p>
+                                            </div>
+                                            <div className="p-4 space-y-3">
+                                                {groupedSchedule[day].length === 0 ? (
+                                                    <p className="text-gray-500 text-sm text-center">No classes</p>
+                                                ) : (
+                                                    groupedSchedule[day].map((classItem) => (
+                                                        <div key={classItem.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <h4 className="font-medium text-sm text-gray-900">{classItem.subject_name}</h4>
+                                                                <span className="text-xs text-gray-500">{classItem.subject_code}</span>
+                                                            </div>
+                                                            <div className="space-y-1 text-xs text-gray-600">
+                                                                <div className="flex items-center">
+                                                                    <FaClock className="mr-1" />
+                                                                    {getTimeSlot(classItem.start_time, classItem.end_time)}
+                                                                </div>
+                                                                <div className="flex items-center">
+                                                                    <FaUsers className="mr-1" />
+                                                                    {classItem.section_name}
+                                                                </div>
+                                                                <div className="flex items-center">
+                                                                    <FaMapMarkerAlt className="mr-1" />
+                                                                    {classItem.room}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                /* Daily View */
+                                <div className="space-y-4">
+                                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium mr-3 ${getDayColor(selectedDay)}`}>
+                                                {selectedDay}
+                                            </span>
+                                            {filteredSchedule.length} {filteredSchedule.length === 1 ? 'Class' : 'Classes'}
+                                        </h2>
+                                        
+                                        {filteredSchedule.length === 0 ? (
+                                            <p className="text-gray-500 text-center py-8">No classes scheduled for {selectedDay}</p>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                {filteredSchedule.map((classItem) => (
+                                                    <div key={classItem.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                                        <div className="flex justify-between items-start mb-3">
+                                                            <div>
+                                                                <h3 className="font-semibold text-gray-900">{classItem.subject_name}</h3>
+                                                                <p className="text-sm text-gray-600">{classItem.subject_code}</p>
+                                                            </div>
+                                                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                                                {classItem.semester}
+                                                            </span>
+                                                        </div>
+                                                        
+                                                        <div className="space-y-2 text-sm text-gray-600">
+                                                            <div className="flex items-center">
+                                                                <FaClock className="mr-2 text-blue-500" />
+                                                                {getTimeSlot(classItem.start_time, classItem.end_time)}
+                                                            </div>
+                                                            <div className="flex items-center">
+                                                                <FaUsers className="mr-2 text-green-500" />
+                                                                {classItem.section_name} • {classItem.strand_name || 'Core'}
+                                                            </div>
+                                                            <div className="flex items-center">
+                                                                <FaMapMarkerAlt className="mr-2 text-red-500" />
+                                                                {classItem.room}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div className="mt-4 pt-3 border-t border-gray-200">
+                                                            <div className="flex items-center justify-between">
+                                                                <Link
+                                                                    href={`/faculty/classes/${classItem.id}/students`}
+                                                                    className="text-gray-600 hover:text-gray-800 text-sm font-medium"
+                                                                >
+                                                                    View Students
+                                                                </Link>
+                                                                <span className="text-xs text-gray-500">
+                                                                    {classItem.students_count || 0} students
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {/* Quick Actions */}
+                    {schedule.length > 0 && (
+                        <div className="mt-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Link
+                                    href="/faculty/semester"
+                                    className="flex items-center p-4 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                                >
+                                    <FaBook className="text-blue-600 mr-3 text-xl" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">Grade Management</p>
+                                        <p className="text-sm text-gray-600">Manage grades for all classes</p>
+                                    </div>
+                                </Link>
+                                
+                                <Link
+                                    href="/faculty/classes"
+                                    className="flex items-center p-4 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                                >
+                                    <FaUsers className="text-green-600 mr-3 text-xl" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">Class Lists</p>
+                                        <p className="text-sm text-gray-600">View student lists</p>
+                                    </div>
+                                </Link>
+                                
+                                <Link
+                                    href="/faculty/loads"
+                                    className="flex items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                                >
+                                    <FaCalendarAlt className="text-purple-600 mr-3 text-xl" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">Teaching Loads</p>
+                                        <p className="text-sm text-gray-600">View load summary</p>
+                                    </div>
+                                </Link>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
-            <div className="text-center p-3 bg-blue-50 rounded-lg">
-              <div className="text-xl font-bold text-blue-600">
-                {[...new Set(weekSchedules.map(s => s.section?.section_name))].filter(Boolean).length}
-              </div>
-              <div className="text-sm text-gray-600">Sections Taught</div>
-            </div>
-            <div className="text-center p-3 bg-green-50 rounded-lg">
-              <div className="text-xl font-bold text-green-600">
-                {[...new Set(weekSchedules.map(s => s.subject?.name))].filter(Boolean).length}
-              </div>
-              <div className="text-sm text-gray-600">Subjects Taught</div>
-            </div>
-            <div className="text-center p-3 bg-indigo-50 rounded-lg">
-              <div className="text-xl font-bold text-indigo-600">
-                {[...new Set(weekSchedules.map(s => s.subject?.strand?.name))].filter(Boolean).length}
-              </div>
-              <div className="text-sm text-gray-600">Strands Covered</div>
-            </div>
-            <div className="text-center p-3 bg-orange-50 rounded-lg">
-              <div className="text-xl font-bold text-orange-600">
-                {schedules.length}
-              </div>
-              <div className="text-sm text-gray-600">Total All Semesters</div>
-            </div>
-          </div>
-          
-          {/* Semester Comparison */}
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <h4 className="font-semibold text-gray-700 mb-2">Semester Comparison</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center p-2 bg-gray-50 rounded">
-                <div className="text-lg font-bold text-gray-700">{firstSemesterCount}</div>
-                <div className="text-xs text-gray-600">1st Semester Classes</div>
-              </div>
-              <div className="text-center p-2 bg-gray-50 rounded">
-                <div className="text-lg font-bold text-gray-700">{secondSemesterCount}</div>
-                <div className="text-xs text-gray-600">2nd Semester Classes</div>
-              </div>
-            </div>
-          </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 }

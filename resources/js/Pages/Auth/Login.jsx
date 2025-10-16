@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Head, useForm, router } from '@inertiajs/react';
 import { AuthManager } from '../../auth';
 import { FaGraduationCap, FaShieldAlt, FaChartLine, FaCalendarAlt, FaUsers, FaEnvelope, FaLock, FaEye, FaEyeSlash, FaSignInAlt, FaSpinner } from 'react-icons/fa';
+import Swal from 'sweetalert2';
 
 export default function Login() {
   // CRITICAL FIX: Immediately check if we should render this component
@@ -57,11 +58,113 @@ export default function Login() {
 
 
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     clearErrors();
-    console.log('🔄 Submitting login form via Inertia...');
-    post('/auth/login-inertia');
+    
+    if (processing || isNavigating) {
+      console.log('🔄 Login: Already processing, ignoring submit');
+      return;
+    }
+
+    console.log('📤 Login: Submitting form to backend');
+    setIsNavigating(true);
+    
+    try {
+      // Use fetch for better error handling of session conflicts
+      const response = await fetch('/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+        },
+        body: JSON.stringify({
+          email: data.email,
+          password: data.password,
+          remember: data.remember
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        console.log('✅ Login: Success response received');
+        
+        // Store session data
+        if (result.session_token) {
+          localStorage.setItem('session_token', result.session_token);
+        }
+        
+        // Store user data
+        AuthManager.setUser(result.user);
+        
+        // Redirect to appropriate dashboard
+        window.location.href = result.redirect_url;
+      } else {
+        // Handle errors including session conflicts
+        console.log('❌ Login: Error response:', result);
+        
+        if (result.errors) {
+          // Handle validation errors with SweetAlert
+          console.log('Validation errors:', result.errors);
+          
+          let errorMessage = result.message || 'Login failed. Please check your credentials.';
+          
+          // Check for specific error types
+          if (result.errors.email) {
+            errorMessage = result.errors.email[0];
+          }
+          
+          await Swal.fire({
+            icon: 'error',
+            title: 'Login Failed',
+            text: errorMessage,
+            confirmButtonColor: '#dc2626',
+            confirmButtonText: 'Try Again'
+          });
+        } else if (result.message || result.error) {
+          // Handle session conflict or other errors with SweetAlert
+          console.log('Session conflict or other error:', result.message || result.error);
+          
+          const errorMessage = result.message || result.error;
+          
+          // Check if it's a session conflict
+          if (errorMessage.includes('already logged in')) {
+            await Swal.fire({
+              icon: 'warning',
+              title: 'Already Logged In',
+              text: errorMessage,
+              confirmButtonColor: '#f59e0b',
+              confirmButtonText: 'Understood',
+              footer: '<small>Please log out from the other session first or contact support for assistance.</small>'
+            });
+          } else {
+            await Swal.fire({
+              icon: 'error',
+              title: 'Login Error',
+              text: errorMessage,
+              confirmButtonColor: '#dc2626',
+              confirmButtonText: 'Try Again'
+            });
+          }
+        }
+        
+        setIsNavigating(false);
+      }
+    } catch (error) {
+      console.error('❌ Login: Network error:', error);
+      
+      await Swal.fire({
+        icon: 'error',
+        title: 'Network Error',
+        text: 'Unable to connect to the server. Please check your internet connection and try again.',
+        confirmButtonColor: '#dc2626',
+        confirmButtonText: 'Retry'
+      });
+      
+      setIsNavigating(false);
+    }
   };
 
   // Handle navigation with smooth transition
@@ -299,7 +402,7 @@ export default function Login() {
             {/* Register Link */}
             <div className="mt-8 text-center">
               <p className="text-gray-600 text-sm">
-                New to ONSTS?{' '}
+                New student?{' '}
                 <button 
                   onClick={(e) => {
                     e.preventDefault();
@@ -310,6 +413,9 @@ export default function Login() {
                 >
                   Create Student Account
                 </button>
+              </p>
+              <p className="text-gray-600 text-xs text-center mt-2">
+                Need help? Contact the registrar's office
               </p>
             </div>
 

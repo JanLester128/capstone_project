@@ -36,7 +36,6 @@ CREATE TABLE `class` (
   `start_time` time NOT NULL,
   `duration` int NOT NULL DEFAULT '60',
   `end_time` time NOT NULL,
-  `room` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `semester` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '1st Semester',
   `school_year` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '2024-2025',
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
@@ -67,6 +66,7 @@ CREATE TABLE `class_details` (
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   `enrollment_id` bigint unsigned NOT NULL,
+  `enrollment_status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'enrolled',
   `section_id` bigint unsigned NOT NULL,
   `is_enrolled` tinyint(1) NOT NULL DEFAULT '1',
   `enrolled_at` timestamp NOT NULL DEFAULT '2025-10-06 22:21:59',
@@ -86,10 +86,16 @@ DROP TABLE IF EXISTS `enrollments`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `enrollments` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `student_id` bigint unsigned NOT NULL,
+  `student_personal_info_id` bigint unsigned DEFAULT NULL,
+  `student_id` bigint unsigned DEFAULT NULL,
+  `student_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `student_lrn` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_school_attended` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `strand_id` bigint unsigned NOT NULL,
   `assigned_section_id` bigint unsigned DEFAULT NULL,
   `intended_grade_level` int NOT NULL DEFAULT '11',
+  `grade_level` enum('Grade 11','Grade 12') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `has_grade_11_enrollment` tinyint(1) NOT NULL DEFAULT '0',
   `first_semester_completed` tinyint(1) NOT NULL DEFAULT '0',
   `second_semester_completed` tinyint(1) NOT NULL DEFAULT '0',
   `academic_year_completed` tinyint(1) NOT NULL DEFAULT '0',
@@ -97,48 +103,60 @@ CREATE TABLE `enrollments` (
   `progressed_at` datetime DEFAULT NULL,
   `progressed_by` bigint unsigned DEFAULT NULL,
   `school_year_id` bigint unsigned NOT NULL,
-  `first_strand_choice_id` bigint unsigned DEFAULT NULL,
-  `second_strand_choice_id` bigint unsigned DEFAULT NULL,
-  `third_strand_choice_id` bigint unsigned DEFAULT NULL,
-  `student_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
-  `enrollment_type` enum('regular','summer','transferee') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'regular',
+  `enrollment_type` enum('regular','summer','transferee') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'regular',
   `summer_subjects` json DEFAULT NULL,
-  `schedule_preference` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `academic_year_status` enum('in_progress','completed','failed','summer_required') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'in_progress',
+  `schedule_preference` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `academic_year_status` enum('in_progress','completed','failed','summer_required') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'in_progress',
   `enrollment_date` timestamp NULL DEFAULT NULL,
   `coordinator_id` bigint unsigned DEFAULT NULL,
+  `reviewed_at` timestamp NULL DEFAULT NULL,
   `date_enrolled` date NOT NULL DEFAULT '2025-09-04',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   `enrolled_by` bigint unsigned DEFAULT NULL,
-  `student_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `grade_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `lrn` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `previous_school` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `previous_enrollment_id` bigint unsigned DEFAULT NULL,
+  `enrollment_method` enum('self','auto','manual') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'self',
+  `cor_generated` tinyint(1) NOT NULL DEFAULT '0',
+  `cor_generated_at` timestamp NULL DEFAULT NULL,
+  `cor_subjects` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   PRIMARY KEY (`id`),
   UNIQUE KEY `enrollments_student_id_school_year_id_unique` (`student_id`,`school_year_id`),
   UNIQUE KEY `unique_student_school_year_enrollment` (`student_id`,`school_year_id`),
   KEY `enrollments_strand_id_foreign` (`strand_id`),
   KEY `enrollments_school_year_id_foreign` (`school_year_id`),
   KEY `enrollments_coordinator_id_foreign` (`coordinator_id`),
-  KEY `enrollments_first_strand_choice_id_foreign` (`first_strand_choice_id`),
-  KEY `enrollments_second_strand_choice_id_foreign` (`second_strand_choice_id`),
-  KEY `enrollments_third_strand_choice_id_foreign` (`third_strand_choice_id`),
   KEY `enrollments_progressed_by_foreign` (`progressed_by`),
   KEY `enrollments_assigned_section_id_foreign` (`assigned_section_id`),
   KEY `enrollments_enrolled_by_foreign` (`enrolled_by`),
-  CONSTRAINT `enrollments_assigned_section_id_foreign` FOREIGN KEY (`assigned_section_id`) REFERENCES `sections` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_coordinator_id_foreign` FOREIGN KEY (`coordinator_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_enrolled_by_foreign` FOREIGN KEY (`enrolled_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_first_strand_choice_id_foreign` FOREIGN KEY (`first_strand_choice_id`) REFERENCES `strands` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_progressed_by_foreign` FOREIGN KEY (`progressed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_school_year_id_foreign` FOREIGN KEY (`school_year_id`) REFERENCES `school_years` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `enrollments_second_strand_choice_id_foreign` FOREIGN KEY (`second_strand_choice_id`) REFERENCES `strands` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `enrollments_strand_id_foreign` FOREIGN KEY (`strand_id`) REFERENCES `strands` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `enrollments_student_id_foreign` FOREIGN KEY (`student_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `enrollments_third_strand_choice_id_foreign` FOREIGN KEY (`third_strand_choice_id`) REFERENCES `strands` (`id`) ON DELETE SET NULL
+  KEY `enrollments_student_personal_info_id_foreign` (`student_personal_info_id`),
+  KEY `enrollments_previous_enrollment_id_foreign` (`previous_enrollment_id`),
+  CONSTRAINT `enrollments_previous_enrollment_id_foreign` FOREIGN KEY (`previous_enrollment_id`) REFERENCES `enrollments` (`id`),
+  CONSTRAINT `enrollments_student_personal_info_id_foreign` FOREIGN KEY (`student_personal_info_id`) REFERENCES `student_personal_info` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `faculty_loads`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `faculty_loads` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `faculty_id` bigint unsigned NOT NULL,
+  `school_year_id` bigint unsigned NOT NULL,
+  `total_loads` int NOT NULL DEFAULT '0',
+  `max_loads` int NOT NULL DEFAULT '5',
+  `is_overloaded` tinyint(1) NOT NULL DEFAULT '0',
+  `load_notes` text COLLATE utf8mb4_unicode_ci,
+  `assigned_by` bigint unsigned DEFAULT NULL,
+  `assigned_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `faculty_loads_faculty_id_school_year_id_unique` (`faculty_id`,`school_year_id`),
+  KEY `faculty_loads_school_year_id_foreign` (`school_year_id`),
+  KEY `faculty_loads_assigned_by_foreign` (`assigned_by`),
+  CONSTRAINT `faculty_loads_assigned_by_foreign` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `faculty_loads_faculty_id_foreign` FOREIGN KEY (`faculty_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `faculty_loads_school_year_id_foreign` FOREIGN KEY (`school_year_id`) REFERENCES `school_years` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `failed_jobs`;
@@ -177,10 +195,9 @@ CREATE TABLE `grades` (
   `semester_grade` decimal(5,2) DEFAULT NULL COMMENT 'Final grade for this semester (average of 2 quarters)',
   `remarks` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Faculty remarks',
   `status` enum('ongoing','completed','incomplete','dropped','pending_approval','approved') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ongoing',
-  `approval_status` enum('draft','pending_approval','approved','rejected') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `approval_status` enum('draft','pending_approval','approved','rejected') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
   `approved_by` bigint unsigned DEFAULT NULL,
   `approved_at` timestamp NULL DEFAULT NULL,
-  `approval_notes` text COLLATE utf8mb4_unicode_ci,
   `submitted_for_approval_at` timestamp NULL DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
@@ -291,8 +308,16 @@ CREATE TABLE `school_years` (
   `enrollment_open` tinyint(1) NOT NULL DEFAULT '1',
   `enrollment_start` datetime DEFAULT NULL,
   `enrollment_end` datetime DEFAULT NULL,
-  `allowed_enrollment_days` json DEFAULT NULL COMMENT 'JSON array of allowed days (0=Sunday, 1=Monday, etc.). NULL means Monday-Saturday default.',
-  `enrollment_day_message` text COLLATE utf8mb4_unicode_ci COMMENT 'Custom message for day restrictions',
+  `quarter_1_start` date DEFAULT NULL,
+  `quarter_1_end` date DEFAULT NULL,
+  `quarter_2_start` date DEFAULT NULL,
+  `quarter_2_end` date DEFAULT NULL,
+  `quarter_3_start` date DEFAULT NULL,
+  `quarter_3_end` date DEFAULT NULL,
+  `quarter_4_start` date DEFAULT NULL,
+  `quarter_4_end` date DEFAULT NULL,
+  `grading_deadline` date DEFAULT NULL,
+  `is_enrollment_open` tinyint(1) NOT NULL DEFAULT '0',
   `is_current_academic_year` tinyint(1) NOT NULL DEFAULT '0',
   `allow_grade_progression` tinyint(1) NOT NULL DEFAULT '0',
   `current_semester` int NOT NULL DEFAULT '1',
@@ -312,18 +337,18 @@ CREATE TABLE `sections` (
   `section_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `year_level` int NOT NULL,
   `strand_id` bigint unsigned NOT NULL,
+  `adviser_id` bigint unsigned DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
-  `teacher_id` bigint unsigned DEFAULT NULL,
   `school_year_id` bigint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `sections_section_name_strand_id_year_level_unique` (`section_name`,`strand_id`,`year_level`),
   KEY `sections_strand_id_foreign` (`strand_id`),
-  KEY `sections_teacher_id_foreign` (`teacher_id`),
   KEY `sections_school_year_id_foreign` (`school_year_id`),
+  KEY `sections_adviser_id_index` (`adviser_id`),
+  CONSTRAINT `sections_adviser_id_foreign` FOREIGN KEY (`adviser_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `sections_school_year_id_foreign` FOREIGN KEY (`school_year_id`) REFERENCES `school_years` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `sections_strand_id_foreign` FOREIGN KEY (`strand_id`) REFERENCES `strands` (`id`),
-  CONSTRAINT `sections_teacher_id_foreign` FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `sections_strand_id_foreign` FOREIGN KEY (`strand_id`) REFERENCES `strands` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `sessions`;
@@ -361,8 +386,10 @@ DROP TABLE IF EXISTS `student_personal_info`;
 CREATE TABLE `student_personal_info` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `user_id` bigint unsigned NOT NULL,
-  `lrn` varchar(100) DEFAULT NULL,
-  `grade_level` varchar(100) DEFAULT NULL,
+  `lrn` varchar(20) DEFAULT NULL,
+  `grade_level` varchar(10) DEFAULT NULL,
+  `student_status` varchar(50) DEFAULT NULL,
+  `previous_school` varchar(255) DEFAULT NULL,
   `extension_name` varchar(100) DEFAULT NULL,
   `birthdate` date DEFAULT NULL,
   `age` int DEFAULT NULL,
@@ -375,30 +402,19 @@ CREATE TABLE `student_personal_info` (
   `pwd_id` varchar(255) DEFAULT NULL,
   `last_grade` varchar(255) DEFAULT NULL,
   `last_sy` varchar(255) DEFAULT NULL,
-  `last_school` varchar(255) DEFAULT NULL,
-  `student_status` varchar(255) DEFAULT NULL,
+  `last_school` varchar(100) DEFAULT NULL,
+  `report_card` varchar(255) DEFAULT NULL COMMENT 'Path to uploaded report card document',
   `guardian_name` varchar(100) DEFAULT NULL,
   `guardian_contact` varchar(100) DEFAULT NULL,
   `guardian_relationship` varchar(100) DEFAULT NULL,
   `emergency_contact_name` varchar(100) DEFAULT NULL,
   `emergency_contact_number` varchar(100) DEFAULT NULL,
   `emergency_contact_relationship` varchar(100) DEFAULT NULL,
-  `psa_birth_certificate` varchar(255) DEFAULT NULL,
-  `report_card` varchar(255) DEFAULT NULL,
+  `psa_birth_certificate` varchar(100) DEFAULT NULL,
   `image` varchar(100) DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
-  `section_id` bigint unsigned DEFAULT NULL,
-  `strand_id` bigint unsigned DEFAULT NULL,
-  `school_year_id` bigint unsigned DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `lrn` (`lrn`),
-  KEY `student_personal_info_section_id_foreign` (`section_id`),
-  KEY `student_personal_info_strand_id_foreign` (`strand_id`),
-  KEY `student_personal_info_school_year_id_foreign` (`school_year_id`),
-  CONSTRAINT `student_personal_info_school_year_id_foreign` FOREIGN KEY (`school_year_id`) REFERENCES `school_years` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `student_personal_info_section_id_foreign` FOREIGN KEY (`section_id`) REFERENCES `sections` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `student_personal_info_strand_id_foreign` FOREIGN KEY (`strand_id`) REFERENCES `strands` (`id`) ON DELETE SET NULL
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `student_strand_preferences`;
@@ -406,17 +422,17 @@ DROP TABLE IF EXISTS `student_strand_preferences`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `student_strand_preferences` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `student_id` bigint unsigned NOT NULL,
+  `student_personal_info_id` bigint unsigned DEFAULT NULL,
   `strand_id` bigint unsigned NOT NULL,
   `preference_order` int NOT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `student_strand_preferences_student_id_preference_order_unique` (`student_id`,`preference_order`),
-  UNIQUE KEY `student_strand_preferences_student_id_strand_id_unique` (`student_id`,`strand_id`),
+  UNIQUE KEY `student_strand_preferences_student_id_preference_order_unique` (`preference_order`),
+  UNIQUE KEY `student_strand_preferences_student_id_strand_id_unique` (`strand_id`),
   KEY `student_strand_preferences_strand_id_foreign` (`strand_id`),
-  CONSTRAINT `student_strand_preferences_strand_id_foreign` FOREIGN KEY (`strand_id`) REFERENCES `strands` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `student_strand_preferences_student_id_foreign` FOREIGN KEY (`student_id`) REFERENCES `student_personal_info` (`id`) ON DELETE CASCADE
+  KEY `student_strand_preferences_student_personal_info_id_foreign` (`student_personal_info_id`),
+  CONSTRAINT `student_strand_preferences_student_personal_info_id_foreign` FOREIGN KEY (`student_personal_info_id`) REFERENCES `student_personal_info` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `subjects`;
@@ -454,16 +470,16 @@ CREATE TABLE `summer_class_schedules` (
   `subject_id` bigint unsigned NOT NULL,
   `faculty_id` bigint unsigned DEFAULT NULL,
   `school_year_id` bigint unsigned NOT NULL,
-  `schedule_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'intensive',
-  `class_days` json NOT NULL,
+  `schedule_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'intensive',
+  `class_days` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `start_time` time NOT NULL,
   `end_time` time NOT NULL,
-  `room` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `room` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `start_date` date NOT NULL,
   `end_date` date NOT NULL,
   `total_hours` int NOT NULL DEFAULT '40',
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
-  `notes` text COLLATE utf8mb4_unicode_ci,
+  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -503,7 +519,7 @@ DROP TABLE IF EXISTS `transferee_previous_schools`;
 CREATE TABLE `transferee_previous_schools` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `student_id` bigint unsigned NOT NULL,
-  `last_school` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `last_school` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -523,14 +539,11 @@ CREATE TABLE `users` (
   `email` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `password` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_changed` tinyint(1) NOT NULL DEFAULT '0',
-  `generated_password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `plain_password` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `role` enum('student','faculty','coordinator','registrar') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `student_type` enum('new','continuing','transferee') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'new' COMMENT 'Type of student: new (first-time), continuing (returning), transferee (from another school)',
   `assigned_strand_id` bigint unsigned DEFAULT NULL,
   `is_coordinator` tinyint(1) NOT NULL DEFAULT '0',
   `status` enum('active','inactive','pending') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
-  `password_change_required` tinyint(1) NOT NULL DEFAULT '0',
   `is_disabled` tinyint(1) NOT NULL DEFAULT '0',
   `remember_token` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
@@ -650,3 +663,22 @@ INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (352,'2025_01_21_00
 INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (353,'2025_01_27_100000_add_summer_enrollment_support',4);
 INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (354,'2025_10_08_172248_add_approval_columns_to_grades_table',4);
 INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (355,'2025_10_11_001000_add_enrollment_day_restrictions',4);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (356,'2025_01_13_120000_drop_teacher_id_from_sections_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (357,'2025_01_21_000010_add_adviser_id_to_sections_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (358,'2025_01_21_120000_cleanup_enrollments_and_related_tables',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (359,'2025_01_21_130000_eliminate_table_redundancy',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (360,'2025_01_21_140000_implement_normalized_database_structure',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (361,'2025_01_21_150000_fix_redundant_columns_and_optimize_lengths',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (362,'2025_10_11_135452_add_enrollment_management_fields_to_enrollments_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (363,'2025_10_12_162739_add_missing_guardian_fields_to_student_personal_info_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (364,'2025_10_12_163610_add_report_card_back_to_student_personal_info_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (365,'2025_10_13_100000_remove_password_columns_from_users_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (366,'2025_10_13_100100_remove_room_column_from_class_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (367,'2025_10_13_100200_remove_enrollment_day_columns_from_school_years_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (368,'2025_10_13_100300_remove_notes_columns_from_enrollments_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (369,'2025_10_13_100400_remove_approval_notes_from_grades_table',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (370,'2025_10_13_111100_add_shs_grade_logic_to_enrollments',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (371,'2025_10_13_114000_restore_password_changed_field',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (372,'2025_10_13_130000_add_missing_intended_grade_level_field',5);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (373,'2025_10_13_214200_create_faculty_loads_table',6);
+INSERT INTO `migrations` (`id`, `migration`, `batch`) VALUES (374,'2025_10_13_220000_add_missing_academic_calendar_fields',6);

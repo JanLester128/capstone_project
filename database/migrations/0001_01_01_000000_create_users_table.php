@@ -13,20 +13,11 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->string('name', 100)->nullable();
-            $table->string('firstname', 100)->nullable();
-            $table->string('lastname', 100)->nullable();
-            $table->string('middlename', 100)->nullable();
+            $table->string('username', 100)->nullable();
             $table->string('email', 100)->unique();
             $table->string('password', 100);
-            $table->string('plain_password', 100)->nullable();
-            $table->enum('role', ['student', 'faculty', 'coordinator', 'registrar']);
-            $table->enum('status', ['active', 'inactive', 'pending'])->default('active');
-            $table->boolean('password_change_required')->default(false);
-            $table->boolean('is_disabled')->default(false);
+            $table->enum('role', ['registrar', 'faculty', 'student']);
             $table->boolean('is_coordinator')->default(false);
-            $table->unsignedBigInteger('assigned_strand_id')->nullable();
-            $table->rememberToken();
             $table->timestamps();
         });
     }

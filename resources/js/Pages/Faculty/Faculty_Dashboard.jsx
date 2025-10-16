@@ -1,319 +1,324 @@
-import React, { useState, useEffect } from "react";
-import { Head } from "@inertiajs/react";
-import Faculty_Sidebar from "../layouts/Faculty_Sidebar";
-import useAuth from "../../hooks/useAuth";
+import React, { useState, useEffect } from 'react';
+import { Head, Link } from '@inertiajs/react';
+import Faculty_Sidebar from '../layouts/Faculty_Sidebar';
 import { 
-  FaCalendarAlt, 
-  FaUsers, 
-  FaGraduationCap, 
-  FaChartLine,
-  FaClock,
-  FaBookOpen,
-  FaBell,
-  FaArrowRight
-} from "react-icons/fa";
+    FaHome, 
+    FaCalendarAlt, 
+    FaChalkboardTeacher, 
+    FaUsers, 
+    FaGraduationCap,
+    FaClock,
+    FaCheckCircle,
+    FaExclamationTriangle,
+    FaBell,
+    FaChartBar,
+    FaBook,
+    FaClipboardList
+} from 'react-icons/fa';
 
-export default function FacultyDashboard() {
-  const { user, isAuthenticated, isLoading, requireAuth } = useAuth();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [classes, setClasses] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [currentTime, setCurrentTime] = useState(new Date());
+export default function Faculty_Dashboard({ 
+    facultyLoad = null,
+    classes = [],
+    notifications = [],
+    academicCalendar = {},
+    gradesSummary = {},
+    auth = null
+}) {
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  useEffect(() => {
-    // Update time every minute
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    // TODO: Replace with actual API calls
-    // Fetch faculty classes and students data
-  }, []);
-
-  const handleSidebarToggle = (collapsed) => {
-    setSidebarCollapsed(collapsed);
-  };
-
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true 
-    });
-  };
-
-  const formatDate = (date) => {
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'long',
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
-  };
-
-  // Quick action handlers
-  const quickActions = [
-    {
-      title: "Grade Students",
-      description: "Input and manage student grades",
-      icon: FaGraduationCap,
-      color: "blue",
-      href: "/faculty/grades"
-    },
-    {
-      title: "View Schedule",
-      description: "Check your class timetable",
-      icon: FaCalendarAlt,
-      color: "green",
-      href: "/faculty/schedule"
-    },
-    {
-      title: "Manage Classes",
-      description: "View and organize your classes",
-      icon: FaUsers,
-      color: "yellow",
-      href: "/faculty/classes"
-    },
-    {
-      title: "Update Profile",
-      description: "Edit your personal information",
-      icon: FaBookOpen,
-      color: "purple",
-      href: "/faculty/profile"
-    }
-  ];
-
-  const getColorClasses = (color) => {
-    const colors = {
-      blue: "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100",
-      green: "bg-green-50 text-green-600 border-green-200 hover:bg-green-100",
-      yellow: "bg-yellow-50 text-yellow-600 border-yellow-200 hover:bg-yellow-100",
-      purple: "bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100",
-      red: "bg-red-50 text-red-600 border-red-200 hover:bg-red-100"
+    const handleSidebarToggle = (collapsed) => {
+        setSidebarCollapsed(collapsed);
     };
-    return colors[color] || colors.blue;
-  };
 
-  return (
-    <>
-      <Head title="Faculty Dashboard" />
-      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-purple-50 overflow-hidden">
-        <Faculty_Sidebar onToggle={handleSidebarToggle} />
-        <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'} min-w-0`}>
-          {/* Enhanced Header */}
-          <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0 flex-1">
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
-                  Faculty Dashboard
-                </h1>
-                <p className="text-gray-600 mt-1">Welcome back, {user?.firstname || 'Faculty'}!</p>
-              </div>
-              <div className="flex items-center space-x-4 flex-shrink-0">
-                {/* Time and Date Display */}
-                <div className="text-right hidden md:block">
-                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                    <FaClock className="text-purple-500" />
-                    {formatTime(currentTime)}
-                  </div>
-                  <p className="text-xs text-gray-500">{formatDate(currentTime)}</p>
-                </div>
-                {/* User Info */}
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900 truncate max-w-32">{user?.name}</p>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-gray-500 capitalize">{user?.role}</span>
-                    {user?.role === 'coordinator' && (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                        Coordinator
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {/* Notification Bell */}
-                <button className="relative p-2 text-gray-400 hover:text-purple-600 transition-colors rounded-lg hover:bg-purple-50">
-                  <FaBell className="w-5 h-5" />
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
-                </button>
-              </div>
-            </div>
-          </header>
+    // Use actual data from props with fallback to empty/default values
+    const currentFacultyLoad = facultyLoad || {
+        total_loads: 0,
+        max_loads: 0,
+        remaining_loads: 0,
+        is_overloaded: false,
+        utilization_percentage: 0
+    };
 
-          {/* Main Content */}
-          <main className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-7xl mx-auto space-y-8">
-              {/* Enhanced Quick Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-all duration-300">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600 mb-1">Total Classes</p>
-                      <p className="text-3xl font-bold text-gray-900">{classes.length}</p>
-                      <p className="text-xs text-green-600 mt-1">↗ Active this semester</p>
-                    </div>
-                    <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                      <FaBookOpen className="w-6 h-6 text-blue-600" />
-                    </div>
-                  </div>
-                </div>
+    const currentClasses = classes || [];
 
-                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-all duration-300">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600 mb-1">Total Students</p>
-                      <p className="text-3xl font-bold text-gray-900">{classes.reduce((sum, cls) => sum + (cls.students || 0), 0)}</p>
-                      <p className="text-xs text-blue-600 mt-1">↗ Enrolled students</p>
-                    </div>
-                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                      <FaUsers className="w-6 h-6 text-green-600" />
-                    </div>
-                  </div>
-                </div>
+    const currentAcademicCalendar = academicCalendar || {
+        semester: 'No Active Semester',
+        year_start: new Date().getFullYear(),
+        year_end: new Date().getFullYear() + 1,
+        current_quarter: 'No Active Quarter',
+        is_quarter_open: false
+    };
 
-                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-all duration-300">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600 mb-1">Today's Classes</p>
-                      <p className="text-3xl font-bold text-gray-900">2</p>
-                      <p className="text-xs text-purple-600 mt-1">→ Next at 2:00 PM</p>
-                    </div>
-                    <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
-                      <FaCalendarAlt className="w-6 h-6 text-yellow-600" />
-                    </div>
-                  </div>
-                </div>
+    const currentGradesSummary = gradesSummary || {
+        total_classes: 0,
+        completed_classes: 0,
+        pending_classes: 0,
+        completion_percentage: 0
+    };
 
-                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-all duration-300">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600 mb-1">Pending Grades</p>
-                      <p className="text-3xl font-bold text-gray-900">8</p>
-                      <p className="text-xs text-red-600 mt-1">⚠ Requires attention</p>
-                    </div>
-                    <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
-                      <FaChartLine className="w-6 h-6 text-red-600" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Enhanced Classes and Recent Activity */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* My Classes */}
-                <div className="bg-white rounded-xl shadow-md border border-gray-100">
-                  <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">My Classes</h3>
-                    <button className="text-sm text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
-                      View All <FaArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="p-6">
-                    {classes.length > 0 ? (
-                      <div className="space-y-4">
-                        {classes.slice(0, 3).map((cls) => (
-                          <div key={cls.id} className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer">
-                            <div className="flex items-center justify-between">
-                              <div className="min-w-0 flex-1">
-                                <h4 className="font-semibold text-gray-900 truncate">{cls.name}</h4>
-                                <p className="text-sm text-gray-600 truncate">{cls.schedule}</p>
-                              </div>
-                              <div className="text-right flex-shrink-0 ml-4">
-                                <p className="text-sm font-medium text-gray-900">{cls.students || 0} students</p>
-                                <button className="text-xs text-purple-600 hover:text-purple-800">View Details</button>
-                              </div>
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <Head title="Faculty Dashboard - ONSTS" />
+            <Faculty_Sidebar onToggle={handleSidebarToggle} />
+            
+            <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+                {/* Header */}
+                <div className="bg-white shadow-sm border-b border-gray-200 p-6">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                                <FaHome className="mr-3 text-blue-600" />
+                                Faculty Dashboard
+                            </h1>
+                            <p className="text-gray-600 mt-1">
+                                Welcome back! Here's your teaching overview for {currentAcademicCalendar.semester} {currentAcademicCalendar.year_start}-{currentAcademicCalendar.year_end}
+                            </p>
+                        </div>
+                        
+                        <div className="flex items-center space-x-4">
+                            <div className="text-right">
+                                <p className="text-sm text-gray-600">Current Quarter</p>
+                                <p className="font-semibold text-blue-600">{currentAcademicCalendar.current_quarter}</p>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <FaBookOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500">No classes assigned yet</p>
-                        <p className="text-sm text-gray-400">Contact your administrator for class assignments</p>
-                      </div>
-                    )}
-                  </div>
+                            {currentAcademicCalendar.is_quarter_open && (
+                                <div className="flex items-center text-green-600">
+                                    <FaCheckCircle className="mr-1" />
+                                    <span className="text-sm">Grading Open</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                {/* Recent Student Activity */}
-                <div className="bg-white rounded-xl shadow-md border border-gray-100">
-                  <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
-                    <button className="text-sm text-purple-600 hover:text-purple-800 font-medium flex items-center gap-1">
-                      View All <FaArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="p-6">
-                    {students.length > 0 ? (
-                      <div className="space-y-4">
-                        {students.slice(0, 4).map((student) => (
-                          <div key={student.id} className="flex items-center space-x-3">
-                            <div className="flex-shrink-0">
-                              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                                <span className="text-sm font-medium text-purple-600">
-                                  {student.name?.charAt(0) || 'S'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate">{student.name}</p>
-                              <p className="text-xs text-gray-600 truncate">{student.course} - Grade: {student.grade}</p>
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {student.timestamp || '2m ago'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <FaUsers className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500">No recent activity</p>
-                        <p className="text-sm text-gray-400">Student activities will appear here</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Enhanced Quick Actions */}
-              <div className="bg-white rounded-xl shadow-md border border-gray-100">
-                <div className="px-6 py-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">Quick Actions</h3>
-                  <p className="text-sm text-gray-600">Frequently used features for efficient workflow</p>
-                </div>
                 <div className="p-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {quickActions.map((action) => {
-                      const IconComponent = action.icon;
-                      return (
-                        <button 
-                          key={action.title}
-                          className={`p-4 border rounded-xl transition-all duration-300 hover:scale-105 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${getColorClasses(action.color)}`}
-                          onClick={() => window.location.href = action.href}
-                        >
-                          <div className="text-center">
-                            <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-white shadow-sm flex items-center justify-center">
-                              <IconComponent className="w-6 h-6" />
+                    {/* Quick Stats Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        {/* Teaching Load */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center">
+                                <div className="p-3 bg-blue-100 rounded-full">
+                                    <FaChalkboardTeacher className="text-blue-600 text-xl" />
+                                </div>
+                                <div className="ml-4">
+                                    <p className="text-sm text-gray-600">Teaching Load</p>
+                                    <p className="text-2xl font-bold text-gray-900">
+                                        {currentFacultyLoad.total_loads}/{currentFacultyLoad.max_loads}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        {currentFacultyLoad.utilization_percentage}% Utilized
+                                    </p>
+                                </div>
                             </div>
-                            <p className="font-semibold text-sm mb-1">{action.title}</p>
-                            <p className="text-xs opacity-75">{action.description}</p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                        </div>
+
+                        {/* Total Classes */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center">
+                                <div className="p-3 bg-green-100 rounded-full">
+                                    <FaUsers className="text-green-600 text-xl" />
+                                </div>
+                                <div className="ml-4">
+                                    <p className="text-sm text-gray-600">Total Classes</p>
+                                    <p className="text-2xl font-bold text-gray-900">{currentClasses.length}</p>
+                                    <p className="text-xs text-gray-500">
+                                        {currentClasses.reduce((sum, cls) => sum + (cls.students_count || 0), 0)} Students
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Grade Progress */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center">
+                                <div className="p-3 bg-yellow-100 rounded-full">
+                                    <FaGraduationCap className="text-yellow-600 text-xl" />
+                                </div>
+                                <div className="ml-4">
+                                    <p className="text-sm text-gray-600">Grade Progress</p>
+                                    <p className="text-2xl font-bold text-gray-900">
+                                        {currentGradesSummary.completion_percentage}%
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        {currentGradesSummary.completed_classes}/{currentGradesSummary.total_classes} Complete
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Notifications */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center">
+                                <div className="p-3 bg-purple-100 rounded-full">
+                                    <FaBell className="text-purple-600 text-xl" />
+                                </div>
+                                <div className="ml-4">
+                                    <p className="text-sm text-gray-600">Notifications</p>
+                                    <p className="text-2xl font-bold text-gray-900">{notifications.length}</p>
+                                    <p className="text-xs text-gray-500">Unread</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        {/* Quick Actions Card */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                                <FaClipboardList className="mr-2 text-blue-600" />
+                                Quick Actions
+                            </h3>
+                            <div className="space-y-3">
+                                <Link
+                                    href="/faculty/semester"
+                                    className="flex items-center p-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                                >
+                                    <FaCalendarAlt className="text-blue-600 mr-3" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">Semester & Grading</p>
+                                        <p className="text-sm text-gray-600">Manage quarterly grades</p>
+                                    </div>
+                                </Link>
+                                
+                                <Link
+                                    href="/faculty/classes"
+                                    className="flex items-center p-3 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                                >
+                                    <FaUsers className="text-green-600 mr-3" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">My Classes</p>
+                                        <p className="text-sm text-gray-600">View class lists</p>
+                                    </div>
+                                </Link>
+                                
+                                <Link
+                                    href="/faculty/schedule"
+                                    className="flex items-center p-3 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                                >
+                                    <FaClock className="text-purple-600 mr-3" />
+                                    <div>
+                                        <p className="font-medium text-gray-900">My Schedule</p>
+                                        <p className="text-sm text-gray-600">View timetable</p>
+                                    </div>
+                                </Link>
+                            </div>
+                        </div>
+
+                        {/* Recent Classes */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                                <FaBook className="mr-2 text-green-600" />
+                                My Classes
+                            </h3>
+                            <div className="space-y-3">
+                                {currentClasses.slice(0, 3).map((classItem) => (
+                                    <div key={classItem.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                        <div>
+                                            <p className="font-medium text-gray-900">{classItem.subject_name}</p>
+                                            <p className="text-sm text-gray-600">{classItem.section_name} • {classItem.strand_name}</p>
+                                            <p className="text-xs text-gray-500">{classItem.students_count} students</p>
+                                        </div>
+                                        <Link
+                                            href={`/faculty/grade-encoding/${classItem.id}`}
+                                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                        >
+                                            Manage Grades
+                                        </Link>
+                                    </div>
+                                ))}
+                            </div>
+                            <Link
+                                href="/faculty/classes"
+                                className="block text-center text-blue-600 hover:text-blue-800 text-sm font-medium mt-4"
+                            >
+                                View All Classes
+                            </Link>
+                        </div>
+
+                        {/* Academic Calendar */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                                <FaCalendarAlt className="mr-2 text-yellow-600" />
+                                Academic Calendar
+                            </h3>
+                            <div className="space-y-4">
+                                <div className="p-3 bg-blue-50 rounded-lg">
+                                    <p className="font-medium text-blue-900">Current Semester</p>
+                                    <p className="text-sm text-blue-700">{currentAcademicCalendar.semester}</p>
+                                    <p className="text-xs text-blue-600">
+                                        AY {currentAcademicCalendar.year_start}-{currentAcademicCalendar.year_end}
+                                    </p>
+                                </div>
+                                
+                                <div className="p-3 bg-green-50 rounded-lg">
+                                    <p className="font-medium text-green-900">Current Quarter</p>
+                                    <p className="text-sm text-green-700">{currentAcademicCalendar.current_quarter}</p>
+                                    <div className="flex items-center mt-1">
+                                        {currentAcademicCalendar.is_quarter_open ? (
+                                            <>
+                                                <FaCheckCircle className="text-green-600 mr-1 text-xs" />
+                                                <span className="text-xs text-green-600">Grading Open</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <FaExclamationTriangle className="text-yellow-600 mr-1 text-xs" />
+                                                <span className="text-xs text-yellow-600">Grading Closed</span>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Load Progress Bar */}
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                                <FaChartBar className="mr-2 text-blue-600" />
+                                Teaching Load Overview
+                            </h3>
+                            <Link
+                                href="/faculty/loads"
+                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                                View Details
+                            </Link>
+                        </div>
+                        
+                        <div className="mb-4">
+                            <div className="flex justify-between text-sm text-gray-600 mb-2">
+                                <span>Current Load: {currentFacultyLoad.total_loads}/{currentFacultyLoad.max_loads}</span>
+                                <span>{currentFacultyLoad.utilization_percentage}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-3">
+                                <div 
+                                    className={`h-3 rounded-full transition-all ${
+                                        currentFacultyLoad.is_overloaded ? 'bg-red-500' : 
+                                        currentFacultyLoad.utilization_percentage >= 80 ? 'bg-yellow-500' : 'bg-blue-500'
+                                    }`}
+                                    style={{ width: `${Math.min(currentFacultyLoad.utilization_percentage, 100)}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                            <div className="text-center p-3 bg-blue-50 rounded-lg">
+                                <p className="font-semibold text-blue-900">{currentFacultyLoad.total_loads}</p>
+                                <p className="text-blue-700">Current Loads</p>
+                            </div>
+                            <div className="text-center p-3 bg-green-50 rounded-lg">
+                                <p className="font-semibold text-green-900">{currentFacultyLoad.remaining_loads}</p>
+                                <p className="text-green-700">Available Slots</p>
+                            </div>
+                            <div className="text-center p-3 bg-gray-50 rounded-lg">
+                                <p className="font-semibold text-gray-900">{currentFacultyLoad.max_loads}</p>
+                                <p className="text-gray-700">Maximum Load</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-              </div>
             </div>
-          </main>
         </div>
-      </div>
-    </>
-  );
+    );
 }

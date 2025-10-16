@@ -17,23 +17,21 @@ class User extends Authenticatable
      * @var array<int, string>
      */
     protected $fillable = [
-        'name',
-        'lastname',
-        'firstname',
-        'middlename',
+        'username',
         'email',
-        'role',
-        'student_type',
-        'status',
         'password',
-        'assigned_strand_id',
+        'role',
         'is_coordinator',
+        'firstname',
+        'lastname',
+        'assigned_strand_id',
+        'password_change_required',
+        'generated_password',
+        'password_changed',
+        'plain_password',
         'is_disabled',
         'last_login_at',
-        'password_changed',
-        // Manual enrollment fields (removed redundant columns - now in student_personal_info)
-        'is_manual_enrollment',
-        'enrolled_by_coordinator',
+        'student_type',
     ];
 
     /**
@@ -52,61 +50,157 @@ class User extends Authenticatable
      * @var array<string, string>
      */
     protected $casts = [
-        'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'is_coordinator' => 'boolean',
+        'password_change_required' => 'boolean',
+        'password_changed' => 'boolean',
         'is_disabled' => 'boolean',
         'last_login_at' => 'datetime',
-        'password_changed' => 'boolean',
     ];
 
-    // Relationships for role-based authentication system
-    public function student()
-    {
-        return $this->hasOne(Student::class);
-    }
-
+    /**
+     * Get the student personal info for this user.
+     */
     public function studentPersonalInfo()
     {
-        return $this->hasOne(Student::class);
+        return $this->hasOne(StudentPersonalInfo::class);
     }
 
+    /**
+     * Get the subjects taught by this user (faculty).
+     */
+    public function subjects()
+    {
+        return $this->hasMany(Subject::class, 'faculty_id');
+    }
+
+    /**
+     * Get the classes taught by this user (faculty).
+     */
+    public function classes()
+    {
+        return $this->hasMany(ClassSchedule::class, 'faculty_id');
+    }
+
+    /**
+     * Get the grades given by this user (faculty).
+     */
+    public function grades()
+    {
+        return $this->hasMany(Grade::class, 'faculty_id');
+    }
+
+    /**
+     * Get the grades received by this user (student).
+     */
+    public function studentGrades()
+    {
+        return $this->hasMany(Grade::class, 'student_id');
+    }
+
+    /**
+     * Get the sections advised by this user (faculty as adviser).
+     */
+    public function advisedSections()
+    {
+        return $this->hasMany(Section::class, 'adviser_id');
+    }
+
+    /**
+     * Get the enrollments coordinated by this user (coordinator).
+     */
+    public function coordinatedEnrollments()
+    {
+        return $this->hasMany(Enrollment::class, 'coordinator_id');
+    }
+
+    /**
+     * Get the class details for this user (student).
+     */
+    public function classDetails()
+    {
+        return $this->hasMany(ClassDetail::class, 'student_id');
+    }
+
+    /**
+     * Get the grades approved by this user.
+     */
+    public function approvedGrades()
+    {
+        return $this->hasMany(Grade::class, 'approved_by');
+    }
+
+    /**
+     * Get the faculty loads for this user.
+     */
+    public function facultyLoads()
+    {
+        return $this->hasMany(FacultyLoad::class, 'faculty_id');
+    }
+
+    /**
+     * Get the current faculty load for active school year.
+     */
+    public function currentFacultyLoad()
+    {
+        return $this->hasOne(FacultyLoad::class, 'faculty_id')
+                    ->whereHas('schoolYear', function ($query) {
+                        $query->where('is_active', true);
+                    });
+    }
+
+    /**
+     * Get loads assigned by this user (registrar).
+     */
+    public function assignedLoads()
+    {
+        return $this->hasMany(FacultyLoad::class, 'assigned_by');
+    }
+
+    /**
+     * Get the strand assigned to this user (faculty).
+     */
     public function assignedStrand()
     {
         return $this->belongsTo(Strand::class, 'assigned_strand_id');
     }
 
-    public function getFullNameAttribute()
+    /**
+     * Get all sessions for this user.
+     */
+    public function sessions()
     {
-        return trim($this->firstname . ' ' . ($this->middlename ? $this->middlename . ' ' : '') . $this->lastname);
+        return $this->hasMany(UserSession::class);
     }
 
-    // Transferee relationships
-    public function transfereeCreditedSubjects()
+    /**
+     * Get the active session for this user.
+     */
+    public function activeSession()
     {
-        return $this->hasMany(TransfereeCreditedSubject::class, 'student_id');
+        return $this->hasOne(UserSession::class)
+                    ->where('status', 'active')
+                    ->where('expires_at', '>', now());
     }
 
-    public function transfereePreviousSchools()
+    /**
+     * Check if user has an active session.
+     */
+    public function hasActiveSession()
     {
-        return $this->hasMany(TransfereePreviousSchool::class, 'student_id');
+        return $this->activeSession()->exists();
     }
 
-    // Helper methods for transferee functionality
-    public function isTransferee()
+    /**
+     * Terminate all active sessions for this user.
+     */
+    public function terminateAllSessions()
     {
-        return $this->transfereePreviousSchools()->exists();
-    }
-
-    public function getCreditedSubjectsCount()
-    {
-        return $this->transfereeCreditedSubjects()->count();
-    }
-
-    public function getTotalCreditedUnits()
-    {
-        return $this->transfereeCreditedSubjects()
-            ->join('subjects', 'transferee_credited_subjects.subject_id', '=', 'subjects.id')
-            ->sum('subjects.units') ?? 0;
+        return $this->sessions()
+                    ->where('status', 'active')
+                    ->update([
+                        'status' => 'terminated',
+                        'updated_at' => now()
+                    ]);
     }
 }

@@ -4,34 +4,36 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Carbon\Carbon;
 
 class TransfereePreviousSchool extends Model
 {
     use HasFactory;
 
-    protected $table = 'transferee_previous_schools';
-
     protected $fillable = [
-        'student_id',
-        'last_school'
+        'student_personal_info_id',
+        'last_school',
     ];
 
-    // No additional casts needed for simplified model
-
     /**
-     * Get the student who transferred from this school
+     * Get the student personal info that owns the previous school record.
      */
-    public function student()
+    public function studentPersonalInfo()
     {
-        return $this->belongsTo(User::class, 'student_id');
+        return $this->belongsTo(StudentPersonalInfo::class, 'student_personal_info_id');
     }
 
     /**
-     * Get the credited subjects from this school
+     * Get the student through the personal info relationship.
      */
-    public function creditedSubjects()
+    public function student()
     {
-        return $this->hasMany(TransfereeCreditedSubject::class, 'student_id', 'student_id');
+        return $this->hasOneThrough(
+            User::class,
+            StudentPersonalInfo::class,
+            'id', // Foreign key on student_personal_info table
+            'id', // Foreign key on users table
+            'student_personal_info_id', // Local key on transferee_previous_schools table
+            'user_id' // Local key on student_personal_info table
+        );
     }
 }

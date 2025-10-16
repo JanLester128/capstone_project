@@ -44,6 +44,7 @@ export default function StudentSidebar({ auth, onToggle }) {
   const [theme, setTheme] = useState('Default');
   const [userInfo, setUserInfo] = useState(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [enrollmentStatus, setEnrollmentStatus] = useState(null);
   
   // HCI Principle 1: Visibility of system status - Enhanced
   const [systemStatus, setSystemStatus] = useState({
@@ -177,6 +178,32 @@ export default function StudentSidebar({ auth, onToggle }) {
     fetchUserInfo();
   }, [auth]);
 
+  // Fetch enrollment status
+  useEffect(() => {
+    const fetchEnrollmentStatus = async () => {
+      try {
+        const response = await fetch('/student/enrollment-status', {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+          },
+          credentials: 'include'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setEnrollmentStatus(data);
+        }
+      } catch (error) {
+        console.error('Error fetching enrollment status:', error);
+      }
+    };
+
+    fetchEnrollmentStatus();
+  }, []);
+
   const handleToggle = () => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
@@ -295,6 +322,26 @@ export default function StudentSidebar({ auth, onToggle }) {
   };
 
   // HCI Principle 4: Consistency and standards - Enhanced navigation structure
+  const getEnrollmentBadge = () => {
+    if (!enrollmentStatus) return null;
+    
+    if (enrollmentStatus.enrollmentOpen && !enrollmentStatus.hasEnrollment) {
+      return 'Open';
+    } else if (enrollmentStatus.hasEnrollment) {
+      switch (enrollmentStatus.enrollmentStatus) {
+        case 'pending':
+          return 'Pending';
+        case 'approved':
+          return 'Approved';
+        case 'rejected':
+          return 'Rejected';
+        default:
+          return null;
+      }
+    }
+    return null;
+  };
+
   const menuItems = [
     {
       path: '/student/dashboard',
@@ -322,11 +369,11 @@ export default function StudentSidebar({ auth, onToggle }) {
     },
     {
       path: '/student/enrollment',
-      icon: FaCalendarAlt,
-      label: 'Enrollment',
-      description: 'Course registration',
+      icon: FaUserGraduate,
+      label: 'Enrollment Application',
+      description: 'Complete enrollment with personal info & strand preferences',
       shortcut: 'Alt+E',
-      badge: null
+      badge: getEnrollmentBadge()
     }
   ];
 
@@ -354,7 +401,7 @@ export default function StudentSidebar({ auth, onToggle }) {
       {/* Mobile Overlay */}
       {!isCollapsed && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden"
           onClick={() => setIsCollapsed(true)}
         />
       )}
@@ -367,13 +414,26 @@ export default function StudentSidebar({ auth, onToggle }) {
         <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-500 to-indigo-600`}>
           {!isCollapsed && (
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                <FaSchool className="text-blue-600 text-lg" />
+              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+                <img 
+                  src="/onsts.png" 
+                  alt="ONSTS Logo" 
+                  className="w-full h-full object-contain"
+                />
               </div>
               <div>
                 <h1 className="text-white font-bold text-lg">ONSTS</h1>
                 <p className="text-blue-100 text-xs">Student Portal</p>
               </div>
+            </div>
+          )}
+          {isCollapsed && (
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+              <img 
+                src="/onsts.png" 
+                alt="ONSTS Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
           )}
           <button

@@ -24,8 +24,13 @@ class TransfereeCreditedSubject extends Model
         'grade' => 'decimal:2',
     ];
 
+    protected $attributes = [
+        'school_year' => '2025-2026',
+        'semester' => '1st'
+    ];
+
     /**
-     * Get the student who received credit for this subject
+     * Get the student that owns the credited subject.
      */
     public function student()
     {
@@ -33,7 +38,7 @@ class TransfereeCreditedSubject extends Model
     }
 
     /**
-     * Get the subject that was credited
+     * Get the subject that was credited.
      */
     public function subject()
     {
@@ -41,56 +46,17 @@ class TransfereeCreditedSubject extends Model
     }
 
     /**
-     * Scope to filter by semester
+     * Get the student's personal info.
      */
-    public function scopeBySemester($query, $semester)
+    public function studentPersonalInfo()
     {
-        return $query->where('semester', $semester);
-    }
-
-    /**
-     * Scope to filter by school year
-     */
-    public function scopeBySchoolYear($query, $schoolYear)
-    {
-        return $query->where('school_year', $schoolYear);
-    }
-
-    /**
-     * Scope to filter by student
-     */
-    public function scopeByStudent($query, $studentId)
-    {
-        return $query->where('student_id', $studentId);
-    }
-
-    /**
-     * Get the letter grade equivalent
-     */
-    public function getLetterGradeAttribute()
-    {
-        $grade = $this->grade;
-        
-        if ($grade >= 90) return 'A';
-        if ($grade >= 85) return 'B';
-        if ($grade >= 80) return 'C';
-        if ($grade >= 75) return 'D';
-        return 'F';
-    }
-
-    /**
-     * Check if the grade is passing
-     */
-    public function getIsPassingAttribute()
-    {
-        return $this->grade >= 75;
-    }
-
-    /**
-     * Get formatted grade with letter equivalent
-     */
-    public function getFormattedGradeAttribute()
-    {
-        return number_format($this->grade, 2) . ' (' . $this->letter_grade . ')';
+        return $this->hasOneThrough(
+            StudentPersonalInfo::class,
+            User::class,
+            'id', // Foreign key on users table
+            'user_id', // Foreign key on student_personal_info table
+            'student_id', // Local key on transferee_credited_subjects table
+            'id' // Local key on users table
+        );
     }
 }

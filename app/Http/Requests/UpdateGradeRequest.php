@@ -33,8 +33,7 @@ class UpdateGradeRequest extends FormRequest
             'class_id' => 'nullable|exists:class,id',
             'semester' => 'sometimes|required|in:1st,2nd',
             'remarks' => 'nullable|string|max:1000',
-            'status' => 'sometimes|required|in:ongoing,completed,incomplete,dropped,pending_approval,approved',
-            'approval_status' => 'sometimes|required|in:draft,pending_approval,approved,rejected',
+            'status' => 'sometimes|required|in:draft,pending_registrar_approval,approved,rejected',
         ];
 
         // Semester-specific quarter validation

@@ -11,84 +11,65 @@ class Subject extends Model
 
     protected $fillable = [
         'name',
-        'code', 
+        'code',
         'semester',
         'year_level',
-        'school_year_id',
+        'is_summer_subject',
         'strand_id',
+        'school_year_id',
         'faculty_id',
-        'prerequisites',
-        'corequisites',
-        'description'
     ];
 
     protected $casts = [
-        'prerequisites' => 'array',
-        'corequisites' => 'array'
+        'is_summer_subject' => 'boolean',
+        'semester' => 'integer',
     ];
 
-    public function strand() {
+    /**
+     * Get the strand that owns the subject.
+     */
+    public function strand()
+    {
         return $this->belongsTo(Strand::class);
     }
 
-    // Removed strands() relationship - subjects now belong to a single strand via strand_id
-
-    public function schoolYear() {
+    /**
+     * Get the school year that owns the subject.
+     */
+    public function schoolYear()
+    {
         return $this->belongsTo(SchoolYear::class);
     }
 
-    public function classes() {
-        return $this->hasMany(ClassSchedule::class);
-    }
-
-    public function grades() {
-        return $this->hasMany(Grade::class);
-    }
-
+    /**
+     * Get the faculty that teaches the subject.
+     */
     public function faculty()
     {
         return $this->belongsTo(User::class, 'faculty_id');
     }
 
-    // Get prerequisite subjects
-    public function prerequisiteSubjects()
+    /**
+     * Get the classes for this subject.
+     */
+    public function classes()
     {
-        if (!$this->prerequisites) {
-            return collect();
-        }
-        
-        return Subject::whereIn('code', $this->prerequisites)->get();
+        return $this->hasMany(ClassSchedule::class, 'subject_id');
     }
 
-    // Get corequisite subjects
-    public function corequisiteSubjects()
+    /**
+     * Get the grades for this subject.
+     */
+    public function grades()
     {
-        if (!$this->corequisites) {
-            return collect();
-        }
-        
-        return Subject::whereIn('code', $this->corequisites)->get();
+        return $this->hasMany(Grade::class);
     }
 
-    // Transferee relationship
-    public function transfereeCreditedSubjects()
+    /**
+     * Get the transferee subject credits for this subject.
+     */
+    public function transfereeCredits()
     {
-        return $this->hasMany(TransfereeCreditedSubject::class);
-    }
-
-    // Helper methods for transferee functionality
-    public function getTransfereeCreditsCount()
-    {
-        return $this->transfereeCreditedSubjects()->count();
-    }
-
-    public function getAverageCreditedGrade()
-    {
-        return $this->transfereeCreditedSubjects()->avg('grade');
-    }
-
-    public function hasTransfereeCredits()
-    {
-        return $this->transfereeCreditedSubjects()->exists();
+        return $this->hasMany(TransfereeSubjectCredit::class);
     }
 }

@@ -32,8 +32,7 @@ class StoreGradeRequest extends FormRequest
             'class_id' => 'nullable|exists:class,id',
             'semester' => 'required|in:1st,2nd',
             'remarks' => 'nullable|string|max:1000',
-            'status' => 'required|in:ongoing,completed,incomplete,dropped,pending_approval,approved',
-            'approval_status' => 'required|in:draft,pending_approval,approved,rejected',
+            'status' => 'required|in:draft,pending_registrar_approval,approved,rejected',
         ];
 
         // Semester-specific quarter validation

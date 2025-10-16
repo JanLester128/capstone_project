@@ -26,24 +26,42 @@ const ForgotPassword = () => {
     try {
       const response = await axios.post("/auth/forgot-password", { email });
       
+      // Get the email from response or fallback to the email entered
+      const emailSentTo = response.data.email_sent_to || email || 'your email address';
+      
+      // Check if debug info is available and if email was actually sent
+      const debugInfo = response.data.debug_info;
+      const emailActuallySent = response.data.email_actually_sent;
+      
       Swal.fire({
-        title: 'OTP Sent Successfully!',
+        title: emailActuallySent ? 'Reset Email Sent Successfully!' : 'Reset Link Generated!',
         html: `
           <div class="text-left">
-            <p class="mb-3">📧 OTP has been sent to your email</p>
+            <p class="mb-3">${emailActuallySent ? '📧 Password reset email has been sent successfully!' : '⚠️ Reset link generated but email delivery may have failed'}</p>
             <div class="bg-green-50 border-l-4 border-green-400 p-4 mb-3">
               <h4 class="font-semibold text-green-800 mb-2">Email sent to:</h4>
-              <p class="text-sm text-green-700">${response.data.email_sent_to}</p>
+              <p class="text-sm text-green-700 font-mono">${emailSentTo}</p>
             </div>
             <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
               <h4 class="font-semibold text-blue-800 mb-2">Next steps:</h4>
               <ul class="text-sm text-blue-700 space-y-1">
                 <li>• Check your email inbox</li>
-                <li>• Enter the 6-digit OTP code</li>
-                <li>• Create your new password</li>
-                <li>• OTP expires in 15 minutes</li>
+                <li>• Click the password reset link</li>
+                <li>• Enter your new password</li>
+                <li>• Reset link expires in 24 hours</li>
               </ul>
             </div>
+            ${debugInfo ? `
+              <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mt-3">
+                <h4 class="font-semibold text-yellow-800 mb-2">🔧 Debug Info (Development Mode):</h4>
+                <p class="text-xs text-yellow-700 mb-1"><strong>Email Status:</strong> ${debugInfo.email_sent ? 'Sent Successfully ✅' : 'Failed to Send ❌'}</p>
+                <p class="text-xs text-yellow-700 mb-1"><strong>OTP Code:</strong> <span class="font-mono bg-white px-2 py-1 rounded">${debugInfo.otp_code}</span></p>
+                <p class="text-xs text-yellow-700 mb-2"><strong>Reset Link:</strong></p>
+                <a href="${debugInfo.reset_url}" class="text-xs text-blue-600 underline break-all" target="_blank">
+                  ${debugInfo.reset_url}
+                </a>
+              </div>
+            ` : ''}
           </div>
         `,
         icon: 'success',

@@ -3,307 +3,824 @@
 namespace App\Http\Controllers;
 
 use App\Models\Enrollment;
+use App\Models\User;
+use App\Models\StudentPersonalInfo;
+use App\Models\SchoolYear;
 use App\Models\Strand;
 use App\Models\Section;
-use App\Models\SchoolYear;
-use App\Models\ClassSchedule;
-use App\Models\ClassDetail;
+use App\Models\Subject;
+use App\Models\TransfereeSubjectCredit;
+use App\Models\TransfereePreviousSchool;
+use App\Models\TransfereeCreditedSubject;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
+use Carbon\Carbon;
 
 class EnrollmentController extends Controller
 {
     /**
-     * Show enrollment form for students
+     * Display student enrollment page
      */
-    public function create()
+    public function studentEnrollmentPage()
     {
-        $strands = Strand::all();
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $user = Auth::user();
         
-        return Inertia::render('Student/EnrollmentForm', [
-            'strands' => $strands,
-            'activeSchoolYear' => $activeSchoolYear
-        ]);
-    }
-
-    /**
-     * Store student pre-enrollment submission
-     */
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            // Basic enrollment info
-            'gradeLevel' => 'required|in:Grade 11,Grade 12',
-            'lastGrade' => 'required|string|max:255',
-            'lastSY' => 'required|string|max:255',
-            
-            // Strand preferences (frontend sends these names)
-            'firstChoice' => 'required|exists:strands,id',
-            'secondChoice' => 'nullable|exists:strands,id',
-            'thirdChoice' => 'nullable|exists:strands,id',
-            
-            // File uploads
-            'reportCard' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
-            'psaBirthCertificate' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
-        ]);
-
-        // Handle file uploads
-        if ($request->hasFile('reportCard')) {
-            $validated['report_card'] = $request->file('reportCard')->store('enrollment_documents', 'public');
+        if (!$user || $user->role !== 'student') {
+            return redirect('/login')->with('error', 'Access denied.');
         }
 
-        if ($request->hasFile('psaBirthCertificate')) {
-            $psaPath = $request->file('psaBirthCertificate')->store('enrollment_documents', 'public');
-        }
-
-        // Map frontend field names to database field names
-        $enrollmentData = [
-            'student_id' => Auth::id(), // This should be the user ID, which is correct
-            'grade_level' => $validated['gradeLevel'],
-            'previous_school' => 'Previous School', // Default value since not in form
-            'status' => 'pending',
-        ];
-
-        // Add file paths if uploaded
-        if (isset($validated['report_card'])) {
-            $enrollmentData['report_card'] = $validated['report_card'];
-        }
-
-        // Add school year and timestamps
-        $schoolYear = SchoolYear::where('is_active', true)->first();
-        $enrollmentData['school_year_id'] = $schoolYear->id;
-        $enrollmentData['submitted_at'] = now();
-
-        // Create enrollment record
-        $enrollment = Enrollment::create($enrollmentData);
-
-        // Store strand preferences in separate table
-        $strandChoices = [
-            'firstChoice' => $validated['firstChoice'],
-            'secondChoice' => $validated['secondChoice'] ?? null,
-            'thirdChoice' => $validated['thirdChoice'] ?? null,
-        ];
-
-        $preferences = [];
-        foreach ($strandChoices as $choiceName => $strandId) {
-            if ($strandId) {
-                $order = $choiceName === 'firstChoice' ? 1 : ($choiceName === 'secondChoice' ? 2 : 3);
-                $preferences[] = [
-                    'student_id' => Auth::id(),
-                    'enrollment_id' => $enrollment->id,
-                    'strand_id' => $strandId,
-                    'preference_order' => $order,
-                    'school_year_id' => $schoolYear->id,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
-            }
-        }
-
-        // Insert strand preferences
-        if (!empty($preferences)) {
-            try {
-                \App\Models\StudentStrandPreference::insert($preferences);
-                Log::info('Strand preferences inserted successfully', ['preferences' => $preferences]);
-            } catch (\Exception $e) {
-                Log::error('Failed to insert strand preferences', ['error' => $e->getMessage(), 'preferences' => $preferences]);
-                // Continue with enrollment even if preferences fail
-            }
-        }
-
-        // Store PSA birth certificate path if uploaded
-        if (isset($psaPath)) {
-            try {
-                $enrollment->update([
-                    'documents' => json_encode(['psa_birth_certificate' => $psaPath])
-                ]);
-            } catch (\Exception $e) {
-                Log::error('Failed to update enrollment documents', ['error' => $e->getMessage()]);
-            }
-        }
-
-        return redirect()->route('student.dashboard')->with('success', 'Enrollment application submitted successfully!');
-    }
-
-    /**
-     * Show coordinator enrollment management page
-     */
-    public function coordinatorIndex()
-    {
-        $activeSchoolYear = SchoolYear::where('is_active', true)->first();
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
         
-        $pendingEnrollments = Enrollment::with(['firstStrandChoice', 'secondStrandChoice', 'thirdStrandChoice'])
-            ->pending()
-            ->forSchoolYear($activeSchoolYear->id)
-            ->latest('submitted_at')
-            ->get();
+        if (!$currentSchoolYear) {
+            return Inertia::render('Student/Student_Enrollment', [
+                'error' => 'No active school year found.',
+                'enrollmentOpen' => false
+            ]);
+        }
 
-        $approvedEnrollments = Enrollment::with(['assignedStrand', 'assignedSection'])
-            ->approved()
-            ->forSchoolYear($activeSchoolYear->id)
-            ->latest('reviewed_at')
-            ->get();
-
-        $rejectedEnrollments = Enrollment::with(['coordinator'])
-            ->rejected()
-            ->forSchoolYear($activeSchoolYear->id)
-            ->latest('reviewed_at')
-            ->get();
-
-        $strands = Strand::all();
-        $sections = Section::with('strand')->get();
-
-        return Inertia::render('Coordinator/EnrollmentManagement', [
-            'pendingEnrollments' => $pendingEnrollments,
-            'approvedEnrollments' => $approvedEnrollments,
-            'rejectedEnrollments' => $rejectedEnrollments,
+        // Check if enrollment is open for current semester
+        $enrollmentOpen = $this->isEnrollmentOpen($currentSchoolYear);
+        
+        // Get available strands
+        $strands = Strand::where('is_active', true)->get();
+        
+        // Get existing enrollment for current school year
+        $existingEnrollment = $this->getStudentEnrollment($user->id, $currentSchoolYear->id);
+        
+        return Inertia::render('Student/Student_Enrollment', [
+            'user' => $user,
+            'currentSchoolYear' => $currentSchoolYear,
+            'enrollmentOpen' => $enrollmentOpen,
             'strands' => $strands,
-            'sections' => $sections,
-            'activeSchoolYear' => $activeSchoolYear
+            'existingEnrollment' => $existingEnrollment
         ]);
     }
 
     /**
-     * Approve enrollment and create class details for student
+     * Submit student enrollment application
      */
-    public function approve(Request $request, Enrollment $enrollment)
+    public function submitEnrollment(Request $request)
     {
-        $validated = $request->validate([
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'student') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$currentSchoolYear || !$this->isEnrollmentOpen($currentSchoolYear)) {
+            return response()->json(['error' => 'Enrollment is currently closed.'], 422);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
             'strand_id' => 'required|exists:strands,id',
-            'assigned_section_id' => 'required|exists:sections,id',
-            'coordinator_notes' => 'nullable|string'
+            'intended_grade_level' => 'required|in:11,12',
+            'student_type' => 'required|in:new,continuing,transferee',
+            'previous_school_name' => 'required_if:student_type,transferee|string|max:255',
+            'previous_school_address' => 'required_if:student_type,transferee|string|max:500',
+            'documents.*' => 'file|mimes:pdf,jpg,jpeg,png|max:5120' // 5MB max
         ]);
 
-        // Check section capacity limit (35 students maximum)
-        $currentEnrollmentCount = ClassDetail::where('section_id', $validated['assigned_section_id'])
-            ->where('enrollment_status', 'approved')
-            ->where('school_year_id', $enrollment->school_year_id)
-            ->count();
-
-        if ($currentEnrollmentCount >= 35) {
-            Log::warning('Section capacity exceeded', [
-                'section_id' => $validated['assigned_section_id'],
-                'current_count' => $currentEnrollmentCount,
-                'enrollment_id' => $enrollment->id
-            ]);
-            
-            return back()->withErrors([
-                'assigned_section_id' => 'This section has reached its maximum capacity of 35 students. Please select a different section.'
-            ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Update enrollment status
-        $enrollment->update([
-            'status' => 'approved',
-            'strand_id' => $validated['strand_id'],
-            'assigned_section_id' => $validated['assigned_section_id'],
-            'coordinator_id' => Auth::id(),
-            'coordinator_notes' => $validated['coordinator_notes'],
-            'reviewed_at' => now()
+        // Check for existing enrollment
+        $existingEnrollment = $this->getStudentEnrollment($user->id, $currentSchoolYear->id);
+        
+        if ($existingEnrollment && $existingEnrollment->status !== 'rejected') {
+            return response()->json(['error' => 'You already have an enrollment application for this school year.'], 422);
+        }
+
+        DB::beginTransaction();
+        
+        try {
+            // Get or create student personal info
+            $studentInfo = StudentPersonalInfo::where('user_id', $user->id)->first();
+            
+            if (!$studentInfo) {
+                return response()->json(['error' => 'Student personal information not found. Please complete your profile first.'], 422);
+            }
+
+            // Create enrollment record
+            $enrollmentData = [
+                'student_personal_info_id' => $studentInfo->id,
+                'strand_id' => $request->strand_id,
+                'school_year_id' => $currentSchoolYear->id,
+                'intended_grade_level' => $request->intended_grade_level,
+                'status' => 'pending',
+                'enrollment_type' => $request->student_type === 'transferee' ? 'transferee' : 'regular',
+                'enrollment_method' => 'self',
+                'enrollment_date' => now()
+            ];
+
+            // For transferees, require coordinator evaluation
+            if ($request->student_type === 'transferee') {
+                $enrollmentData['status'] = 'pending_evaluation';
+            }
+
+            $enrollment = Enrollment::create($enrollmentData);
+
+            // Handle transferee-specific data
+            if ($request->student_type === 'transferee') {
+                $this->handleTransfereeData($enrollment, $request);
+            }
+
+            // Handle document uploads
+            if ($request->hasFile('documents')) {
+                $this->handleDocumentUploads($enrollment, $request->file('documents'));
+            }
+
+            // Update user student_type if needed
+            if ($user->student_type !== $request->student_type) {
+                User::where('id', $user->id)->update(['student_type' => $request->student_type]);
+            }
+
+            DB::commit();
+
+            // Log enrollment submission
+            Log::info('Enrollment submitted', [
+                'user_id' => $user->id,
+                'enrollment_id' => $enrollment->id,
+                'student_type' => $request->student_type,
+                'strand_id' => $request->strand_id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Enrollment application submitted successfully.',
+                'enrollment' => $enrollment->load(['strand', 'schoolYear'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            Log::error('Enrollment submission failed', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json(['error' => 'Failed to submit enrollment. Please try again.'], 500);
+        }
+    }
+
+    /**
+     * Get enrollments for coordinator/registrar review
+     */
+    public function getEnrollmentsForReview(Request $request)
+    {
+        $user = Auth::user();
+        
+        if (!$user || !in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$currentSchoolYear) {
+            return response()->json(['error' => 'No active school year found.'], 422);
+        }
+
+        $query = Enrollment::with([
+            'studentPersonalInfo.user',
+            'strand',
+            'assignedSection',
+            'coordinator'
+        ])->where('school_year_id', $currentSchoolYear->id);
+
+        // Filter by status
+        if ($request->has('status') && $request->status !== 'all') {
+            $query->where('status', $request->status);
+        }
+
+        // Filter by enrollment type
+        if ($request->has('type') && $request->type !== 'all') {
+            $query->where('enrollment_type', $request->type);
+        }
+
+        // For coordinators, show only transferee enrollments needing evaluation
+        if ($user->role === 'coordinator') {
+            $query->where('enrollment_type', 'transferee')
+                  ->whereIn('status', ['pending_evaluation', 'evaluated']);
+        }
+
+        $enrollments = $query->orderBy('created_at', 'desc')->paginate(20);
+
+        return response()->json([
+            'enrollments' => $enrollments,
+            'currentSchoolYear' => $currentSchoolYear
+        ]);
+    }
+
+    /**
+     * Approve enrollment (Registrar only)
+     */
+    public function approveEnrollment(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $enrollment = Enrollment::with(['studentPersonalInfo.user', 'strand'])->find($enrollmentId);
+        
+        if (!$enrollment) {
+            return response()->json(['error' => 'Enrollment not found.'], 404);
+        }
+
+        // Validate request
+        $validator = Validator::make($request->all(), [
+            'assigned_section_id' => 'required|exists:sections,id'
         ]);
 
-        // Create class detail record for the approved student
-        ClassDetail::create([
-            'student_id' => $enrollment->student_id,
-            'strand_id' => $validated['strand_id'],
-            'section_id' => $validated['assigned_section_id'],
-            'school_year_id' => $enrollment->school_year_id,
-            'coordinator_notes' => $validated['coordinator_notes'],
-            'enrollment_status' => 'approved',
-            'approved_by' => Auth::id(),
-            'approved_at' => now(),
-            'is_enrolled' => false // Will be set to true when enrolled in specific classes
-        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
 
-        return back()->with('success', 'Enrollment approved successfully!');
+        DB::beginTransaction();
+        
+        try {
+            // Update enrollment status
+            $enrollment->update([
+                'status' => 'approved',
+                'assigned_section_id' => $request->assigned_section_id
+            ]);
+
+            // Log approval
+            Log::info('Enrollment approved', [
+                'enrollment_id' => $enrollment->id,
+                'student_id' => $enrollment->studentPersonalInfo->user_id,
+                'approved_by' => $user->id,
+                'section_id' => $request->assigned_section_id
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Enrollment approved successfully.',
+                'enrollment' => $enrollment->fresh(['studentPersonalInfo.user', 'strand', 'assignedSection'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            Log::error('Enrollment approval failed', [
+                'enrollment_id' => $enrollment->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json(['error' => 'Failed to approve enrollment.'], 500);
+        }
     }
 
     /**
      * Reject enrollment
      */
-    public function reject(Request $request, Enrollment $enrollment)
+    public function rejectEnrollment(Request $request, $enrollmentId)
     {
-        $validated = $request->validate([
-            'coordinator_notes' => 'required|string'
+        $user = Auth::user();
+        
+        if (!$user || !in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $enrollment = Enrollment::find($enrollmentId);
+        
+        if (!$enrollment) {
+            return response()->json(['error' => 'Enrollment not found.'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rejection_reason' => 'required|string|max:500'
         ]);
 
-        $enrollment->update([
-            'status' => 'rejected',
-            'coordinator_id' => Auth::id(),
-            'coordinator_notes' => $validated['coordinator_notes'],
-            'reviewed_at' => now()
-        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
 
-        return back()->with('success', 'Enrollment rejected.');
+        DB::beginTransaction();
+        
+        try {
+            $enrollment->update([
+                'status' => 'rejected',
+                'rejection_reason' => $request->rejection_reason
+            ]);
+
+            Log::info('Enrollment rejected', [
+                'enrollment_id' => $enrollment->id,
+                'rejected_by' => $user->id,
+                'reason' => $request->rejection_reason
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Enrollment rejected.',
+                'enrollment' => $enrollment->fresh()
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            return response()->json(['error' => 'Failed to reject enrollment.'], 500);
+        }
     }
 
     /**
-     * Enroll approved student in specific class schedules
+     * Show transferee management dashboard (Coordinator only)
      */
-    public function enrollInClasses(Request $request, Enrollment $enrollment)
+    public function transfereeManagement()
     {
-        $validated = $request->validate([
-            'class_ids' => 'required|array',
-            'class_ids.*' => 'exists:class,id'
-        ]);
-
-        // Get the student's class detail record
-        $classDetail = ClassDetail::where('student_id', $enrollment->student_id)
-            ->where('enrollment_status', 'approved')
-            ->first();
-
-        if (!$classDetail) {
-            return back()->withErrors(['error' => 'Student must be approved first before enrolling in classes.']);
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'coordinator') {
+            return redirect('/faculty/dashboard')->with('error', 'Access denied. Coordinator privileges required.');
         }
 
-        foreach ($validated['class_ids'] as $classId) {
-            // Update existing class detail or create new ones for specific classes
-            ClassDetail::updateOrCreate([
-                'class_id' => $classId,
-                'student_id' => $enrollment->student_id,
-            ], [
-                'strand_id' => $classDetail->strand_id,
-                'section_id' => $classDetail->section_id,
-                'school_year_id' => $classDetail->school_year_id,
-                'coordinator_notes' => $classDetail->coordinator_notes,
-                'enrollment_status' => 'enrolled',
-                'approved_by' => $classDetail->approved_by,
-                'approved_at' => $classDetail->approved_at,
-                'is_enrolled' => true,
-                'enrolled_at' => now()
+        $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+        
+        if (!$currentSchoolYear) {
+            return Inertia::render('Faculty/TransfereeManagement', [
+                'error' => 'No active school year found.',
+                'transfereeEnrollments' => [],
+                'stats' => []
             ]);
         }
 
-        return back()->with('success', 'Student enrolled in selected classes successfully!');
+        // Get transferee enrollments with related data
+        $transfereeEnrollments = Enrollment::with([
+            'studentPersonalInfo.user',
+            'strand',
+            'transfereePreviousSchool',
+            'coordinator'
+        ])
+        ->where('school_year_id', $currentSchoolYear->id)
+        ->where('enrollment_type', 'transferee')
+        ->orderBy('created_at', 'desc')
+        ->get()
+        ->map(function ($enrollment) {
+            return [
+                'id' => $enrollment->id,
+                'student_name' => $enrollment->studentPersonalInfo->user->firstname . ' ' . $enrollment->studentPersonalInfo->user->lastname,
+                'student_email' => $enrollment->studentPersonalInfo->user->email,
+                'intended_grade_level' => $enrollment->intended_grade_level,
+                'strand_name' => $enrollment->strand->name,
+                'previous_school' => $enrollment->transfereePreviousSchool->school_name ?? null,
+                'status' => $enrollment->status,
+                'enrollment_date' => $enrollment->enrollment_date,
+                'evaluation_notes' => $enrollment->evaluation_notes,
+                'coordinator_name' => $enrollment->coordinator ? $enrollment->coordinator->firstname . ' ' . $enrollment->coordinator->lastname : null
+            ];
+        });
+
+        // Calculate statistics
+        $stats = [
+            'pending_evaluation' => $transfereeEnrollments->where('status', 'pending_evaluation')->count(),
+            'evaluated' => $transfereeEnrollments->where('status', 'evaluated')->count(),
+            'approved' => $transfereeEnrollments->where('status', 'approved')->count(),
+            'rejected' => $transfereeEnrollments->where('status', 'rejected')->count(),
+            'returned' => $transfereeEnrollments->where('status', 'returned')->count(),
+            'total' => $transfereeEnrollments->count()
+        ];
+
+        return Inertia::render('Faculty/TransfereeManagement', [
+            'transfereeEnrollments' => $transfereeEnrollments,
+            'stats' => $stats,
+            'currentSchoolYear' => $currentSchoolYear
+        ]);
     }
 
     /**
-     * Get class schedules for COR generation
+     * Show transferee evaluation page (Coordinator only)
      */
-    public function getClassSchedules(Enrollment $enrollment)
+    public function showTransfereeEvaluation($enrollmentId)
     {
-        if (!$enrollment->isApproved() || !$enrollment->assigned_section_id) {
-            return response()->json(['error' => 'Student not properly enrolled'], 400);
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'coordinator') {
+            return redirect('/faculty/enrollment')->with('error', 'Access denied.');
         }
 
-        $classDetails = ClassDetail::with(['classSchedule.subject', 'classSchedule.faculty'])
-            ->where('student_id', $enrollment->student_id)
-            ->where('section_id', $enrollment->assigned_section_id)
-            ->where('is_enrolled', true)
-            ->get();
+        $enrollment = Enrollment::with([
+            'studentPersonalInfo.user',
+            'strand',
+            'schoolYear'
+        ])->find($enrollmentId);
+        
+        if (!$enrollment || $enrollment->enrollment_type !== 'transferee') {
+            return redirect('/faculty/enrollment')->with('error', 'Transferee enrollment not found.');
+        }
 
-        $schedulesByDay = $classDetails->groupBy(function ($detail) {
-            return $detail->classSchedule->day_of_week;
-        });
+        // Get available strands
+        $strands = Strand::where('is_active', true)->get();
+        
+        // Get standard subjects for the intended grade level and strand
+        $standardSubjects = Subject::where('year_level', $enrollment->intended_grade_level)
+            ->where('strand_id', $enrollment->strand_id)
+            ->get();
+        
+        // Get all subjects for reference
+        $subjects = Subject::all();
+
+        // Try to get transferee previous school data safely
+        $previousSchool = null;
+        $creditedSubjects = [];
+        
+        try {
+            if ($enrollment->studentPersonalInfo && $enrollment->studentPersonalInfo->user) {
+                $studentId = $enrollment->studentPersonalInfo->user->id;
+                $studentPersonalInfoId = $enrollment->studentPersonalInfo->id;
+                
+                $previousSchool = TransfereePreviousSchool::where('student_personal_info_id', $studentPersonalInfoId)->first();
+                $creditedSubjects = TransfereeCreditedSubject::where('student_id', $studentId)
+                    ->with('subject')
+                    ->get();
+            }
+        } catch (\Exception $e) {
+            // Log the error but continue
+            Log::warning('Could not load transferee previous school data', [
+                'enrollment_id' => $enrollmentId,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        // Add the previous school and subject credits to the enrollment data
+        $enrollmentData = $enrollment->toArray();
+        $enrollmentData['transferee_previous_school'] = $previousSchool;
+        $enrollmentData['transferee_subject_credits'] = $creditedSubjects;
+
+        return Inertia::render('Faculty/TransfereeEvaluation', [
+            'enrollment' => $enrollmentData,
+            'strands' => $strands,
+            'subjects' => $subjects,
+            'standardSubjects' => $standardSubjects
+        ]);
+    }
+
+    /**
+     * Evaluate transferee enrollment (Coordinator only)
+     */
+    public function evaluateTransferee(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'coordinator') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $enrollment = Enrollment::with(['studentPersonalInfo.user'])->find($enrollmentId);
+        
+        if (!$enrollment || $enrollment->enrollment_type !== 'transferee') {
+            return response()->json(['error' => 'Transferee enrollment not found.'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'recommended_strand_id' => 'required|exists:strands,id',
+            'recommended_grade_level' => 'required|in:11,12',
+            'subject_evaluations' => 'array',
+            'subject_evaluations.*.standard_subject_id' => 'required|exists:subjects,id',
+            'subject_evaluations.*.is_credited' => 'required|boolean',
+            'subject_evaluations.*.equivalent_grade' => 'nullable|numeric|min:0|max:100',
+            'subject_evaluations.*.remarks' => 'nullable|string|max:500'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        DB::beginTransaction();
+        
+        try {
+            // Update enrollment with coordinator evaluation
+            $enrollment->update([
+                'status' => 'evaluated', // Will need registrar approval before enrollment
+                'coordinator_id' => $user->id,
+                'strand_id' => $request->recommended_strand_id,
+                'intended_grade_level' => $request->recommended_grade_level
+            ]);
+
+            // Ensure transferee previous school record exists
+            $this->ensureTransfereePreviousSchool($enrollment);
+
+            // Save subject evaluations to transferee_credited_subjects table
+            if (!empty($request->subject_evaluations)) {
+                $studentId = $enrollment->studentPersonalInfo->user_id;
+                $currentSchoolYear = SchoolYear::where('is_active', true)->first();
+                
+                // Generate school year if none is active - ensure it's never null
+                $schoolYearValue = null;
+                if ($currentSchoolYear && !empty($currentSchoolYear->school_year)) {
+                    $schoolYearValue = $currentSchoolYear->school_year;
+                } else {
+                    // Fallback to current academic year
+                    $currentYear = date('Y');
+                    $nextYear = $currentYear + 1;
+                    $schoolYearValue = $currentYear . '-' . $nextYear;
+                }
+                
+                // Double-check that we have a value
+                if (empty($schoolYearValue)) {
+                    $schoolYearValue = '2025-2026'; // Hard fallback
+                }
+                
+                Log::info('Saving transferee subject evaluations', [
+                    'enrollment_id' => $enrollment->id,
+                    'student_id' => $studentId,
+                    'evaluations_count' => count($request->subject_evaluations),
+                    'current_school_year' => $currentSchoolYear ? $currentSchoolYear->school_year : 'null',
+                    'school_year_value' => $schoolYearValue
+                ]);
+                
+                // Clear existing credited subjects for this student
+                TransfereeCreditedSubject::where('student_id', $studentId)->delete();
+                
+                foreach ($request->subject_evaluations as $index => $evaluation) {
+                    if (isset($evaluation['is_credited']) && $evaluation['is_credited'] && !empty($evaluation['equivalent_grade'])) {
+                        try {
+                            // Validate data before creation
+                            $createData = [
+                                'student_id' => $studentId,
+                                'subject_id' => $evaluation['standard_subject_id'],
+                                'grade' => $evaluation['equivalent_grade'],
+                                'semester' => '1st', // Default to 1st semester, can be made dynamic
+                                'school_year' => $schoolYearValue,
+                                'remarks' => $evaluation['remarks'] ?? ''
+                            ];
+                            
+                            // Log the data being inserted
+                            Log::info('Creating credited subject with data', [
+                                'create_data' => $createData,
+                                'school_year_check' => $createData['school_year']
+                            ]);
+                            
+                            $creditedSubject = TransfereeCreditedSubject::create($createData);
+                            
+                            Log::info('Created credited subject', [
+                                'credited_subject_id' => $creditedSubject->id,
+                                'subject_id' => $evaluation['standard_subject_id'],
+                                'grade' => $evaluation['equivalent_grade']
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('Failed to create credited subject', [
+                                'evaluation_index' => $index,
+                                'evaluation_data' => $evaluation,
+                                'error' => $e->getMessage()
+                            ]);
+                            throw $e; // Re-throw to trigger rollback
+                        }
+                    }
+                }
+            }
+
+            Log::info('Transferee enrollment evaluated', [
+                'enrollment_id' => $enrollment->id,
+                'evaluated_by' => $user->id,
+                'recommended_strand' => $request->recommended_strand_id,
+                'recommended_grade' => $request->recommended_grade_level
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transferee evaluation completed successfully.',
+                'enrollment' => $enrollment->fresh(['strand', 'coordinator'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            Log::error('Transferee evaluation failed', [
+                'enrollment_id' => $enrollment->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to complete evaluation.',
+                'message' => $e->getMessage(),
+                'details' => 'Please check the logs for more information.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Return transferee evaluation for revision (Registrar only)
+     */
+    public function returnForRevision(Request $request, $enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || $user->role !== 'registrar') {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $enrollment = Enrollment::find($enrollmentId);
+        
+        if (!$enrollment || $enrollment->enrollment_type !== 'transferee') {
+            return response()->json(['error' => 'Transferee enrollment not found.'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'revision_notes' => 'required|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        DB::beginTransaction();
+        
+        try {
+            $enrollment->update([
+                'status' => 'returned',
+                'revision_notes' => $request->revision_notes
+            ]);
+
+            // Notify coordinator about the return
+            if ($enrollment->coordinator) {
+                $enrollment->coordinator->notify(new \App\Notifications\EvaluationReturnedForRevision($enrollment, $request->revision_notes));
+            }
+
+            Log::info('Transferee evaluation returned for revision', [
+                'enrollment_id' => $enrollment->id,
+                'returned_by' => $user->id,
+                'notes' => $request->revision_notes
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Evaluation returned for revision.',
+                'enrollment' => $enrollment->fresh()
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            return response()->json(['error' => 'Failed to return evaluation.'], 500);
+        }
+    }
+
+    /**
+     * Get evaluation history for an enrollment
+     */
+    public function getEvaluationHistory($enrollmentId)
+    {
+        $user = Auth::user();
+        
+        if (!$user || !in_array($user->role, ['registrar', 'coordinator'])) {
+            return response()->json(['error' => 'Access denied.'], 403);
+        }
+
+        $enrollment = Enrollment::with([
+            'transfereeSubjectCredits',
+            'coordinator'
+        ])->find($enrollmentId);
+        
+        if (!$enrollment) {
+            return response()->json(['error' => 'Enrollment not found.'], 404);
+        }
+
+        // Get evaluation history (you might want to create an EvaluationHistory model)
+        $history = [
+            'enrollment_date' => $enrollment->enrollment_date,
+            'evaluation_completed' => $enrollment->coordinator_id ? $enrollment->updated_at : null,
+            'coordinator' => $enrollment->coordinator ? [
+                'name' => $enrollment->coordinator->firstname . ' ' . $enrollment->coordinator->lastname,
+                'email' => $enrollment->coordinator->email
+            ] : null,
+            'subject_credits_count' => $enrollment->transfereeSubjectCredits->count(),
+            'total_credited_units' => $enrollment->transfereeSubjectCredits->sum('units'),
+            'status_changes' => [
+                // This would ideally come from an audit log
+                [
+                    'status' => 'pending_evaluation',
+                    'date' => $enrollment->created_at,
+                    'note' => 'Application submitted'
+                ],
+                [
+                    'status' => $enrollment->status,
+                    'date' => $enrollment->updated_at,
+                    'note' => $enrollment->evaluation_notes ?? 'Status updated'
+                ]
+            ]
+        ];
 
         return response()->json([
-            'schedules' => $schedulesByDay,
-            'student' => $enrollment,
-            'section' => $enrollment->assignedSection,
-            'strand' => $enrollment->assignedStrand
+            'enrollment' => $enrollment,
+            'history' => $history
         ]);
+    }
+
+    /**
+     * Private helper methods
+     */
+    private function isEnrollmentOpen($schoolYear)
+    {
+        $now = Carbon::now();
+        
+        // Check if current date is within enrollment period
+        if ($schoolYear->enrollment_start && $schoolYear->enrollment_end) {
+            return $now->between(
+                Carbon::parse($schoolYear->enrollment_start),
+                Carbon::parse($schoolYear->enrollment_end)
+            );
+        }
+        
+        // Default: enrollment is open if no specific dates are set
+        return true;
+    }
+
+    private function getStudentEnrollment($userId, $schoolYearId)
+    {
+        return Enrollment::with(['strand', 'assignedSection', 'schoolYear'])
+            ->whereHas('studentPersonalInfo', function($query) use ($userId) {
+                $query->where('user_id', $userId);
+            })
+            ->where('school_year_id', $schoolYearId)
+            ->first();
+    }
+
+    private function handleTransfereeData($enrollment, $request)
+    {
+        // Create or update transferee previous school record
+        TransfereePreviousSchool::updateOrCreate(
+            ['enrollment_id' => $enrollment->id],
+            [
+                'school_name' => $request->previous_school_name,
+                'school_address' => $request->previous_school_address,
+                'last_grade_level' => $request->last_grade_level ?? null,
+                'last_school_year' => $request->last_school_year ?? null
+            ]
+        );
+    }
+
+    private function handleDocumentUploads($enrollment, $documents)
+    {
+        foreach ($documents as $document) {
+            $path = $document->store('enrollment_documents/' . $enrollment->id, 'public');
+            
+            // You might want to create a separate EnrollmentDocument model
+            // For now, we'll just log the uploaded files
+            Log::info('Document uploaded for enrollment', [
+                'enrollment_id' => $enrollment->id,
+                'file_path' => $path,
+                'original_name' => $document->getClientOriginalName()
+            ]);
+        }
+    }
+
+    /**
+     * Ensure transferee previous school record exists for transferee students
+     */
+    private function ensureTransfereePreviousSchool($enrollment)
+    {
+        if ($enrollment->enrollment_type !== 'transferee') {
+            return;
+        }
+
+        $studentInfo = $enrollment->studentPersonalInfo;
+        if (!$studentInfo) {
+            return;
+        }
+
+        // Check if transferee previous school record already exists
+        $existingRecord = TransfereePreviousSchool::where('student_personal_info_id', $studentInfo->id)->first();
+        
+        if (!$existingRecord) {
+            // Get previous school from student personal info
+            $lastSchool = $studentInfo->last_school ?? $studentInfo->previous_school ?? 'Not specified';
+            
+            try {
+                TransfereePreviousSchool::create([
+                    'student_personal_info_id' => $studentInfo->id,
+                    'last_school' => $lastSchool
+                ]);
+                
+                Log::info('Auto-created transferee previous school record', [
+                    'enrollment_id' => $enrollment->id,
+                    'student_personal_info_id' => $studentInfo->id,
+                    'last_school' => $lastSchool
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to auto-create transferee previous school record', [
+                    'enrollment_id' => $enrollment->id,
+                    'student_personal_info_id' => $studentInfo->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
     }
 }

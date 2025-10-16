@@ -26,7 +26,8 @@ import {
   FaChevronRight,
   FaPalette,
   FaCog,
-  FaClipboardCheck
+  FaClipboardCheck,
+  FaUserGraduate
 } from "react-icons/fa";
 import Swal from "sweetalert2";
 
@@ -203,7 +204,7 @@ const Sidebar = ({ onToggle }) => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const response = await fetch('/auth/logout', {
+        const response = await fetch('/logout', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -310,6 +311,13 @@ const Sidebar = ({ onToggle }) => {
       shortcut: "Alt+E"
     },
     {
+      path: "/registrar/enrolled-students",
+      icon: FaUserGraduate,
+      label: "Enrolled Students",
+      description: "View & print CORs",
+      shortcut: "Alt+N"
+    },
+    {
       path: "/registrar/faculty",
       icon: FaChalkboardTeacher,
       label: "Faculty",
@@ -317,37 +325,65 @@ const Sidebar = ({ onToggle }) => {
       shortcut: "Alt+F"
     },
     {
-      type: "dropdown",
+      path: "/registrar/subjects",
+      icon: FaBookOpen,
+      label: "Subjects",
+      description: "Course catalog",
+      shortcut: "Alt+U"
+    },
+    {
+      path: "/registrar/grades/pending",
+      icon: FaClipboardCheck,
+      label: "Grade Approvals",
+      description: "Review & approve grades",
+      shortcut: "Alt+G"
+    },
+    {
+      path: "/registrar/school-years",
       icon: FaGraduationCap,
-      label: "Academic Management",
-      description: "Academic operations",
+      label: "School Years",
+      description: "Academic periods",
+      shortcut: "Alt+Y"
+    },
+    {
+      type: "dropdown",
+      icon: FaCalendarAlt,
+      label: "Schedules",
+      description: "Class schedules & calendar",
       shortcut: "Alt+A",
       items: [
         {
-          path: "/registrar/subjects",
-          icon: FaBookOpen,
-          label: "Subjects",
-          description: "Course catalog"
-        },
-        {
           path: "/registrar/schedules",
           icon: FaCalendarAlt,
-          label: "Schedules",
+          label: "Class Schedules",
           description: "Class timetables"
         },
         {
-          path: "/registrar/school-years",
-          icon: FaGraduationCap,
-          label: "School Years",
-          description: "Academic periods"
+          path: "/registrar/academic-calendar",
+          icon: FaCalendarAlt,
+          label: "Academic Calendar",
+          description: "Semester & quarter setup"
         },
         {
-          path: "/registrar/grades/pending",
-          icon: FaClipboardCheck,
-          label: "Grade Approvals",
-          description: "Review & approve grades"
+          path: "/registrar/summer-schedule",
+          icon: FaCalendarAlt,
+          label: "Summer Schedule",
+          description: "Summer class schedules"
+        },
+        {
+          path: "/registrar/faculty-loads",
+          icon: FaChalkboardTeacher,
+          label: "Faculty Loads",
+          description: "Teaching assignments"
         }
       ]
+    },
+    {
+      path: "/registrar/transferee-approvals",
+      icon: FaUserGraduate,
+      label: "Transferee Approvals",
+      description: "Review transferee evaluations",
+      shortcut: "Alt+T"
     },
     {
       path: "/registrar/reports",
@@ -372,7 +408,7 @@ const Sidebar = ({ onToggle }) => {
       {/* Mobile Overlay */}
       {!isCollapsed && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden"
           onClick={() => setIsCollapsed(true)}
         />
       )}
@@ -385,13 +421,26 @@ const Sidebar = ({ onToggle }) => {
         <div className={`flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between p-6'} border-b border-gray-200 bg-gradient-to-r from-blue-500 to-indigo-600`}>
           {!isCollapsed && (
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                <FaSchool className="text-blue-600 text-lg" />
+              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+                <img 
+                  src="/onsts.png" 
+                  alt="ONSTS Logo" 
+                  className="w-full h-full object-contain"
+                />
               </div>
               <div>
                 <h1 className="text-white font-bold text-lg">ONSTS</h1>
                 <p className="text-blue-100 text-xs">Registrar Portal</p>
               </div>
+            </div>
+          )}
+          {isCollapsed && (
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center p-1">
+              <img 
+                src="/onsts.png" 
+                alt="ONSTS Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
           )}
           <button

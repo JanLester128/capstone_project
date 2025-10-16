@@ -68,7 +68,7 @@ This implementation provides a comprehensive solution for displaying full academ
 
 ### **Data Protection Measures**
 1. **No Cross-Fetching**: Students can only access their own data
-2. **Approved Grades Only**: Only displays grades with `approval_status = 'approved'`
+2. **Approved Grades Only**: Only displays grades with `status = 'approved'`
 3. **Authentication Required**: All routes protected by authentication middleware
 4. **Role-Based Access**: Faculty can access student data, students only their own
 
@@ -79,7 +79,7 @@ $userId = Auth::id();
 $student = Student::where('user_id', $userId)->firstOrFail();
 
 // Only approved grades for privacy
-->where('approval_status', 'approved')
+->where('status', 'approved')
 ```
 
 ## 🛣️ **Route Structure**

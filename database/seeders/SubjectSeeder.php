@@ -15,39 +15,53 @@ class SubjectSeeder extends Seeder
         $activeSchoolYear = SchoolYear::where('is_active', true)->first();
         
         if (!$activeSchoolYear) {
-            echo "No active school year found. Please create and activate a school year first.\n";
-            echo "Subjects will be created without school year assignment.\n";
+            echo "No active school year found. Creating subjects without school year assignment.\n";
+            echo "Subjects can be linked to school years later through the admin interface.\n";
         }
 
-        // Get strands
+        // Get strands - create them if they don't exist
         $abm = Strand::where('code', 'ABM')->first();
         $humss = Strand::where('code', 'HUMSS')->first();
         $stem = Strand::where('code', 'STEM')->first();
         $tvl = Strand::where('code', 'TVL')->first();
 
-        // Create subjects and link them to the active school year
+        // Check if strands exist, if not, inform user
+        if (!$abm || !$humss || !$stem || !$tvl) {
+            echo "Warning: Some strands are missing. Make sure StrandSeeder runs before SubjectSeeder.\n";
+            echo "Missing strands will be skipped.\n";
+        }
+
+        // Create subjects and link them to the active school year (or null if none exists)
+        $createdCount = 0;
+        
         if ($abm) {
             $this->createABMSubjects($abm->id, $activeSchoolYear ? $activeSchoolYear->id : null);
+            $createdCount += 32; // ABM has 32 subjects
         }
 
         if ($humss) {
             $this->createHUMSSSubjects($humss->id, $activeSchoolYear ? $activeSchoolYear->id : null);
+            $createdCount += 32; // HUMSS has 32 subjects
         }
 
         if ($stem) {
             $this->createSTEMSubjects($stem->id, $activeSchoolYear ? $activeSchoolYear->id : null);
+            $createdCount += 30; // STEM has 30 subjects
         }
 
         if ($tvl) {
             $this->createTVLSubjects($tvl->id, $activeSchoolYear ? $activeSchoolYear->id : null);
+            $createdCount += 26; // TVL has 26 subjects
         }
 
         if ($activeSchoolYear) {
-            echo "Default K-12 subjects created successfully and linked to active school year: {$activeSchoolYear->semester} ({$activeSchoolYear->year_start}-{$activeSchoolYear->year_end}).\n";
+            echo "✅ {$createdCount} K-12 subjects created successfully and linked to active school year: {$activeSchoolYear->semester} ({$activeSchoolYear->year_start}-{$activeSchoolYear->year_end}).\n";
         } else {
-            echo "Default K-12 subjects created successfully.\n";
-            echo "Note: Subjects will be linked to school years when school years are created dynamically.\n";
+            echo "✅ {$createdCount} K-12 subjects created successfully without school year assignment.\n";
+            echo "📝 Note: Subjects can be linked to school years when school years are created through the registrar interface.\n";
         }
+        
+        echo "📚 Subjects created for strands: " . collect([$abm, $humss, $stem, $tvl])->filter()->pluck('code')->implode(', ') . "\n";
     }
 
     private function createABMSubjects($strandId, $schoolYearId = null)
@@ -101,7 +115,8 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => $schoolYearId
+                    'school_year_id' => $schoolYearId,
+                    'faculty_id' => null // Faculty will be assigned later through the admin interface
                 ])
             );
         }
@@ -158,7 +173,8 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => $schoolYearId
+                    'school_year_id' => $schoolYearId,
+                    'faculty_id' => null // Faculty will be assigned later through the admin interface
                 ])
             );
         }
@@ -214,7 +230,8 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => $schoolYearId
+                    'school_year_id' => $schoolYearId,
+                    'faculty_id' => null // Faculty will be assigned later through the admin interface
                 ])
             );
         }
@@ -267,7 +284,8 @@ class SubjectSeeder extends Seeder
                 ['code' => $subject['code']],
                 array_merge($subject, [
                     'strand_id' => $strandId,
-                    'school_year_id' => $schoolYearId
+                    'school_year_id' => $schoolYearId,
+                    'faculty_id' => null // Faculty will be assigned later through the admin interface
                 ])
             );
         }

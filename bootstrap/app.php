@@ -13,10 +13,6 @@ return Application::configure(basePath: dirname(__DIR__))
         then: function () {
             // Load auth routes without any middleware to prevent conflicts
             Route::group([], base_path('routes/auth.php'));
-            
-            // Load student routes with web middleware (required for sessions)
-            Route::middleware(['web'])
-                ->group(base_path('routes/student.php'));
         },
         health: '/up',
     )

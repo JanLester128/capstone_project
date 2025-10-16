@@ -11,81 +11,64 @@ class ClassDetail extends Model
 
     protected $fillable = [
         'class_id',
+        'student_id',
         'enrollment_id',
-        'student_id', // Add student_id to fillable fields
         'section_id',
+        'enrollment_status',
         'is_enrolled',
-        'enrolled_at'
+        'enrolled_at',
     ];
 
     protected $casts = [
         'is_enrolled' => 'boolean',
-        'enrolled_at' => 'datetime'
+        'enrolled_at' => 'datetime',
     ];
 
-    // Relationships
-    public function classSchedule()
+    /**
+     * Get the class that owns the class detail.
+     */
+    public function class()
     {
         return $this->belongsTo(ClassSchedule::class, 'class_id');
     }
 
+    /**
+     * Get the student (user) that owns the class detail.
+     */
+    public function student()
+    {
+        return $this->belongsTo(User::class, 'student_id');
+    }
+
+    /**
+     * Get the user (alias for student relationship).
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'student_id');
+    }
+
+    /**
+     * Get the enrollment that owns the class detail.
+     */
     public function enrollment()
     {
         return $this->belongsTo(Enrollment::class);
     }
 
+    /**
+     * Get the section that owns the class detail.
+     */
     public function section()
     {
         return $this->belongsTo(Section::class);
     }
 
-    // Access student through enrollment relationship
-    public function student()
-    {
-        return $this->hasOneThrough(
-            User::class,
-            Enrollment::class,
-            'id', // Foreign key on enrollments table
-            'id', // Foreign key on users table
-            'enrollment_id', // Local key on class_details table
-            'student_id' // Local key on enrollments table
-        );
-    }
-
-    // Scopes
+    /**
+     * Scope to get enrolled class details.
+     */
     public function scopeEnrolled($query)
     {
         return $query->where('is_enrolled', true);
-    }
-
-    public function scopeForSection($query, $sectionId)
-    {
-        return $query->where('section_id', $sectionId);
-    }
-
-    public function scopeForClass($query, $classId)
-    {
-        return $query->where('class_id', $classId);
-    }
-
-    public function scopeForEnrollment($query, $enrollmentId)
-    {
-        return $query->where('enrollment_id', $enrollmentId);
-    }
-
-    // Helper methods
-    public function getStudentNameAttribute()
-    {
-        return $this->student ? $this->student->name : 'Unknown Student';
-    }
-
-    public function getSubjectNameAttribute()
-    {
-        return $this->classSchedule && $this->classSchedule->subject ? $this->classSchedule->subject->name : 'Unknown Subject';
-    }
-
-    public function getStrandNameAttribute()
-    {
-        return $this->enrollment && $this->enrollment->strand ? $this->enrollment->strand->name : 'Unknown Strand';
     }
 }

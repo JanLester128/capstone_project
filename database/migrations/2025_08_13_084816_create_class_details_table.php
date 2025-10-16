@@ -10,18 +10,14 @@ return new class extends Migration
     {
         Schema::create('class_details', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('class_id')->constrained('class')->onDelete('cascade'); // Schedule reference
-            $table->foreignId('enrollment_id')->constrained('enrollments')->onDelete('cascade'); // Student enrollment
-            $table->foreignId('section_id')->constrained('sections')->onDelete('cascade'); // Section assignment
-            $table->boolean('is_enrolled')->default(true); // Enrollment status
-            $table->timestamp('enrolled_at')->default(now());
+            $table->foreignId('class_id')->constrained('class')->onDelete('cascade');
+            $table->foreignId('student_id')->constrained('users')->onDelete('cascade');
+            $table->foreignId('enrollment_id')->constrained('enrollments')->onDelete('cascade');
+            $table->foreignId('section_id')->constrained('sections')->onDelete('cascade');
+            $table->string('enrollment_status', 100)->default('enrolled');
+            $table->boolean('is_enrolled')->default(true);
+            $table->timestamp('enrolled_at')->nullable();
             $table->timestamps();
-            
-            // Ensure unique enrollment per class per student
-            $table->unique(['class_id', 'enrollment_id'], 'unique_student_class_enrollment');
-            
-            // Index for section-based queries
-            $table->index(['section_id', 'class_id'], 'section_class_index');
         });
     }
 

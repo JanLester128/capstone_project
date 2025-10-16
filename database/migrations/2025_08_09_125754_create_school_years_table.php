@@ -13,14 +13,17 @@ return new class extends Migration
     {
         Schema::create('school_years', function (Blueprint $table) {
             $table->id();
-            $table->string('year', 100);
-            $table->string('semester', 20);
+            $table->integer('year_start');
+            $table->integer('year_end');
+            $table->string('semester', 100);
+            $table->date('start_date');
+            $table->date('end_date');
             $table->boolean('is_active')->default(false);
-            $table->integer('current_semester')->default(1);
+            $table->boolean('is_current_academic_year')->default(false);
             $table->timestamps();
 
-            // Ensure unique combination of year, semester
-            $table->unique(['year', 'semester']);
+            // Ensure unique combination of year_start, year_end, semester
+            $table->unique(['year_start', 'year_end', 'semester']);
         });
     }
 
